@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const QRCode = require("qrcode");
+const puppeteer = require("puppeteer");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,7 +17,10 @@ const INDEX_FILE = path.join(__dirname, "index.html");
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "200kb" }));
 
-// Painel principal
+// =====================================
+// PAINEL PRINCIPAL
+// =====================================
+
 app.get("/", (_req, res) => {
   res.sendFile(INDEX_FILE, (err) => {
     if (err && !res.headersSent) {
@@ -25,7 +29,10 @@ app.get("/", (_req, res) => {
   });
 });
 
-// Banco de dados local
+// =====================================
+// BANCO DE DADOS LOCAL
+// =====================================
+
 function loadStore() {
   try {
     if (!fs.existsSync(DATA_FILE)) {
@@ -40,7 +47,7 @@ function loadStore() {
       queue: Array.isArray(data.queue) ? data.queue : []
     };
   } catch (error) {
-    console.error("Erro ao ler dados:", error.message);
+    console.error("Erro ao ler dados:", error.stack || error.message);
     return { products: [], destinations: [], queue: [] };
   }
 }
@@ -50,7 +57,10 @@ function saveStore(store) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2));
 }
 
-// Proteção administrativa
+// =====================================
+// PROTEÇÃO ADMINISTRATIVA
+// =====================================
+
 function adminOnly(req, res, next) {
   const expected = process.env.ADMIN_PASSWORD;
 
@@ -87,7 +97,21 @@ function clearWhatsAppData() {
   whatsappPairingCode = null;
 }
 
-// Inicialização protegida contra duplicidade
+function getChromePath() {
+  const chromePath =
+    process.env.PUPPETEER_EXECUTABLE_PATH ||
+    puppeteer.executablePath();
+
+  if (!fs.existsSync(chromePath)) {
+    throw new Error(
+      "Chrome não encontrado no caminho configurado: " + chromePath
+    );
+  }
+
+  return chromePath;
+}
+
+// Inicialização do WhatsApp sem duplicidade
 function startWhatsApp() {
   if (whatsappStatus === "ready") {
     return Promise.resolve();
@@ -104,18 +128,41 @@ function startWhatsApp() {
   whatsappStatus = "starting";
   clearWhatsAppData();
 
+  let chromePath;
+
+  try {
+    chromePath = getChromePath();
+    console.log("Chrome encontrado:", chromePath);
+  } catch (error) {
+    whatsappStatus = "error";
+    console.error("Erro ao localizar Chrome:", error.stack || error.message);
+    return Promise.reject(error);
+  }
+
   const client = new Client({
     authStrategy: new LocalAuth({
-      clientId: "medeiros-digital"
+      clientId: "medeiros-digital",
+      dataPath: path.join(__dirname, ".wwebjs_auth")
     }),
+
     puppeteer: {
+      executablePath: chromePath,
       headless: true,
+      timeout: 120000,
+      protocolTimeout: 180000,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--no-zygote"
+        "--no-zygote",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+        "--disable-features=Translate,BackForwardCache",
+        "--no-first-run",
+        "--no-default-browser-check"
       ]
     }
   });
@@ -129,7 +176,7 @@ function startWhatsApp() {
       console.log("QR Code do WhatsApp disponível.");
     } catch (error) {
       whatsappStatus = "error";
-      console.error("Erro ao gerar QR Code:", error.message);
+      console.error("Erro ao gerar QR Code:", error.stack || error.message);
     }
   });
 
@@ -173,12 +220,18 @@ function startWhatsApp() {
 
       clearWhatsAppData();
 
-      console.error("Erro ao iniciar WhatsApp:", error.message);
+      console.error(
+        "Erro completo ao iniciar WhatsApp:",
+        error.stack || error.message
+      );
 
       try {
         await client.destroy();
-      } catch (_) {
-        // Cliente pode já estar encerrado
+      } catch (destroyError) {
+        console.error(
+          "Erro ao encerrar navegador:",
+          destroyError.message
+        );
       }
 
       throw error;
@@ -194,11 +247,15 @@ function startWhatsApp() {
   return initPromise;
 }
 
-// Status geral
+// =====================================
+// STATUS E SAÚDE DO SERVIDOR
+// =====================================
+
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
-    service: "medeiros-shopee-affiliate-robot"
+    service: "medeiros-shopee-affiliate-robot",
+    whatsapp: whatsappStatus
   });
 });
 
@@ -211,21 +268,28 @@ app.get("/api/status", (_req, res) => {
       shopee: process.env.SHOPEE_API_ENABLED === "true"
         ? "configured-for-validation"
         : "disabled",
+
       metaGroups: process.env.META_GROUPS_API_ENABLED === "true"
         ? "configured-for-validation"
         : "disabled"
     },
+
     whatsapp: whatsappStatus,
+
     counts: {
       products: store.products.length,
       destinations: store.destinations.length,
       queue: store.queue.length
     },
+
     note: "Shopee API e publicação automática ainda não estão habilitadas."
   });
 });
 
-// Informações privadas da conexão
+// =====================================
+// INFORMAÇÕES PRIVADAS DO WHATSAPP
+// =====================================
+
 app.get("/api/whatsapp", adminOnly, (_req, res) => {
   res.json({
     ok: true,
@@ -235,7 +299,10 @@ app.get("/api/whatsapp", adminOnly, (_req, res) => {
   });
 });
 
-// Iniciar conexão
+// =====================================
+// INICIAR CONEXÃO WHATSAPP
+// =====================================
+
 app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
   try {
     const method = req.body?.method;
@@ -255,20 +322,23 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
       });
     }
 
-    // QR Code: inicia em segundo plano e responde imediatamente.
+    // Conexão por QR Code
     if (method === "qr") {
       startWhatsApp().catch((error) => {
-        console.error("Falha na inicialização em segundo plano:", error.message);
+        console.error(
+          "Falha na inicialização em segundo plano:",
+          error.stack || error.message
+        );
       });
 
       return res.status(202).json({
         ok: true,
         status: whatsappStatus,
-        message: "Inicialização solicitada. Aguarde o QR Code no painel."
+        message: "Inicialização solicitada. Aguarde o QR Code."
       });
     }
 
-    // Código de pareamento
+    // Conexão por código de pareamento
     const phone = String(req.body?.phone || "").replace(/\D/g, "");
 
     if (!/^\d{12,13}$/.test(phone)) {
@@ -287,7 +357,10 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
 
     if (!whatsappClient) {
       startWhatsApp().catch((error) => {
-        console.error("Falha na inicialização:", error.message);
+        console.error(
+          "Falha na inicialização:",
+          error.stack || error.message
+        );
       });
 
       return res.status(202).json({
@@ -302,6 +375,14 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
         ok: true,
         status: whatsappStatus,
         message: "WhatsApp ainda está inicializando. Aguarde."
+      });
+    }
+
+    if (whatsappStatus !== "qr" && whatsappStatus !== "ready") {
+      return res.status(409).json({
+        ok: false,
+        status: whatsappStatus,
+        error: "A conexão ainda não está pronta. Aguarde."
       });
     }
 
@@ -321,7 +402,10 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
   } catch (error) {
     whatsappStatus = "error";
 
-    console.error("Erro na conexão WhatsApp:", error.message);
+    console.error(
+      "Erro na conexão WhatsApp:",
+      error.stack || error.message
+    );
 
     return res.status(500).json({
       ok: false,
@@ -331,7 +415,10 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
   }
 });
 
-// Desconectar
+// =====================================
+// DESCONECTAR WHATSAPP
+// =====================================
+
 app.post("/api/whatsapp/disconnect", adminOnly, async (_req, res) => {
   try {
     const client = whatsappClient;
@@ -351,7 +438,7 @@ app.post("/api/whatsapp/disconnect", adminOnly, async (_req, res) => {
     });
 
   } catch (error) {
-    console.error("Erro ao desconectar:", error.message);
+    console.error("Erro ao desconectar:", error.stack || error.message);
 
     return res.status(500).json({
       ok: false,
@@ -460,7 +547,10 @@ app.post("/api/queue", adminOnly, (req, res) => {
   res.status(201).json(item);
 });
 
-// Rota não encontrada: resposta JSON
+// =====================================
+// ROTA NÃO ENCONTRADA
+// =====================================
+
 app.use((_req, res) => {
   res.status(404).json({
     ok: false,
@@ -468,9 +558,12 @@ app.use((_req, res) => {
   });
 });
 
-// Tratamento de erros
+// =====================================
+// TRATAMENTO DE ERROS
+// =====================================
+
 app.use((err, _req, res, _next) => {
-  console.error("Erro na requisição:", err.message);
+  console.error("Erro na requisição:", err.stack || err.message);
 
   if (res.headersSent) return;
 
@@ -480,7 +573,11 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-// Inicialização do servidor
+// =====================================
+// INICIALIZAÇÃO DO SERVIDOR
+// =====================================
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`MEDEIROS DIGITAL iniciado na porta ${PORT}`);
+  console.log("Servidor pronto para receber requisições.");
 });
