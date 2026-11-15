@@ -1,237 +1,566 @@
 
-<!doctype html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#101010">
 <title>MEDEIROS DIGITAL | Shopee Affiliate Robot</title>
+
 <style>
-:root{color-scheme:dark;--bg:#101010;--panel:#1b1b1b;--line:#303030;--orange:#ff7a18;--muted:#aaa;--white:#f7f7f7}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--white);font:15px system-ui,Arial}
-header{padding:22px 18px;border-bottom:1px solid var(--line);background:#151515}
-header strong{color:var(--orange);letter-spacing:.5px}
-.wrap{max-width:1050px;margin:auto;padding:22px 16px}
-h1{font-size:22px;margin:0 0 6px}
-.sub{color:var(--muted);margin:0}
-.notice{border:1px solid #75400f;background:#2b1b0d;color:#ffd7b5;padding:13px;border-radius:12px;margin:18px 0}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:17px}
-.metric{font-size:28px;color:var(--orange);font-weight:700}
-.muted{color:var(--muted);font-size:13px}
-section{margin-top:22px}
-h2{font-size:17px;margin:0 0 12px}
-input,button{font:inherit;border-radius:9px;padding:11px;border:1px solid var(--line);background:#111;color:white;width:100%;margin:5px 0}
-button{background:var(--orange);border:0;color:#171717;font-weight:700;cursor:pointer}
-button.secondary{background:#333;color:white;border:1px solid #555}
-button:disabled{opacity:.5;cursor:not-allowed}
-.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
-.status{font-size:13px;color:#ffd7b5;line-height:1.6;overflow-wrap:anywhere}
-.qrbox{background:white;border-radius:12px;padding:12px;margin:12px auto;max-width:280px;text-align:center}
-.qrbox img{width:100%;height:auto;display:block}
-.code{font-size:25px;letter-spacing:4px;color:var(--orange);font-weight:800;text-align:center;padding:15px;overflow-wrap:anywhere}
-.hidden{display:none}
-footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
+:root {
+  color-scheme: dark;
+  --bg: #101010;
+  --panel: #1b1b1b;
+  --line: #303030;
+  --orange: #ff7a18;
+  --muted: #aaa;
+  --white: #f7f7f7;
+  --green: #36c982;
+  --red: #ff5757;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--white);
+  font: 15px system-ui, Arial, sans-serif;
+}
+
+header {
+  padding: 22px 18px;
+  border-bottom: 1px solid var(--line);
+  background: #151515;
+}
+
+header strong {
+  color: var(--orange);
+  letter-spacing: .7px;
+  font-size: 18px;
+}
+
+.wrap {
+  max-width: 1050px;
+  margin: auto;
+  padding: 22px 16px;
+}
+
+h1 { font-size: 23px; margin: 0 0 6px; }
+h2 { font-size: 17px; margin: 0 0 12px; }
+h3 { font-size: 16px; margin: 18px 0 8px; }
+
+.sub, .muted {
+  color: var(--muted);
+}
+
+.sub { margin: 0; }
+.muted { font-size: 13px; line-height: 1.5; }
+
+.notice {
+  border: 1px solid #75400f;
+  background: #2b1b0d;
+  color: #ffd7b5;
+  padding: 14px;
+  border-radius: 12px;
+  margin: 18px 0;
+  line-height: 1.5;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 17px;
+  margin-top: 18px;
+}
+
+.metric {
+  font-size: 28px;
+  color: var(--orange);
+  font-weight: 700;
+}
+
+input, button {
+  font: inherit;
+  border-radius: 9px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: #111;
+  color: white;
+  width: 100%;
+  margin: 5px 0;
+}
+
+button {
+  background: var(--orange);
+  border: 0;
+  color: #171717;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #333;
+  color: white;
+  border: 1px solid #555;
+}
+
+button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.status {
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  color: #ffd7b5;
+}
+
+.success { color: var(--green); }
+.error { color: var(--red); }
+
+.qrbox {
+  background: white;
+  border-radius: 12px;
+  padding: 12px;
+  margin: 12px auto;
+  max-width: 280px;
+  text-align: center;
+}
+
+.qrbox img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.code {
+  font-size: 25px;
+  letter-spacing: 4px;
+  color: var(--orange);
+  font-weight: 800;
+  text-align: center;
+  padding: 15px;
+  overflow-wrap: anywhere;
+}
+
+.hidden { display: none !important; }
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 20px 0;
+}
+
+footer {
+  padding: 22px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+@media(max-width: 480px) {
+  .wrap { padding: 18px 12px; }
+  .card { padding: 14px; }
+}
 </style>
 </head>
+
 <body>
+
 <header>
-<div class="wrap" style="padding:0 16px">
-<strong>MEDEIROS DIGITAL</strong>
-<div class="muted">SHOPEE AFFILIATE ROBOT</div>
-</div>
+  <div class="wrap" style="padding:0 16px">
+    <strong>MEDEIROS DIGITAL</strong>
+    <div class="muted">SHOPEE AFFILIATE ROBOT</div>
+  </div>
 </header>
 
 <main class="wrap">
+
 <h1>Painel de controle</h1>
 <p class="sub">Sistema de ofertas e afiliados.</p>
 
 <div class="notice">
-<b>Modo de segurança:</b> Shopee e Meta continuam desativadas. A conexão WhatsApp abaixo serve apenas para autenticação e teste. Nenhuma oferta será enviada automaticamente.
+  <b>Modo de segurança:</b>
+  Shopee e Meta continuam desativadas. A conexão WhatsApp serve para autenticação e teste.
+  Nenhuma oferta será enviada automaticamente.
 </div>
 
 <div class="grid">
-<div class="card"><div class="muted">Produtos cadastrados</div><div class="metric" id="products">—</div></div>
-<div class="card"><div class="muted">Destinos cadastrados</div><div class="metric" id="destinations">—</div></div>
-<div class="card"><div class="muted">Itens na fila</div><div class="metric" id="queue">—</div></div>
+  <div class="card">
+    <div class="muted">Produtos cadastrados</div>
+    <div class="metric" id="products">—</div>
+  </div>
+
+  <div class="card">
+    <div class="muted">Destinos cadastrados</div>
+    <div class="metric" id="destinations">—</div>
+  </div>
+
+  <div class="card">
+    <div class="muted">Itens na fila</div>
+    <div class="metric" id="queue">—</div>
+  </div>
 </div>
 
 <section class="card">
-<h2>Status das integrações</h2>
-<div class="status" id="status">Carregando...</div>
+  <h2>Status das integrações</h2>
+  <div class="status" id="status">Carregando...</div>
 </section>
 
 <section class="card">
-<h2>Acesso administrativo</h2>
-<p class="muted">Digite a senha ADMIN_PASSWORD configurada no Render.</p>
-<input id="password" type="password" placeholder="Senha administrativa">
-<button onclick="login()">Entrar</button>
-<div id="loginmsg" class="muted"></div>
+  <h2>Acesso administrativo</h2>
+  <p class="muted">Digite a senha ADMIN_PASSWORD configurada no Render.</p>
+
+  <input id="password" type="password" placeholder="Senha administrativa">
+
+  <button id="loginButton" onclick="login()">Entrar</button>
+
+  <div id="loginmsg" class="status"></div>
 </section>
 
 <section class="card">
-<h2>WhatsApp — conexão</h2>
-<p class="muted">Entre primeiro no painel administrativo para acessar a conexão.</p>
+  <h2>WhatsApp — conexão</h2>
+  <p class="muted">
+    Entre primeiro no painel administrativo para acessar a conexão.
+  </p>
 
-<div id="waArea" class="hidden">
-<div class="status" id="waStatus">Consultando conexão...</div>
+  <div id="waArea" class="hidden">
 
-<h3>Opção 1 — QR Code</h3>
-<p class="muted">Clique para iniciar e aguarde o QR Code aparecer. No celular, abra WhatsApp → Aparelhos conectados → Conectar aparelho.</p>
-<button onclick="connectQR()">Gerar QR Code</button>
+    <div class="status" id="waStatus">
+      Consultando conexão...
+    </div>
 
-<div id="qrArea" class="hidden">
-<div class="qrbox"><img id="qrImage" alt="QR Code do WhatsApp"></div>
-<p class="muted">Escaneie o código pelo WhatsApp do celular.</p>
-</div>
+    <h3>Opção 1 — QR Code</h3>
 
-<hr style="border-color:#303030;margin:20px 0">
+    <p class="muted">
+      Clique para iniciar e aguarde o QR Code aparecer.
+      No celular, abra WhatsApp → Aparelhos conectados → Conectar aparelho.
+    </p>
 
-<h3>Opção 2 — Código de pareamento</h3>
-<p class="muted">Informe o número da conta WhatsApp com código do país e DDD. Exemplo: 5511999999999.</p>
-<input id="phone" inputmode="numeric" placeholder="55 + DDD + número">
-<button onclick="connectPairing()">Solicitar código</button>
-<div id="pairArea" class="hidden">
-<div class="code" id="pairCode"></div>
-<p class="muted">No celular, acesse Aparelhos conectados → Conectar aparelho → Conectar com número de telefone e informe o código.</p>
-</div>
+    <button id="qrButton" onclick="connectQR()">Gerar QR Code</button>
 
-<button class="secondary" onclick="refreshWhatsApp()">Atualizar conexão</button>
-<button class="secondary" onclick="disconnectWhatsApp()">Desconectar WhatsApp</button>
-<div id="waMessage" class="status"></div>
-</div>
+    <div id="qrArea" class="hidden">
+      <div class="qrbox">
+        <img id="qrImage" alt="QR Code do WhatsApp">
+      </div>
+      <p class="muted">Escaneie o código pelo WhatsApp do celular.</p>
+    </div>
+
+    <hr>
+
+    <h3>Opção 2 — Código de pareamento</h3>
+
+    <p class="muted">
+      Informe o número da conta WhatsApp com código do país e DDD.
+      Exemplo: 5511999999999.
+    </p>
+
+    <input id="phone" inputmode="numeric" placeholder="55 + DDD + número">
+
+    <button id="pairButton" onclick="connectPairing()">
+      Solicitar código
+    </button>
+
+    <div id="pairArea" class="hidden">
+      <div class="code" id="pairCode"></div>
+      <p class="muted">
+        No celular, acesse Aparelhos conectados → Conectar aparelho →
+        Conectar com número de telefone.
+      </p>
+    </div>
+
+    <button class="secondary" onclick="refreshWhatsApp()">
+      Atualizar conexão
+    </button>
+
+    <button class="secondary" onclick="disconnectWhatsApp()">
+      Desconectar WhatsApp
+    </button>
+
+    <div id="waMessage" class="status"></div>
+  </div>
 </section>
 
 <section class="card">
-<h2>Cadastrar produto manualmente</h2>
-<div class="row">
-<input id="pname" placeholder="Nome do produto">
-<input id="price" placeholder="Preço (opcional)">
-<input id="url" placeholder="Link de afiliado (opcional)">
-</div>
-<button onclick="addProduct()">Salvar produto</button>
+  <h2>Cadastrar produto manualmente</h2>
+
+  <div class="row">
+    <input id="pname" placeholder="Nome do produto">
+    <input id="price" placeholder="Preço (opcional)">
+    <input id="url" placeholder="Link de afiliado (opcional)">
+  </div>
+
+  <button onclick="addProduct()">Salvar produto</button>
 </section>
 
 <section class="card">
-<h2>Cadastrar destino (rascunho)</h2>
-<div class="row">
-<input id="dname" placeholder="Nome do destino">
-<input id="channel" placeholder="Canal / tipo">
-</div>
-<button onclick="addDestination()">Salvar destino</button>
+  <h2>Cadastrar destino (rascunho)</h2>
+
+  <div class="row">
+    <input id="dname" placeholder="Nome do destino">
+    <input id="channel" placeholder="Canal / tipo">
+  </div>
+
+  <button onclick="addDestination()">Salvar destino</button>
 </section>
+
 </main>
 
-<footer>MEDEIROS DIGITAL • Proteja suas credenciais</footer>
+<footer>
+  MEDEIROS DIGITAL • Proteja suas credenciais
+</footer>
 
 <script>
+"use strict";
+
 let pass = "";
 let waTimer = null;
+let connecting = false;
 
-async function api(path, method="GET", body) {
-  const r = await fetch(path, {
+const $ = (id) => document.getElementById(id);
+
+function showMessage(id, message, type = "") {
+  const el = $(id);
+  el.textContent = message;
+  el.className = "status " + type;
+}
+
+async function readResponse(response, endpoint) {
+  const contentType = response.headers.get("content-type") || "";
+  const raw = await response.text();
+
+  if (!contentType.toLowerCase().includes("application/json")) {
+    const preview = raw.slice(0, 180).replace(/\s+/g, " ");
+
+    throw new Error(
+      "A rota " + endpoint +
+      " devolveu uma resposta que não é JSON. HTTP " +
+      response.status + ". Resposta: " + preview
+    );
+  }
+
+  let data;
+
+  try {
+    data = JSON.parse(raw);
+  } catch (error) {
+    throw new Error("JSON inválido recebido da rota " + endpoint);
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      data.error || "Erro HTTP " + response.status + " em " + endpoint
+    );
+  }
+
+  return data;
+}
+
+async function api(endpoint, method = "GET", body) {
+  const options = {
     method,
     headers: {
-      "Content-Type": "application/json",
+      "Accept": "application/json",
       "x-admin-password": pass
     },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  const d = await r.json();
-  if (!r.ok) throw new Error(d.error || "Falha na operação.");
-  return d;
+    cache: "no-store"
+  };
+
+  if (body !== undefined) {
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(body);
+  }
+
+  let response;
+
+  try {
+    response = await fetch(endpoint, options);
+  } catch (error) {
+    throw new Error("Não foi possível conectar ao servidor. Verifique sua internet.");
+  }
+
+  return await readResponse(response, endpoint);
+}
+
+async function publicApi(endpoint) {
+  let response;
+
+  try {
+    response = await fetch(endpoint, {
+      headers: { "Accept": "application/json" },
+      cache: "no-store"
+    });
+  } catch (error) {
+    throw new Error("Não foi possível conectar ao servidor.");
+  }
+
+  return await readResponse(response, endpoint);
 }
 
 async function refresh() {
   try {
-    const r = await fetch("/api/status");
-    const d = await r.json();
-    document.getElementById("products").textContent = d.counts.products;
-    document.getElementById("destinations").textContent = d.counts.destinations;
-    document.getElementById("queue").textContent = d.counts.queue;
-    document.getElementById("status").textContent =
-      "Shopee: " + d.integrations.shopee +
-      " | Meta Groups: " + d.integrations.metaGroups +
+    const d = await publicApi("/api/status");
+
+    $("products").textContent = d.counts?.products ?? 0;
+    $("destinations").textContent = d.counts?.destinations ?? 0;
+    $("queue").textContent = d.counts?.queue ?? 0;
+
+    $("status").textContent =
+      "Shopee: " + (d.integrations?.shopee || "indisponível") +
+      " | Meta Groups: " + (d.integrations?.metaGroups || "indisponível") +
       " | WhatsApp: " + (d.whatsapp || "não iniciado") +
-      " — " + d.note;
-  } catch(e) {
-    document.getElementById("status").textContent =
-      "Não foi possível consultar o status.";
+      " — " + (d.note || "");
+
+  } catch (error) {
+    showMessage("status", error.message, "error");
   }
 }
 
 async function login() {
-  pass = document.getElementById("password").value;
+  const password = $("password").value;
+
+  if (!password) {
+    showMessage("loginmsg", "Digite sua senha administrativa.", "error");
+    return;
+  }
+
+  pass = password;
+  $("loginButton").disabled = true;
+
   try {
     await api("/api/data");
-    document.getElementById("loginmsg").textContent = "Senha aceita.";
-    document.getElementById("waArea").classList.remove("hidden");
+
+    showMessage("loginmsg", "Senha aceita. Painel liberado.", "success");
+    $("waArea").classList.remove("hidden");
+
     await refreshWhatsApp();
-  } catch(e) {
-    document.getElementById("loginmsg").textContent = e.message;
-    document.getElementById("waArea").classList.add("hidden");
+  } catch (error) {
+    pass = "";
+    $("waArea").classList.add("hidden");
+    showMessage("loginmsg", error.message, "error");
+  } finally {
+    $("loginButton").disabled = false;
   }
 }
 
 async function connectQR() {
+  if (connecting) return;
+
+  connecting = true;
+  $("qrButton").disabled = true;
+
+  $("qrArea").classList.add("hidden");
+  showMessage("waMessage", "Solicitando inicialização do WhatsApp...");
+
   try {
-    document.getElementById("waMessage").textContent = "Iniciando conexão...";
-    await api("/api/whatsapp/connect", "POST", {method:"qr"});
+    const d = await api("/api/whatsapp/connect", "POST", {
+      method: "qr"
+    });
+
+    showMessage(
+      "waMessage",
+      d.message || "Inicialização solicitada. Aguarde o QR Code."
+    );
+
     await refreshWhatsApp();
     startWAPolling();
-  } catch(e) {
-    document.getElementById("waMessage").textContent = e.message;
+
+  } catch (error) {
+    showMessage("waMessage", error.message, "error");
+  } finally {
+    connecting = false;
+    $("qrButton").disabled = false;
   }
 }
 
 async function connectPairing() {
-  const phone = document.getElementById("phone").value.replace(/\D/g, "");
+  const phone = $("phone").value.replace(/\D/g, "");
+
+  if (!phone) {
+    showMessage("waMessage", "Informe o telefone com código do país e DDD.", "error");
+    return;
+  }
+
+  $("pairButton").disabled = true;
+  showMessage("waMessage", "Solicitando código de pareamento...");
+
   try {
-    document.getElementById("waMessage").textContent = "Solicitando código...";
     const d = await api("/api/whatsapp/connect", "POST", {
-      method:"pairing",
+      method: "pairing",
       phone
     });
+
     if (d.pairingCode) {
-      document.getElementById("pairCode").textContent = d.pairingCode;
-      document.getElementById("pairArea").classList.remove("hidden");
+      $("pairCode").textContent = d.pairingCode;
+      $("pairArea").classList.remove("hidden");
     }
+
+    showMessage(
+      "waMessage",
+      d.message || "Solicitação recebida. Consulte o estado da conexão."
+    );
+
     await refreshWhatsApp();
     startWAPolling();
-  } catch(e) {
-    document.getElementById("waMessage").textContent = e.message;
+
+  } catch (error) {
+    showMessage("waMessage", error.message, "error");
+  } finally {
+    $("pairButton").disabled = false;
   }
 }
 
 async function refreshWhatsApp() {
+  if (!pass) return;
+
   try {
     const d = await api("/api/whatsapp");
-    document.getElementById("waStatus").textContent =
-      "Estado da conexão: " + d.status;
+
+    $("waStatus").textContent = "Estado da conexão: " + d.status;
 
     if (d.qr) {
-      document.getElementById("qrImage").src = d.qr;
-      document.getElementById("qrArea").classList.remove("hidden");
+      $("qrImage").src = d.qr;
+      $("qrArea").classList.remove("hidden");
     } else {
-      document.getElementById("qrArea").classList.add("hidden");
+      $("qrImage").removeAttribute("src");
+      $("qrArea").classList.add("hidden");
     }
 
     if (d.pairingCode) {
-      document.getElementById("pairCode").textContent = d.pairingCode;
-      document.getElementById("pairArea").classList.remove("hidden");
+      $("pairCode").textContent = d.pairingCode;
+      $("pairArea").classList.remove("hidden");
     }
 
     if (d.status === "ready") {
-      document.getElementById("waMessage").textContent =
-        "WhatsApp conectado e pronto.";
+      showMessage("waMessage", "WhatsApp conectado e pronto.", "success");
       stopWAPolling();
     } else if (d.status === "error") {
-      document.getElementById("waMessage").textContent =
-        "Falha na conexão. Consulte os logs do Render.";
+      showMessage("waMessage", "Falha na conexão. Consulte os logs do Render.", "error");
       stopWAPolling();
+    } else if (d.status === "qr") {
+      showMessage("waMessage", "QR Code disponível. Escaneie pelo celular.", "success");
+    } else if (d.status === "starting") {
+      showMessage("waMessage", "WhatsApp iniciando. Aguarde...");
     }
-  } catch(e) {
-    document.getElementById("waMessage").textContent = e.message;
+
+  } catch (error) {
+    showMessage("waMessage", error.message, "error");
   }
 }
 
@@ -249,47 +578,69 @@ function stopWAPolling() {
 
 async function disconnectWhatsApp() {
   if (!confirm("Deseja desconectar o WhatsApp?")) return;
+
   try {
     await api("/api/whatsapp/disconnect", "POST", {});
-    document.getElementById("waMessage").textContent = "WhatsApp desconectado.";
-    document.getElementById("qrArea").classList.add("hidden");
-    document.getElementById("pairArea").classList.add("hidden");
-    await refreshWhatsApp();
+
+    $("qrArea").classList.add("hidden");
+    $("pairArea").classList.add("hidden");
+
+    showMessage("waMessage", "WhatsApp desconectado.");
     stopWAPolling();
-  } catch(e) {
-    document.getElementById("waMessage").textContent = e.message;
+
+    await refreshWhatsApp();
+
+  } catch (error) {
+    showMessage("waMessage", error.message, "error");
   }
 }
 
 async function addProduct() {
   try {
     await api("/api/products", "POST", {
-      name: document.getElementById("pname").value,
-      price: document.getElementById("price").value,
-      affiliateUrl: document.getElementById("url").value
+      name: $("pname").value,
+      price: $("price").value,
+      affiliateUrl: $("url").value
     });
-    document.getElementById("loginmsg").textContent = "Produto salvo.";
+
+    showMessage("loginmsg", "Produto salvo com sucesso.", "success");
+
+    $("pname").value = "";
+    $("price").value = "";
+    $("url").value = "";
+
     await refresh();
-  } catch(e) {
-    document.getElementById("loginmsg").textContent = e.message;
+
+  } catch (error) {
+    showMessage("loginmsg", error.message, "error");
   }
 }
 
 async function addDestination() {
   try {
     await api("/api/destinations", "POST", {
-      name: document.getElementById("dname").value,
-      channel: document.getElementById("channel").value
+      name: $("dname").value,
+      channel: $("channel").value
     });
-    document.getElementById("loginmsg").textContent =
-      "Destino salvo como pendente de validação.";
+
+    showMessage("loginmsg", "Destino salvo como pendente de validação.", "success");
+
+    $("dname").value = "";
+    $("channel").value = "";
+
     await refresh();
-  } catch(e) {
-    document.getElementById("loginmsg").textContent = e.message;
+
+  } catch (error) {
+    showMessage("loginmsg", error.message, "error");
   }
 }
 
+$("password").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") login();
+});
+
 refresh();
 </script>
+
 </body>
 </html>
