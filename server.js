@@ -155,12 +155,14 @@ function startWhatsApp() {
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--no-zygote",
         "--disable-extensions",
         "--disable-background-networking",
         "--disable-background-timer-throttling",
         "--disable-renderer-backgrounding",
-        "--disable-features=Translate,BackForwardCache",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-software-rasterizer",
+        "--disable-features=Translate,BackForwardCache,IsolateOrigins,site-per-process",
+        "--renderer-process-limit=1",
         "--no-first-run",
         "--no-default-browser-check"
       ]
