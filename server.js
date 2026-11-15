@@ -1,4 +1,3 @@
-
 const express = require("express");
 const helmet = require("helmet");
 const fs = require("fs");
@@ -75,6 +74,8 @@ const automationRunning = {
 function defaultAutomation() {
   return {
     active: false,
+    startTime: "08:00",
+    endTime: "18:00",
     scheduleTimes: ["08:00"],
     intervalSeconds: 1800,
     intervalMinutes: 30,
@@ -87,8 +88,7 @@ function defaultAutomation() {
   };
 }
 
-// Normaliza configurações e mantém compatibilidade
-// com versões anteriores que usavam intervalMinutes.
+// Mantém compatibilidade com configurações antigas.
 function normalizeAutomation(saved = {}) {
   const defaults = defaultAutomation();
 
@@ -110,14 +110,28 @@ function normalizeAutomation(saved = {}) {
     seconds = defaults.intervalSeconds;
   }
 
+  const legacyStart = Array.isArray(saved.scheduleTimes)
+    ? saved.scheduleTimes[0]
+    : null;
+
+  const startTime = isValidTime(saved.startTime)
+    ? saved.startTime
+    : isValidTime(legacyStart)
+      ? legacyStart
+      : defaults.startTime;
+
+  const endTime = isValidTime(saved.endTime)
+    ? saved.endTime
+    : defaults.endTime;
+
   return {
     ...defaults,
     ...saved,
+    startTime,
+    endTime,
     intervalSeconds: seconds,
     intervalMinutes: seconds / 60,
-    scheduleTimes: Array.isArray(saved.scheduleTimes)
-      ? saved.scheduleTimes
-      : ["08:00"],
+    scheduleTimes: [startTime],
     destinationIds: Array.isArray(saved.destinationIds)
       ? saved.destinationIds
       : [],
@@ -134,6 +148,11 @@ function defaultStore() {
     queue: [],
     automation: defaultAutomation()
   };
+}
+
+function isValidTime(value) {
+  return typeof value === "string" &&
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
 function getProfile(req) {
@@ -238,38 +257,72 @@ function getSaoPauloTime(date = new Date()) {
   }).format(date);
 }
 
-function getCurrentWindow(automation, now = new Date()) {
-  const currentTime = getSaoPauloTime(now);
-  const dateParts = getSaoPauloDateParts(now);
-  const dateKey = `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+function getDateKey(parts) {
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
 
-  if (currentTime < "08:00" || currentTime >= "18:00") {
+// Retorna a data anterior usando o calendário, sem depender
+// do fuso horário configurado no servidor.
+function getPreviousDateKey(dateKey) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const previous = new Date(Date.UTC(year, month - 1, day - 1));
+
+  return [
+    previous.getUTCFullYear(),
+    String(previous.getUTCMonth() + 1).padStart(2, "0"),
+    String(previous.getUTCDate()).padStart(2, "0")
+  ].join("-");
+}
+
+// Reconhece horários normais e horários que atravessam a meia-noite.
+// Exemplo: início 20:00 e encerramento 02:00.
+function getCurrentWindow(automation, now = new Date()) {
+  const startTime = automation.startTime || "08:00";
+  const endTime = automation.endTime || "18:00";
+
+  if (!isValidTime(startTime) || !isValidTime(endTime)) {
     return null;
   }
 
-  const times = [...automation.scheduleTimes].sort();
+  // Horários iguais são inválidos: não representam uma janela de 24h.
+  if (startTime === endTime) {
+    return null;
+  }
 
-  let currentStart = null;
-  let nextStart = null;
+  const currentTime = getSaoPauloTime(now);
+  const dateParts = getSaoPauloDateParts(now);
+  const todayKey = getDateKey(dateParts);
 
-  for (const time of times) {
-    if (time <= currentTime) {
-      currentStart = time;
-    } else if (!nextStart) {
-      nextStart = time;
+  const crossesMidnight = startTime > endTime;
+
+  let isInsideWindow = false;
+  let sessionDateKey = todayKey;
+
+  if (!crossesMidnight) {
+    // Exemplo: 08:00 até 18:00.
+    isInsideWindow =
+      currentTime >= startTime &&
+      currentTime < endTime;
+  } else {
+    // Exemplo: 20:00 até 02:00.
+    isInsideWindow =
+      currentTime >= startTime ||
+      currentTime < endTime;
+
+    // Depois da meia-noite, a sessão ainda pertence ao dia anterior.
+    if (currentTime < endTime) {
+      sessionDateKey = getPreviousDateKey(todayKey);
     }
   }
 
-  if (!currentStart) return null;
-
-  const endTime = nextStart || "18:00";
-
-  if (currentTime >= endTime) return null;
+  if (!isInsideWindow) {
+    return null;
+  }
 
   return {
-    start: currentStart,
+    start: startTime,
     end: endTime,
-    key: `${dateKey}-${currentStart}`
+    key: `${sessionDateKey}-${startTime}-${endTime}`
   };
 }
 
@@ -891,22 +944,37 @@ app.post("/api/automation", adminOnly, (req, res) => {
   const store = loadStore(profileId);
   const body = req.body || {};
 
-  const times = Array.isArray(body.scheduleTimes)
-    ? [...new Set(body.scheduleTimes.map(String))]
-    : store.automation.scheduleTimes;
+  // Compatibilidade: clientes antigos enviam scheduleTimes.
+  const legacyStart = Array.isArray(body.scheduleTimes)
+    ? body.scheduleTimes[0]
+    : undefined;
 
-  for (const time of times) {
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
-      return res.status(400).json({
-        error: `Horário inválido: ${time}`
-      });
-    }
+  const startTime = body.startTime !== undefined
+    ? String(body.startTime)
+    : legacyStart !== undefined
+      ? String(legacyStart)
+      : store.automation.startTime || "08:00";
 
-    if (time < "08:00" || time >= "18:00") {
-      return res.status(400).json({
-        error: "Os horários de início devem estar entre 08:00 e 17:59."
-      });
-    }
+  const endTime = body.endTime !== undefined
+    ? String(body.endTime)
+    : store.automation.endTime || "18:00";
+
+  if (!isValidTime(startTime)) {
+    return res.status(400).json({
+      error: "Informe um horário de início válido."
+    });
+  }
+
+  if (!isValidTime(endTime)) {
+    return res.status(400).json({
+      error: "Informe um horário de encerramento válido."
+    });
+  }
+
+  if (startTime === endTime) {
+    return res.status(400).json({
+      error: "O horário de início e o de encerramento não podem ser iguais."
+    });
   }
 
   let intervalSeconds;
@@ -944,19 +1012,16 @@ app.post("/api/automation", adminOnly, (req, res) => {
     });
   }
 
-  store.automation.scheduleTimes = times.sort();
+  // Cada perfil mantém seus próprios horários e configurações.
+  store.automation.startTime = startTime;
+  store.automation.endTime = endTime;
+  store.automation.scheduleTimes = [startTime];
   store.automation.intervalSeconds = intervalSeconds;
   store.automation.intervalMinutes = intervalSeconds / 60;
   store.automation.destinationIds = destinationIds;
 
   if (typeof body.active === "boolean") {
     if (body.active) {
-      if (!times.length) {
-        return res.status(400).json({
-          error: "Cadastre pelo menos um horário de início."
-        });
-      }
-
       if (!destinationIds.length) {
         return res.status(400).json({
           error: "Selecione pelo menos um grupo autorizado."
@@ -982,12 +1047,19 @@ app.post("/api/automation", adminOnly, (req, res) => {
     store.automation.active = body.active;
 
     if (body.active) {
+      // Ao ativar ou salvar a programação ativa, o motor recalcula
+      // a janela com os novos horários.
       store.automation.lastWindowKey = null;
       store.automation.nextSendAt = null;
       store.automation.lastError = null;
     } else {
       store.automation.nextSendAt = null;
     }
+  } else if (store.automation.active) {
+    // Se os horários forem alterados sem enviar o campo active,
+    // reinicia o cálculo da janela sem desativar a automação.
+    store.automation.lastWindowKey = null;
+    store.automation.nextSendAt = null;
   }
 
   saveStore(profileId, store);
