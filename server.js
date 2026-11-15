@@ -15,11 +15,10 @@ const {
 const app = express();
 const PORT = process.env.PORT || 3000;
 const TIME_ZONE = "America/Sao_Paulo";
+const DATA_DIR = path.join(__dirname, "data");
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "2mb" }));
-
-const DATA_DIR = path.join(__dirname, "data");
 
 const PROFILES = {
   rafael: {
@@ -71,9 +70,18 @@ const automationRunning = {
   usuario2: false
 };
 
-// -------------------------
-// DADOS E CONFIGURAÇÕES
-// -------------------------
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function ensureDirectory(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+}
+
+function isValidTime(value) {
+  return typeof value === "string" &&
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
 
 function defaultAutomation() {
   return {
@@ -95,21 +103,13 @@ function defaultAutomation() {
 function normalizeAutomation(saved = {}) {
   const defaults = defaultAutomation();
 
-  let seconds;
+  let seconds = saved.intervalSeconds !== undefined
+    ? Number(saved.intervalSeconds)
+    : saved.intervalMinutes !== undefined
+      ? Number(saved.intervalMinutes) * 60
+      : defaults.intervalSeconds;
 
-  if (saved.intervalSeconds !== undefined) {
-    seconds = Number(saved.intervalSeconds);
-  } else if (saved.intervalMinutes !== undefined) {
-    seconds = Number(saved.intervalMinutes) * 60;
-  } else {
-    seconds = defaults.intervalSeconds;
-  }
-
-  if (
-    !Number.isInteger(seconds) ||
-    seconds < 10 ||
-    seconds > 86400
-  ) {
+  if (!Number.isInteger(seconds) || seconds < 10 || seconds > 86400) {
     seconds = defaults.intervalSeconds;
   }
 
@@ -153,9 +153,36 @@ function defaultStore() {
   };
 }
 
-function isValidTime(value) {
-  return typeof value === "string" &&
-    /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+function loadStore(profileId) {
+  const file = PROFILES[profileId].dataFile;
+
+  try {
+    ensureDirectory(file);
+
+    if (!fs.existsSync(file)) {
+      const initial = defaultStore();
+      fs.writeFileSync(file, JSON.stringify(initial, null, 2));
+      return initial;
+    }
+
+    const data = JSON.parse(fs.readFileSync(file, "utf8"));
+
+    return {
+      products: Array.isArray(data.products) ? data.products : [],
+      destinations: Array.isArray(data.destinations) ? data.destinations : [],
+      queue: Array.isArray(data.queue) ? data.queue : [],
+      automation: normalizeAutomation(data.automation || {})
+    };
+  } catch (error) {
+    console.error("Erro ao carregar dados:", error.message);
+    return defaultStore();
+  }
+}
+
+function saveStore(profileId, data) {
+  const file = PROFILES[profileId].dataFile;
+  ensureDirectory(file);
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
 function getProfile(req) {
@@ -186,52 +213,6 @@ function adminOnly(req, res, next) {
   next();
 }
 
-function ensureDirectory(filePath) {
-  fs.mkdirSync(path.dirname(filePath), {
-    recursive: true
-  });
-}
-
-function wait(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// -------------------------
-// ARMAZENAMENTO
-// -------------------------
-
-function loadStore(profileId) {
-  const file = PROFILES[profileId].dataFile;
-
-  try {
-    ensureDirectory(file);
-
-    if (!fs.existsSync(file)) {
-      const initial = defaultStore();
-      fs.writeFileSync(file, JSON.stringify(initial, null, 2));
-      return initial;
-    }
-
-    const data = JSON.parse(fs.readFileSync(file, "utf8"));
-
-    return {
-      products: Array.isArray(data.products) ? data.products : [],
-      destinations: Array.isArray(data.destinations) ? data.destinations : [],
-      queue: Array.isArray(data.queue) ? data.queue : [],
-      automation: normalizeAutomation(data.automation || {})
-    };
-  } catch (error) {
-    console.error("Erro ao carregar dados:", error);
-    return defaultStore();
-  }
-}
-
-function saveStore(profileId, data) {
-  const file = PROFILES[profileId].dataFile;
-  ensureDirectory(file);
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
-}
-
 // -------------------------
 // HORÁRIO DE SÃO PAULO
 // -------------------------
@@ -247,9 +228,7 @@ function getSaoPauloDateParts(date = new Date()) {
   const result = {};
 
   for (const part of parts) {
-    if (part.type !== "literal") {
-      result[part.type] = part.value;
-    }
+    if (part.type !== "literal") result[part.type] = part.value;
   }
 
   return result;
@@ -283,40 +262,27 @@ function getCurrentWindow(automation, now = new Date()) {
   const startTime = automation.startTime || "08:00";
   const endTime = automation.endTime || "18:00";
 
-  if (!isValidTime(startTime) || !isValidTime(endTime)) {
-    return null;
-  }
-
-  if (startTime === endTime) {
-    return null;
-  }
+  if (!isValidTime(startTime) || !isValidTime(endTime)) return null;
+  if (startTime === endTime) return null;
 
   const currentTime = getSaoPauloTime(now);
-  const dateParts = getSaoPauloDateParts(now);
-  const todayKey = getDateKey(dateParts);
-
+  const todayKey = getDateKey(getSaoPauloDateParts(now));
   const crossesMidnight = startTime > endTime;
 
   let isInsideWindow = false;
   let sessionDateKey = todayKey;
 
   if (!crossesMidnight) {
-    isInsideWindow =
-      currentTime >= startTime &&
-      currentTime < endTime;
+    isInsideWindow = currentTime >= startTime && currentTime < endTime;
   } else {
-    isInsideWindow =
-      currentTime >= startTime ||
-      currentTime < endTime;
+    isInsideWindow = currentTime >= startTime || currentTime < endTime;
 
     if (currentTime < endTime) {
       sessionDateKey = getPreviousDateKey(todayKey);
     }
   }
 
-  if (!isInsideWindow) {
-    return null;
-  }
+  if (!isInsideWindow) return null;
 
   return {
     start: startTime,
@@ -342,10 +308,8 @@ function getEncryptionKey() {
 }
 
 function encryptSecret(secret) {
-  const key = getEncryptionKey();
   const iv = crypto.randomBytes(12);
-
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const cipher = crypto.createCipheriv("aes-256-gcm", getEncryptionKey(), iv);
 
   const encrypted = Buffer.concat([
     cipher.update(secret, "utf8"),
@@ -360,11 +324,9 @@ function encryptSecret(secret) {
 }
 
 function decryptSecret(saved) {
-  const key = getEncryptionKey();
-
   const decipher = crypto.createDecipheriv(
     "aes-256-gcm",
-    key,
+    getEncryptionKey(),
     Buffer.from(saved.iv, "hex")
   );
 
@@ -380,9 +342,7 @@ function getShopeeCredentials(profileId) {
   const saved = shopeeCredentials[profileId];
 
   if (!saved) {
-    throw new Error(
-      "Cadastre as credenciais Shopee deste perfil primeiro."
-    );
+    throw new Error("Cadastre as credenciais Shopee deste perfil primeiro.");
   }
 
   return {
@@ -390,10 +350,6 @@ function getShopeeCredentials(profileId) {
     secret: decryptSecret(saved.encryptedSecret)
   };
 }
-
-// -------------------------
-// REQUISIÇÕES SHOPEE
-// -------------------------
 
 async function shopeeRequest(profileId, query, variables = {}) {
   const credentials = getShopeeCredentials(profileId);
@@ -439,23 +395,15 @@ async function shopeeRequest(profileId, query, variables = {}) {
         const error = new Error(
           `Resposta inesperada da Shopee. HTTP ${response.status}.`
         );
-
-        error.retryable =
-          response.status === 429 || response.status >= 500;
-
+        error.retryable = response.status === 429 || response.status >= 500;
         throw error;
       }
 
       if (!response.ok) {
         const error = new Error(
-          result.message ||
-          result.error ||
-          `Erro HTTP ${response.status} na Shopee.`
+          result.message || result.error || `Erro HTTP ${response.status} na Shopee.`
         );
-
-        error.retryable =
-          response.status === 429 || response.status >= 500;
-
+        error.retryable = response.status === 429 || response.status >= 500;
         throw error;
       }
 
@@ -465,10 +413,8 @@ async function shopeeRequest(profileId, query, variables = {}) {
           .join("; ");
 
         const error = new Error(message);
-
         error.retryable =
           /10000|system\s*error|temporar|internal server/i.test(message);
-
         throw error;
       }
 
@@ -480,10 +426,7 @@ async function shopeeRequest(profileId, query, variables = {}) {
         error.name === "AbortError" ||
         error.name === "TypeError";
 
-      if (!retryable || attempt === 3) {
-        throw error;
-      }
-
+      if (!retryable || attempt === 3) throw error;
       await wait(attempt * 2000);
     }
   }
@@ -492,7 +435,7 @@ async function shopeeRequest(profileId, query, variables = {}) {
 }
 
 // -------------------------
-// BUSCAR PRODUTOS PARA ENVIO
+// PRODUTOS E OFERTAS
 // -------------------------
 
 async function getAutomaticOffer(profileId, store) {
@@ -554,7 +497,6 @@ async function getAutomaticOffer(profileId, store) {
 
 function formatMoney(value) {
   const number = Number(value);
-
   if (!Number.isFinite(number)) return null;
 
   return number.toLocaleString("pt-BR", {
@@ -566,19 +508,13 @@ function formatMoney(value) {
 function createOfferMessage(product) {
   const link = product.offerLink || product.productLink;
 
-  if (!link) {
-    throw new Error("O produto não possui link de afiliado.");
-  }
+  if (!link) throw new Error("O produto não possui link de afiliado.");
 
   let safeLink;
 
   try {
     const parsed = new URL(link);
-
-    if (parsed.protocol !== "https:") {
-      throw new Error("Link não seguro.");
-    }
-
+    if (parsed.protocol !== "https:") throw new Error("Link não seguro.");
     safeLink = parsed.href;
   } catch {
     throw new Error("Link de oferta inválido.");
@@ -593,20 +529,13 @@ function createOfferMessage(product) {
     `🛍️ ${product.productName || "Confira esta oferta"}`
   ];
 
-  if (price) {
-    lines.push(`💰 Preço: ${price}`);
-  }
+  if (price) lines.push(`💰 Preço: ${price}`);
 
   if (commission !== undefined && commission !== null) {
     lines.push(`⭐ Comissão informada: ${commission}`);
   }
 
-  lines.push(
-    "",
-    "👉 Confira aqui:",
-    safeLink
-  );
-
+  lines.push("", "👉 Confira aqui:", safeLink);
   return lines.join("\n");
 }
 
@@ -634,16 +563,12 @@ function rejectPairingWaiters(session, error) {
 
 function waitForPairingReady(session, timeoutMs = 30000) {
   if (session.status === "connected") {
-    return Promise.reject(
-      new Error("Este WhatsApp já está conectado.")
-    );
+    return Promise.reject(new Error("Este WhatsApp já está conectado."));
   }
 
-  if (
-    session.socket &&
-    session.pairingReady &&
-    session.status === "qr"
-  ) {
+  // Não exige que o status continue sendo "qr".
+  // O evento pode ser seguido por outro status, como "connecting".
+  if (session.socket && session.pairingReady) {
     return Promise.resolve();
   }
 
@@ -654,22 +579,15 @@ function waitForPairingReady(session, timeoutMs = 30000) {
   }
 
   return new Promise((resolve, reject) => {
-    const waiter = {
-      resolve,
-      reject,
-      timer: null
-    };
+    const waiter = { resolve, reject, timer: null };
 
     waiter.timer = setTimeout(() => {
       const index = session.pairingWaiters.indexOf(waiter);
-
-      if (index !== -1) {
-        session.pairingWaiters.splice(index, 1);
-      }
+      if (index !== -1) session.pairingWaiters.splice(index, 1);
 
       reject(
         new Error(
-          "O WhatsApp demorou para iniciar. Aguarde alguns segundos e tente novamente."
+          "O WhatsApp não disponibilizou o pareamento a tempo. Aguarde e tente novamente."
         )
       );
     }, timeoutMs);
@@ -695,12 +613,11 @@ async function initializeWhatsApp(profileId) {
   session.lastError = null;
   session.pairingReady = false;
   session.pairingCode = null;
+  session.qr = null;
 
   session.initPromise = (async () => {
     try {
-      ensureDirectory(
-        path.join(PROFILES[profileId].authDir, "placeholder")
-      );
+      ensureDirectory(path.join(PROFILES[profileId].authDir, "placeholder"));
 
       const { state, saveCreds } = await useMultiFileAuthState(
         PROFILES[profileId].authDir
@@ -709,10 +626,7 @@ async function initializeWhatsApp(profileId) {
       const socket = makeWASocket({
         auth: state,
         printQRInTerminal: false,
-
-        // Identificação padrão para testar o pareamento numérico.
         browser: ["Ubuntu", "Chrome", "22.04.4"],
-
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         keepAliveIntervalMs: 20000,
@@ -721,7 +635,6 @@ async function initializeWhatsApp(profileId) {
       });
 
       session.socket = socket;
-
       socket.ev.on("creds.update", saveCreds);
 
       socket.ev.on("connection.update", async update => {
@@ -730,9 +643,8 @@ async function initializeWhatsApp(profileId) {
         if (qr) {
           try {
             session.qr = await QRCode.toDataURL(qr);
-            session.status = "qr";
-
             session.pairingReady = true;
+            session.status = "qr";
             resolvePairingWaiters(session);
           } catch (error) {
             session.lastError = error.message;
@@ -741,7 +653,8 @@ async function initializeWhatsApp(profileId) {
         }
 
         if (connection === "connecting") {
-          session.status = "starting";
+          // Não apaga pairingReady quando o QR já foi recebido.
+          if (!session.pairingReady) session.status = "starting";
         }
 
         if (connection === "open") {
@@ -750,9 +663,7 @@ async function initializeWhatsApp(profileId) {
           session.pairingCode = null;
           session.pairingReady = false;
           session.lastError = null;
-
           resolvePairingWaiters(session);
-
           console.log(`WhatsApp conectado: ${profileId}`);
         }
 
@@ -766,9 +677,7 @@ async function initializeWhatsApp(profileId) {
             new Error("A conexão do WhatsApp foi encerrada. Tente novamente.")
           );
 
-          const statusCode =
-            lastDisconnect?.error?.output?.statusCode;
-
+          const statusCode = lastDisconnect?.error?.output?.statusCode;
           const shouldReconnect =
             !session.manualDisconnect &&
             statusCode !== DisconnectReason.loggedOut;
@@ -790,10 +699,7 @@ async function initializeWhatsApp(profileId) {
           if (shouldReconnect) {
             setTimeout(() => {
               initializeWhatsApp(profileId).catch(error => {
-                console.error(
-                  "Falha ao reconectar WhatsApp:",
-                  error
-                );
+                console.error("Falha ao reconectar WhatsApp:", error.message);
               });
             }, 5000);
           }
@@ -806,9 +712,7 @@ async function initializeWhatsApp(profileId) {
       session.lastError = error.message;
       session.socket = null;
       session.pairingReady = false;
-
       rejectPairingWaiters(session, error);
-
       throw error;
     } finally {
       session.initPromise = null;
@@ -885,7 +789,6 @@ async function runAutomation(profileId) {
 
     const product = await getAutomaticOffer(profileId, store);
     const message = createOfferMessage(product);
-
     let sentCount = 0;
     const errors = [];
 
@@ -894,7 +797,6 @@ async function runAutomation(profileId) {
         await session.socket.sendMessage(destination.groupId, {
           text: message
         });
-
         sentCount++;
         await wait(1500);
       } catch (error) {
@@ -909,9 +811,7 @@ async function runAutomation(profileId) {
         automation.sentProductIds.push(productId);
       }
 
-      automation.sentProductIds =
-        automation.sentProductIds.slice(-5000);
-
+      automation.sentProductIds = automation.sentProductIds.slice(-5000);
       automation.lastSentAt = new Date().toISOString();
 
       automation.lastError = errors.length
@@ -920,15 +820,11 @@ async function runAutomation(profileId) {
 
       const intervalSeconds = Math.max(
         10,
-        Math.min(
-          86400,
-          Number(automation.intervalSeconds) || 1800
-        )
+        Math.min(86400, Number(automation.intervalSeconds) || 1800)
       );
 
       automation.intervalSeconds = intervalSeconds;
       automation.intervalMinutes = intervalSeconds / 60;
-
       automation.nextSendAt = new Date(
         Date.now() + intervalSeconds * 1000
       ).toISOString();
@@ -938,8 +834,7 @@ async function runAutomation(profileId) {
       );
     } else {
       throw new Error(
-        errors.join(" | ") ||
-        "Não foi possível enviar para os grupos."
+        errors.join(" | ") || "Não foi possível enviar para os grupos."
       );
     }
 
@@ -949,7 +844,6 @@ async function runAutomation(profileId) {
 
     const store = loadStore(profileId);
     store.automation.lastError = error.message;
-
     store.automation.nextSendAt = new Date(
       Date.now() + 5 * 60 * 1000
     ).toISOString();
@@ -1005,15 +899,11 @@ app.get("/api/status", adminOnly, (req, res) => {
     ok: true,
     profile: profileId,
     whatsapp: sessions[profileId].status,
-    shopee: shopeeCredentials[profileId]
-      ? "configured"
-      : "disabled",
+    shopee: shopeeCredentials[profileId] ? "configured" : "disabled",
     products: store.products.length,
     destinations: store.destinations.length,
     queue: store.queue.length,
-    automation: store.automation.active
-      ? "active"
-      : "paused"
+    automation: store.automation.active ? "active" : "paused"
   });
 });
 
@@ -1022,17 +912,12 @@ app.get("/api/data", adminOnly, (req, res) => {
 });
 
 // -------------------------
-// AUTOMAÇÃO - CONFIGURAÇÃO
+// AUTOMAÇÃO
 // -------------------------
 
 app.get("/api/automation", adminOnly, (req, res) => {
-  const profileId = getProfile(req);
-  const store = loadStore(profileId);
-
-  res.json({
-    ok: true,
-    automation: store.automation
-  });
+  const store = loadStore(getProfile(req));
+  res.json({ ok: true, automation: store.automation });
 });
 
 app.post("/api/automation", adminOnly, (req, res) => {
@@ -1055,15 +940,11 @@ app.post("/api/automation", adminOnly, (req, res) => {
     : store.automation.endTime || "18:00";
 
   if (!isValidTime(startTime)) {
-    return res.status(400).json({
-      error: "Informe um horário de início válido."
-    });
+    return res.status(400).json({ error: "Informe um horário de início válido." });
   }
 
   if (!isValidTime(endTime)) {
-    return res.status(400).json({
-      error: "Informe um horário de encerramento válido."
-    });
+    return res.status(400).json({ error: "Informe um horário de encerramento válido." });
   }
 
   if (startTime === endTime) {
@@ -1079,8 +960,7 @@ app.post("/api/automation", adminOnly, (req, res) => {
   } else if (body.intervalMinutes !== undefined) {
     intervalSeconds = Number(body.intervalMinutes) * 60;
   } else {
-    intervalSeconds =
-      Number(store.automation.intervalSeconds) || 1800;
+    intervalSeconds = Number(store.automation.intervalSeconds) || 1800;
   }
 
   if (
@@ -1097,9 +977,7 @@ app.post("/api/automation", adminOnly, (req, res) => {
     ? [...new Set(body.destinationIds.map(String))]
     : store.automation.destinationIds;
 
-  const knownIds = new Set(
-    store.destinations.map(destination => destination.id)
-  );
+  const knownIds = new Set(store.destinations.map(item => item.id));
 
   if (destinationIds.some(id => !knownIds.has(id))) {
     return res.status(400).json({
@@ -1191,18 +1069,14 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
       qr: sessions[profileId].qr
     });
   } catch (error) {
-    res.status(500).json({
-      ok: false,
-      error: error.message
-    });
+    res.status(500).json({ ok: false, error: error.message });
   }
 });
 
 // PAREAMENTO POR NÚMERO
-app.post("/api/whatsapp/pairing', adminOnly, async (req, res) => {
+app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
   const profileId = getProfile(req);
   const session = sessions[profileId];
-
   const phone = String(req.body.phone || "").replace(/\D/g, "");
 
   if (phone.length < 10 || phone.length > 15) {
@@ -1231,8 +1105,17 @@ app.post("/api/whatsapp/pairing', adminOnly, async (req, res) => {
       await initializeWhatsApp(profileId);
 
       if (!session.socket) {
+        throw new Error("Não foi possível iniciar o WhatsApp. Tente novamente.");
+      }
+
+      // Se já existe uma sessão registrada, não solicita outro código.
+      const authState = await useMultiFileAuthState(
+        PROFILES[profileId].authDir
+      );
+
+      if (authState.state.creds.registered) {
         throw new Error(
-          "Não foi possível iniciar o WhatsApp. Tente novamente."
+          "Este perfil já possui uma sessão registrada. Desconecte o aparelho vinculado antes de solicitar outro código."
         );
       }
 
@@ -1248,7 +1131,8 @@ app.post("/api/whatsapp/pairing', adminOnly, async (req, res) => {
         throw new Error("Este WhatsApp já está conectado.");
       }
 
-      await wait(1500);
+      // Pequena espera para estabilizar a conexão.
+      await wait(2000);
 
       const code = await session.socket.requestPairingCode(phone);
 
@@ -1277,7 +1161,7 @@ app.post("/api/whatsapp/pairing', adminOnly, async (req, res) => {
 
     console.error(
       `Erro no pareamento numérico (${profileId}):`,
-      error
+      error.message
     );
 
     res.status(500).json({
@@ -1314,10 +1198,7 @@ app.post("/api/whatsapp/disconnect", adminOnly, async (req, res) => {
   session.pairingPromise = null;
   session.status = "disconnected";
 
-  res.json({
-    ok: true,
-    status: "disconnected"
-  });
+  res.json({ ok: true, status: "disconnected" });
 });
 
 app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
@@ -1334,9 +1215,7 @@ app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
   }
 
   if (!session.socket || session.status !== "connected") {
-    return res.status(400).json({
-      error: "WhatsApp não está conectado."
-    });
+    return res.status(400).json({ error: "WhatsApp não está conectado." });
   }
 
   try {
@@ -1344,16 +1223,10 @@ app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
       ? `${destination}@s.whatsapp.net`
       : destination;
 
-    await session.socket.sendMessage(jid, {
-      text: message
-    });
-
+    await session.socket.sendMessage(jid, { text: message });
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({
-      ok: false,
-      error: error.message
-    });
+    res.status(500).json({ ok: false, error: error.message });
   }
 });
 
@@ -1370,14 +1243,12 @@ app.get("/api/whatsapp/groups", adminOnly, async (req, res) => {
   try {
     const groups = await session.socket.groupFetchAllParticipating();
 
-    const result = Object.entries(groups).map(([id, group]) => ({
-      id,
-      name: group.subject || "Grupo sem nome"
-    }));
-
     res.json({
       ok: true,
-      groups: result
+      groups: Object.entries(groups).map(([id, group]) => ({
+        id,
+        name: group.subject || "Grupo sem nome"
+      }))
     });
   } catch (error) {
     res.status(500).json({
@@ -1392,11 +1263,7 @@ app.get("/api/whatsapp/groups", adminOnly, async (req, res) => {
 
 app.get("/api/destinations", adminOnly, (req, res) => {
   const store = loadStore(getProfile(req));
-
-  res.json({
-    ok: true,
-    destinations: store.destinations
-  });
+  res.json({ ok: true, destinations: store.destinations });
 });
 
 app.post("/api/products", adminOnly, (req, res) => {
@@ -1414,18 +1281,12 @@ app.post("/api/products", adminOnly, (req, res) => {
   };
 
   if (!product.name) {
-    return res.status(400).json({
-      error: "Informe o nome do produto."
-    });
+    return res.status(400).json({ error: "Informe o nome do produto." });
   }
 
   store.products.unshift(product);
   saveStore(profileId, store);
-
-  res.json({
-    ok: true,
-    product
-  });
+  res.json({ ok: true, product });
 });
 
 app.post("/api/destinations", adminOnly, (req, res) => {
@@ -1449,11 +1310,7 @@ app.post("/api/destinations", adminOnly, (req, res) => {
 
   store.destinations.push(destination);
   saveStore(profileId, store);
-
-  res.json({
-    ok: true,
-    destination
-  });
+  res.json({ ok: true, destination });
 });
 
 app.post("/api/queue", adminOnly, (req, res) => {
@@ -1478,11 +1335,7 @@ app.post("/api/queue", adminOnly, (req, res) => {
 
   store.queue.push(item);
   saveStore(profileId, store);
-
-  res.json({
-    ok: true,
-    item
-  });
+  res.json({ ok: true, item });
 });
 
 // -------------------------
@@ -1528,10 +1381,7 @@ app.post("/api/shopee/credentials", adminOnly, (req, res) => {
       message: "Credenciais salvas para este perfil."
     });
   } catch (error) {
-    res.status(500).json({
-      ok: false,
-      error: error.message
-    });
+    res.status(500).json({ ok: false, error: error.message });
   }
 });
 
@@ -1669,24 +1519,19 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
           const result = data?.productOfferV2;
 
           if (!result) {
-            throw new Error(
-              "A Shopee não retornou a lista de ofertas."
-            );
+            throw new Error("A Shopee não retornou a lista de ofertas.");
           }
 
           successfulSearches++;
           pagesRead++;
 
-          const products = Array.isArray(result.nodes)
-            ? result.nodes
-            : [];
+          const products = Array.isArray(result.nodes) ? result.nodes : [];
 
           for (const product of products) {
             const id = String(product.itemId || "").trim();
             const link = String(
               product.offerLink || product.productLink || ""
             ).trim();
-
             const name = String(product.productName || "").trim();
 
             const uniqueKey = id
@@ -1706,7 +1551,6 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
           }
 
           if (!result.pageInfo?.hasNextPage) break;
-
           await wait(500);
         } catch (error) {
           errors.push({
@@ -1714,7 +1558,6 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
             page,
             error: error.message
           });
-
           break;
         }
       }
@@ -1727,8 +1570,7 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
     if (successfulSearches === 0) {
       return res.status(502).json({
         ok: false,
-        error:
-          errors[0]?.error ||
+        error: errors[0]?.error ||
           "Não foi possível pesquisar ofertas na Shopee.",
         details: errors
       });
@@ -1781,7 +1623,5 @@ app.use((error, req, res, next) => {
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(
-    `MEDEIROS DIGITAL iniciado na porta ${PORT}`
-  );
+  console.log(`MEDEIROS DIGITAL iniciado na porta ${PORT}`);
 });
