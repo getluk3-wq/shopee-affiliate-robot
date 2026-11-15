@@ -1,46 +1,295 @@
+
 <!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MEDEIROS DIGITAL | Shopee Affiliate Robot</title>
 <style>
 :root{color-scheme:dark;--bg:#101010;--panel:#1b1b1b;--line:#303030;--orange:#ff7a18;--muted:#aaa;--white:#f7f7f7}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--white);font:15px system-ui,Arial}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--white);font:15px system-ui,Arial}
 header{padding:22px 18px;border-bottom:1px solid var(--line);background:#151515}
-header strong{color:var(--orange);letter-spacing:.5px}.wrap{max-width:1050px;margin:auto;padding:22px 16px}
-h1{font-size:22px;margin:0 0 6px}.sub{color:var(--muted);margin:0}
+header strong{color:var(--orange);letter-spacing:.5px}
+.wrap{max-width:1050px;margin:auto;padding:22px 16px}
+h1{font-size:22px;margin:0 0 6px}
+.sub{color:var(--muted);margin:0}
 .notice{border:1px solid #75400f;background:#2b1b0d;color:#ffd7b5;padding:13px;border-radius:12px;margin:18px 0}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:17px}
-.metric{font-size:28px;color:var(--orange);font-weight:700}.muted{color:var(--muted);font-size:13px}
-section{margin-top:22px}h2{font-size:17px;margin:0 0 12px}
+.metric{font-size:28px;color:var(--orange);font-weight:700}
+.muted{color:var(--muted);font-size:13px}
+section{margin-top:22px}
+h2{font-size:17px;margin:0 0 12px}
 input,button{font:inherit;border-radius:9px;padding:11px;border:1px solid var(--line);background:#111;color:white;width:100%;margin:5px 0}
 button{background:var(--orange);border:0;color:#171717;font-weight:700;cursor:pointer}
+button.secondary{background:#333;color:white;border:1px solid #555}
+button:disabled{opacity:.5;cursor:not-allowed}
 .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
-.status{font-size:13px;color:#ffd7b5;line-height:1.6}
+.status{font-size:13px;color:#ffd7b5;line-height:1.6;overflow-wrap:anywhere}
+.qrbox{background:white;border-radius:12px;padding:12px;margin:12px auto;max-width:280px;text-align:center}
+.qrbox img{width:100%;height:auto;display:block}
+.code{font-size:25px;letter-spacing:4px;color:var(--orange);font-weight:800;text-align:center;padding:15px;overflow-wrap:anywhere}
+.hidden{display:none}
 footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
-</style></head>
+</style>
+</head>
 <body>
-<header><div class="wrap" style="padding:0 16px"><strong>MEDEIROS DIGITAL</strong><div class="muted">SHOPEE AFFILIATE ROBOT</div></div></header>
+<header>
+<div class="wrap" style="padding:0 16px">
+<strong>MEDEIROS DIGITAL</strong>
+<div class="muted">SHOPEE AFFILIATE ROBOT</div>
+</div>
+</header>
+
 <main class="wrap">
-<h1>Painel de controle</h1><p class="sub">Base inicial do sistema de ofertas e afiliados.</p>
-<div class="notice"><b>Modo demonstração:</b> as integrações Shopee e Meta estão desativadas. Este painel não consulta a Shopee nem envia mensagens. Só habilite integrações após validar acesso, documentação e destinos autorizados.</div>
+<h1>Painel de controle</h1>
+<p class="sub">Sistema de ofertas e afiliados.</p>
+
+<div class="notice">
+<b>Modo de segurança:</b> Shopee e Meta continuam desativadas. A conexão WhatsApp abaixo serve apenas para autenticação e teste. Nenhuma oferta será enviada automaticamente.
+</div>
+
 <div class="grid">
 <div class="card"><div class="muted">Produtos cadastrados</div><div class="metric" id="products">—</div></div>
 <div class="card"><div class="muted">Destinos cadastrados</div><div class="metric" id="destinations">—</div></div>
 <div class="card"><div class="muted">Itens na fila</div><div class="metric" id="queue">—</div></div>
 </div>
-<section class="card"><h2>Status das integrações</h2><div class="status" id="status">Carregando...</div></section>
-<section class="card"><h2>Acesso administrativo</h2><p class="muted">Digite a senha ADMIN_PASSWORD configurada no Render para usar os formulários de cadastro.</p><input id="password" type="password" placeholder="Senha administrativa"><button onclick="login()">Entrar</button><div id="loginmsg" class="muted"></div></section>
-<section class="card"><h2>Cadastrar produto manualmente</h2><div class="row"><input id="pname" placeholder="Nome do produto"><input id="price" placeholder="Preço (opcional)"><input id="url" placeholder="Link de afiliado (opcional)"></div><button onclick="addProduct()">Salvar produto</button></section>
-<section class="card"><h2>Cadastrar destino (rascunho)</h2><div class="row"><input id="dname" placeholder="Nome do destino"><input id="channel" placeholder="Canal / tipo"></div><button onclick="addDestination()">Salvar destino</button></section>
-</main><footer>Versão inicial • Sem disparos automáticos • Proteja suas credenciais</footer>
+
+<section class="card">
+<h2>Status das integrações</h2>
+<div class="status" id="status">Carregando...</div>
+</section>
+
+<section class="card">
+<h2>Acesso administrativo</h2>
+<p class="muted">Digite a senha ADMIN_PASSWORD configurada no Render.</p>
+<input id="password" type="password" placeholder="Senha administrativa">
+<button onclick="login()">Entrar</button>
+<div id="loginmsg" class="muted"></div>
+</section>
+
+<section class="card">
+<h2>WhatsApp — conexão</h2>
+<p class="muted">Entre primeiro no painel administrativo para acessar a conexão.</p>
+
+<div id="waArea" class="hidden">
+<div class="status" id="waStatus">Consultando conexão...</div>
+
+<h3>Opção 1 — QR Code</h3>
+<p class="muted">Clique para iniciar e aguarde o QR Code aparecer. No celular, abra WhatsApp → Aparelhos conectados → Conectar aparelho.</p>
+<button onclick="connectQR()">Gerar QR Code</button>
+
+<div id="qrArea" class="hidden">
+<div class="qrbox"><img id="qrImage" alt="QR Code do WhatsApp"></div>
+<p class="muted">Escaneie o código pelo WhatsApp do celular.</p>
+</div>
+
+<hr style="border-color:#303030;margin:20px 0">
+
+<h3>Opção 2 — Código de pareamento</h3>
+<p class="muted">Informe o número da conta WhatsApp com código do país e DDD. Exemplo: 5511999999999.</p>
+<input id="phone" inputmode="numeric" placeholder="55 + DDD + número">
+<button onclick="connectPairing()">Solicitar código</button>
+<div id="pairArea" class="hidden">
+<div class="code" id="pairCode"></div>
+<p class="muted">No celular, acesse Aparelhos conectados → Conectar aparelho → Conectar com número de telefone e informe o código.</p>
+</div>
+
+<button class="secondary" onclick="refreshWhatsApp()">Atualizar conexão</button>
+<button class="secondary" onclick="disconnectWhatsApp()">Desconectar WhatsApp</button>
+<div id="waMessage" class="status"></div>
+</div>
+</section>
+
+<section class="card">
+<h2>Cadastrar produto manualmente</h2>
+<div class="row">
+<input id="pname" placeholder="Nome do produto">
+<input id="price" placeholder="Preço (opcional)">
+<input id="url" placeholder="Link de afiliado (opcional)">
+</div>
+<button onclick="addProduct()">Salvar produto</button>
+</section>
+
+<section class="card">
+<h2>Cadastrar destino (rascunho)</h2>
+<div class="row">
+<input id="dname" placeholder="Nome do destino">
+<input id="channel" placeholder="Canal / tipo">
+</div>
+<button onclick="addDestination()">Salvar destino</button>
+</section>
+</main>
+
+<footer>MEDEIROS DIGITAL • Proteja suas credenciais</footer>
+
 <script>
-let pass="";
-async function api(path,method="GET",body){const r=await fetch(path,{method,headers:{"Content-Type":"application/json","x-admin-password":pass},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw new Error(d.error||"Falha");return d}
-async function refresh(){try{const d=await fetch("/api/status").then(r=>r.json());products.textContent=d.counts.products;destinations.textContent=d.counts.destinations;queue.textContent=d.counts.queue;status.textContent="Shopee: "+d.integrations.shopee+" | Meta Groups: "+d.integrations.metaGroups+" — "+d.note}catch(e){status.textContent="Não foi possível consultar o status."}}
-async function login(){pass=password.value;try{await api("/api/data");loginmsg.textContent="Senha aceita. Você pode cadastrar itens nesta versão inicial."}catch(e){loginmsg.textContent=e.message}}
-async function addProduct(){try{await api("/api/products","POST",{name:pname.value,price:price.value,affiliateUrl:url.value});loginmsg.textContent="Produto salvo.";await refresh()}catch(e){loginmsg.textContent=e.message}}
-async function addDestination(){try{await api("/api/destinations","POST",{name:dname.value,channel:channel.value});loginmsg.textContent="Destino salvo como pendente de validação.";await refresh()}catch(e){loginmsg.textContent=e.message}}
+let pass = "";
+let waTimer = null;
+
+async function api(path, method="GET", body) {
+  const r = await fetch(path, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "x-admin-password": pass
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || "Falha na operação.");
+  return d;
+}
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/status");
+    const d = await r.json();
+    document.getElementById("products").textContent = d.counts.products;
+    document.getElementById("destinations").textContent = d.counts.destinations;
+    document.getElementById("queue").textContent = d.counts.queue;
+    document.getElementById("status").textContent =
+      "Shopee: " + d.integrations.shopee +
+      " | Meta Groups: " + d.integrations.metaGroups +
+      " | WhatsApp: " + (d.whatsapp || "não iniciado") +
+      " — " + d.note;
+  } catch(e) {
+    document.getElementById("status").textContent =
+      "Não foi possível consultar o status.";
+  }
+}
+
+async function login() {
+  pass = document.getElementById("password").value;
+  try {
+    await api("/api/data");
+    document.getElementById("loginmsg").textContent = "Senha aceita.";
+    document.getElementById("waArea").classList.remove("hidden");
+    await refreshWhatsApp();
+  } catch(e) {
+    document.getElementById("loginmsg").textContent = e.message;
+    document.getElementById("waArea").classList.add("hidden");
+  }
+}
+
+async function connectQR() {
+  try {
+    document.getElementById("waMessage").textContent = "Iniciando conexão...";
+    await api("/api/whatsapp/connect", "POST", {method:"qr"});
+    await refreshWhatsApp();
+    startWAPolling();
+  } catch(e) {
+    document.getElementById("waMessage").textContent = e.message;
+  }
+}
+
+async function connectPairing() {
+  const phone = document.getElementById("phone").value.replace(/\D/g, "");
+  try {
+    document.getElementById("waMessage").textContent = "Solicitando código...";
+    const d = await api("/api/whatsapp/connect", "POST", {
+      method:"pairing",
+      phone
+    });
+    if (d.pairingCode) {
+      document.getElementById("pairCode").textContent = d.pairingCode;
+      document.getElementById("pairArea").classList.remove("hidden");
+    }
+    await refreshWhatsApp();
+    startWAPolling();
+  } catch(e) {
+    document.getElementById("waMessage").textContent = e.message;
+  }
+}
+
+async function refreshWhatsApp() {
+  try {
+    const d = await api("/api/whatsapp");
+    document.getElementById("waStatus").textContent =
+      "Estado da conexão: " + d.status;
+
+    if (d.qr) {
+      document.getElementById("qrImage").src = d.qr;
+      document.getElementById("qrArea").classList.remove("hidden");
+    } else {
+      document.getElementById("qrArea").classList.add("hidden");
+    }
+
+    if (d.pairingCode) {
+      document.getElementById("pairCode").textContent = d.pairingCode;
+      document.getElementById("pairArea").classList.remove("hidden");
+    }
+
+    if (d.status === "ready") {
+      document.getElementById("waMessage").textContent =
+        "WhatsApp conectado e pronto.";
+      stopWAPolling();
+    } else if (d.status === "error") {
+      document.getElementById("waMessage").textContent =
+        "Falha na conexão. Consulte os logs do Render.";
+      stopWAPolling();
+    }
+  } catch(e) {
+    document.getElementById("waMessage").textContent = e.message;
+  }
+}
+
+function startWAPolling() {
+  stopWAPolling();
+  waTimer = setInterval(refreshWhatsApp, 4000);
+}
+
+function stopWAPolling() {
+  if (waTimer) {
+    clearInterval(waTimer);
+    waTimer = null;
+  }
+}
+
+async function disconnectWhatsApp() {
+  if (!confirm("Deseja desconectar o WhatsApp?")) return;
+  try {
+    await api("/api/whatsapp/disconnect", "POST", {});
+    document.getElementById("waMessage").textContent = "WhatsApp desconectado.";
+    document.getElementById("qrArea").classList.add("hidden");
+    document.getElementById("pairArea").classList.add("hidden");
+    await refreshWhatsApp();
+    stopWAPolling();
+  } catch(e) {
+    document.getElementById("waMessage").textContent = e.message;
+  }
+}
+
+async function addProduct() {
+  try {
+    await api("/api/products", "POST", {
+      name: document.getElementById("pname").value,
+      price: document.getElementById("price").value,
+      affiliateUrl: document.getElementById("url").value
+    });
+    document.getElementById("loginmsg").textContent = "Produto salvo.";
+    await refresh();
+  } catch(e) {
+    document.getElementById("loginmsg").textContent = e.message;
+  }
+}
+
+async function addDestination() {
+  try {
+    await api("/api/destinations", "POST", {
+      name: document.getElementById("dname").value,
+      channel: document.getElementById("channel").value
+    });
+    document.getElementById("loginmsg").textContent =
+      "Destino salvo como pendente de validação.";
+    await refresh();
+  } catch(e) {
+    document.getElementById("loginmsg").textContent = e.message;
+  }
+}
+
 refresh();
-</script></body></html>
+</script>
+</body>
+</html>
