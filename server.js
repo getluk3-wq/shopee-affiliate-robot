@@ -113,7 +113,6 @@ async function startWhatsApp() {
 
   const initPromise = (async () => {
     try {
-      // Importação compatível com versões ESM do Baileys
       const baileys = await import("@whiskeysockets/baileys");
 
       const makeWASocket = baileys.default || baileys.makeWASocket;
@@ -302,7 +301,6 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
       });
     }
 
-    // Conexão por QR Code
     if (method === "qr") {
       startWhatsApp().catch((error) => {
         console.error(
@@ -318,7 +316,6 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
       });
     }
 
-    // Conexão por código de pareamento
     const phone = String(req.body?.phone || "").replace(/\D/g, "");
 
     if (!/^\d{12,13}$/.test(phone)) {
@@ -440,6 +437,61 @@ app.post("/api/whatsapp/disconnect", adminOnly, async (_req, res) => {
     return res.status(500).json({
       ok: false,
       error: "Não foi possível desconectar."
+    });
+  }
+});
+
+// =====================================
+// ENVIAR MENSAGEM DE TESTE PELO WHATSAPP
+// =====================================
+
+app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
+  try {
+    if (!whatsappClient || whatsappStatus !== "ready") {
+      return res.status(409).json({
+        ok: false,
+        error: "WhatsApp não está conectado."
+      });
+    }
+
+    const phone = String(req.body?.phone || "").replace(/\D/g, "");
+    const message = String(req.body?.message || "").trim();
+
+    if (!/^\d{12,13}$/.test(phone)) {
+      return res.status(400).json({
+        ok: false,
+        error: "Informe o telefone com código do país e DDD."
+      });
+    }
+
+    if (!message || message.length > 4000) {
+      return res.status(400).json({
+        ok: false,
+        error: "A mensagem deve ter entre 1 e 4000 caracteres."
+      });
+    }
+
+    const jid = `${phone}@s.whatsapp.net`;
+
+    const result = await whatsappClient.sendMessage(jid, {
+      text: message
+    });
+
+    return res.json({
+      ok: true,
+      message: "Mensagem enviada.",
+      messageId: result?.key?.id || null
+    });
+
+  } catch (error) {
+    console.error(
+      "Erro ao enviar mensagem:",
+      error.stack || error.message
+    );
+
+    return res.status(500).json({
+      ok: false,
+      error: "Não foi possível enviar a mensagem."
     });
   }
 });
