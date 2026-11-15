@@ -76,6 +76,7 @@ function defaultAutomation() {
   return {
     active: false,
     scheduleTimes: ["08:00"],
+    intervalSeconds: 1800,
     intervalMinutes: 30,
     destinationIds: [],
     sentProductIds: [],
@@ -84,6 +85,47 @@ function defaultAutomation() {
     lastSentAt: null,
     lastError: null
   };
+}
+
+function normalizeAutomation(saved = {}) {
+  const defaults = defaultAutomation();
+  const automation = {
+    ...defaults,
+    ...saved
+  };
+
+  // Mantém compatibilidade com configurações antigas,
+  // que armazenavam somente intervalMinutes.
+  let seconds = Number(automation.intervalSeconds);
+
+  if (
+    !Number.isInteger(seconds) ||
+    seconds < 10 ||
+    seconds > 86400
+  ) {
+    const oldMinutes = Number(automation.intervalMinutes);
+    seconds =
+      Number.isFinite(oldMinutes) && oldMinutes >= 1
+        ? Math.round(oldMinutes * 60)
+        : defaults.intervalSeconds;
+  }
+
+  automation.intervalSeconds = seconds;
+  automation.intervalMinutes = seconds / 60;
+
+  automation.scheduleTimes = Array.isArray(automation.scheduleTimes)
+    ? automation.scheduleTimes
+    : ["08:00"];
+
+  automation.destinationIds = Array.isArray(automation.destinationIds)
+    ? automation.destinationIds
+    : [];
+
+  automation.sentProductIds = Array.isArray(automation.sentProductIds)
+    ? automation.sentProductIds
+    : [];
+
+  return automation;
 }
 
 function defaultStore() {
@@ -146,27 +188,12 @@ function loadStore(profileId) {
     }
 
     const data = JSON.parse(fs.readFileSync(file, "utf8"));
-    const automation = {
-      ...defaultAutomation(),
-      ...(data.automation || {})
-    };
 
     return {
       products: Array.isArray(data.products) ? data.products : [],
       destinations: Array.isArray(data.destinations) ? data.destinations : [],
       queue: Array.isArray(data.queue) ? data.queue : [],
-      automation: {
-        ...automation,
-        scheduleTimes: Array.isArray(automation.scheduleTimes)
-          ? automation.scheduleTimes
-          : ["08:00"],
-        destinationIds: Array.isArray(automation.destinationIds)
-          ? automation.destinationIds
-          : [],
-        sentProductIds: Array.isArray(automation.sentProductIds)
-          ? automation.sentProductIds
-          : []
-      }
+      automation: normalizeAutomation(data.automation || {})
     };
   } catch (error) {
     console.error("Erro ao carregar dados:", error);
@@ -699,7 +726,6 @@ async function runAutomation(profileId) {
         automation.sentProductIds.push(productId);
       }
 
-      // Mantém o histórico de IDs em tamanho controlado.
       automation.sentProductIds =
         automation.sentProductIds.slice(-5000);
 
@@ -708,17 +734,21 @@ async function runAutomation(profileId) {
         ? `Enviado parcialmente. ${errors.join(" | ")}`
         : null;
 
-      const interval = Math.max(
-        1,
-        Number(automation.intervalMinutes) || 30
+      // O intervalo agora é calculado em segundos.
+      const intervalSeconds = Math.max(
+        10,
+        Math.min(86400, Number(automation.intervalSeconds) || 1800)
       );
 
+      automation.intervalSeconds = intervalSeconds;
+      automation.intervalMinutes = intervalSeconds / 60;
+
       automation.nextSendAt = new Date(
-        Date.now() + interval * 60 * 1000
+        Date.now() + intervalSeconds * 1000
       ).toISOString();
 
       console.log(
-        `Oferta ${productId} enviada pelo perfil ${profileId} para ${sentCount} destino(s).`
+        `Oferta ${productId} enviada pelo perfil ${profileId} para ${sentCount} destino(s). Próximo envio em ${intervalSeconds} segundo(s).`
       );
     } else {
       throw new Error(
@@ -733,7 +763,7 @@ async function runAutomation(profileId) {
     const store = loadStore(profileId);
     store.automation.lastError = error.message;
 
-    // Tenta novamente após 5 minutos em caso de falha.
+    // Em caso de falha, aguarda 5 minutos antes de tentar novamente.
     store.automation.nextSendAt = new Date(
       Date.now() + 5 * 60 * 1000
     ).toISOString();
@@ -744,10 +774,12 @@ async function runAutomation(profileId) {
   }
 }
 
+// Verifica a automação a cada segundo para respeitar
+// os intervalos de 10 e 15 segundos.
 setInterval(() => {
   runAutomation("rafael").catch(console.error);
   runAutomation("usuario2").catch(console.error);
-}, 15000);
+}, 1000);
 
 // -------------------------
 // ROTAS PÚBLICAS
@@ -838,17 +870,26 @@ app.post("/api/automation", adminOnly, (req, res) => {
     }
   }
 
-  const intervalMinutes = Number(
-    body.intervalMinutes ?? store.automation.intervalMinutes
-  );
+  // Aceita o novo campo intervalSeconds.
+  // Também aceita intervalMinutes para compatibilidade
+  // com versões anteriores do painel.
+  let intervalSeconds;
+
+  if (body.intervalSeconds !== undefined) {
+    intervalSeconds = Number(body.intervalSeconds);
+  } else if (body.intervalMinutes !== undefined) {
+    intervalSeconds = Number(body.intervalMinutes) * 60;
+  } else {
+    intervalSeconds = Number(store.automation.intervalSeconds) || 1800;
+  }
 
   if (
-    !Number.isInteger(intervalMinutes) ||
-    intervalMinutes < 1 ||
-    intervalMinutes > 1440
+    !Number.isInteger(intervalSeconds) ||
+    intervalSeconds < 10 ||
+    intervalSeconds > 86400
   ) {
     return res.status(400).json({
-      error: "O intervalo deve ser de 1 a 1440 minutos."
+      error: "O intervalo deve ser de 10 segundos até 24 horas."
     });
   }
 
@@ -867,7 +908,8 @@ app.post("/api/automation", adminOnly, (req, res) => {
   }
 
   store.automation.scheduleTimes = times.sort();
-  store.automation.intervalMinutes = intervalMinutes;
+  store.automation.intervalSeconds = intervalSeconds;
+  store.automation.intervalMinutes = intervalSeconds / 60;
   store.automation.destinationIds = destinationIds;
 
   if (typeof body.active === "boolean") {
