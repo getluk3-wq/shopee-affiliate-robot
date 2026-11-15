@@ -55,7 +55,7 @@ button{
 button.secondary{background:#333;color:white;border:1px solid #555}
 button:disabled{opacity:.5;cursor:not-allowed}
 .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
-.status{font-size:13px;line-height:1.6;overflow-wrap:anywhere;color:#ffd7b5}
+.status{font-size:13px;line-height:1.6;overflow-wrap:anywhere;color:#ffd7b5;margin-top:8px}
 .success{color:var(--green)}
 .error{color:var(--red)}
 .qrbox{
@@ -71,9 +71,24 @@ button:disabled{opacity:.5;cursor:not-allowed}
 hr{border:0;border-top:1px solid var(--line);margin:20px 0}
 footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 .profile-label{color:var(--orange);font-weight:700;margin-top:12px}
+.product{
+  display:grid;grid-template-columns:100px 1fr;gap:13px;
+  border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:12px
+}
+.product img{
+  width:100px;height:100px;object-fit:contain;
+  background:#fff;border-radius:8px
+}
+.product h3{margin:0 0 8px}
+.product p{margin:4px 0;font-size:13px;color:#ccc}
+.product a{color:#ff9b52;font-weight:700;text-decoration:none}
+.product a:hover{text-decoration:underline}
+.small-button{padding:8px;font-size:13px;margin-top:7px}
 @media(max-width:480px){
   .wrap{padding:18px 12px}
   .card{padding:14px}
+  .product{grid-template-columns:75px 1fr}
+  .product img{width:75px;height:75px}
 }
 </style>
 </head>
@@ -94,8 +109,8 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 <div class="notice">
   <b>Modo de segurança:</b>
   Os perfis e as conexões WhatsApp são separados.
-  Shopee e publicação automática ainda não estão ativadas.
-  Nenhuma oferta será enviada automaticamente.
+  As credenciais Shopee também são separadas por perfil.
+  Nenhuma oferta será publicada automaticamente nesta etapa.
 </div>
 
 <section class="card">
@@ -110,8 +125,8 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 
   <section class="card">
     <h2>Selecionar perfil</h2>
-    <p class="muted">Escolha qual conta deseja administrar. Cada perfil possui sua própria sessão WhatsApp e seus próprios dados.</p>
-    <select id="profile" onchange="changeProfile()">
+    <p class="muted">Cada perfil possui seus próprios dados, WhatsApp e credenciais Shopee.</p>
+    <select id="profile">
       <option value="rafael">Perfil 1 — Rafael</option>
       <option value="usuario2">Perfil 2 — Segundo usuário</option>
     </select>
@@ -142,7 +157,6 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
     <h2>WhatsApp — <span id="waProfileName">Rafael</span></h2>
     <p class="muted">
       Conecte o WhatsApp pertencente ao perfil selecionado.
-      A sessão do outro perfil não será utilizada neste envio.
     </p>
 
     <div class="status" id="waStatus">Consultando conexão...</div>
@@ -181,7 +195,6 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
   <section class="card">
     <h2>Enviar mensagem de teste</h2>
     <p class="muted">
-      A mensagem será enviada pelo WhatsApp do perfil selecionado.
       Envie somente para destinatários que autorizaram receber mensagens.
     </p>
 
@@ -198,12 +211,10 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
   <section class="card">
     <h2>Destinos do perfil</h2>
     <p class="muted">
-      Cadastro temporário de destinos. A integração e validação de grupos será implementada em uma próxima etapa.
+      Cadastre o nome e a identificação do destino para organizar suas futuras divulgações.
     </p>
-    <div class="row">
-      <input id="dname" placeholder="Nome do destino">
-      <input id="channel" placeholder="Canal / tipo">
-    </div>
+    <input id="dname" placeholder="Nome do destino">
+    <input id="channel" placeholder="Número ou identificação do grupo">
     <button onclick="addDestination()">Salvar destino</button>
     <div id="destinationResult" class="status"></div>
   </section>
@@ -211,10 +222,52 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
   <section class="card">
     <h2>Integração Shopee</h2>
     <p class="muted">
-      A busca automática de produtos, comissões, tendências e links de afiliado será configurada nesta área.
-      Ainda não insira suas chaves aqui: primeiro precisamos implementar armazenamento seguro das credenciais e validar a API oficial.
+      Cadastre as credenciais da conta de afiliado correspondente ao perfil selecionado.
+      Nunca compartilhe sua Secret com outras pessoas.
     </p>
-    <div class="status">Estado: aguardando integração e validação.</div>
+
+    <div id="shopeeCredentialStatus" class="status">
+      Verificando credenciais...
+    </div>
+
+    <h3>App ID</h3>
+    <input id="shopeeAppId" inputmode="numeric" placeholder="Digite o App ID da Shopee">
+
+    <h3>Secret</h3>
+    <input id="shopeeSecret" type="password" autocomplete="new-password"
+      placeholder="Digite a Secret da Shopee">
+
+    <button id="saveShopeeButton" onclick="saveShopeeCredentials()">
+      Salvar credenciais Shopee
+    </button>
+
+    <button id="testShopeeButton" class="secondary" onclick="testShopee()">
+      Testar conexão Shopee
+    </button>
+
+    <div id="shopeeMessage" class="status"></div>
+
+    <hr>
+
+    <h2>Pesquisar ofertas</h2>
+    <p class="muted">
+      Pesquise produtos disponíveis na API de afiliados Shopee.
+      A busca utiliza ordenação por comissão, conforme os parâmetros aceitos pela API.
+    </p>
+
+    <input id="searchKeyword" placeholder="Ex.: fone bluetooth, cozinha, celular...">
+
+    <div class="row">
+      <select id="searchLimit">
+        <option value="10">10 produtos</option>
+        <option value="20" selected>20 produtos</option>
+        <option value="30">30 produtos</option>
+      </select>
+      <button id="searchButton" onclick="searchShopeeProducts()">Pesquisar ofertas</button>
+    </div>
+
+    <div id="searchMessage" class="status"></div>
+    <div id="productResults"></div>
   </section>
 
 </div>
@@ -230,7 +283,7 @@ let profile = "rafael";
 let waTimer = null;
 let connecting = false;
 
-const $ = (id) => document.getElementById(id);
+const $ = id => document.getElementById(id);
 
 function showMessage(id, message, type = "") {
   const el = $(id);
@@ -323,9 +376,7 @@ async function changeProfile() {
   profile = $("profile").value;
   stopWAPolling();
 
-  $("profileLabel").textContent =
-    "Perfil ativo: " + getProfileName();
-
+  $("profileLabel").textContent = "Perfil ativo: " + getProfileName();
   $("waProfileName").textContent = getProfileName();
 
   $("qrArea").classList.add("hidden");
@@ -334,35 +385,36 @@ async function changeProfile() {
   $("pairCode").textContent = "";
   $("sendResult").textContent = "";
   $("waMessage").textContent = "";
+  $("productResults").replaceChildren();
+  $("shopeeAppId").value = "";
+  $("shopeeSecret").value = "";
+  $("searchKeyword").value = "";
 
   await loadProfile();
 }
 
 function getProfileName() {
-  return profile === "rafael"
-    ? "Rafael"
-    : "Segundo usuário";
+  return profile === "rafael" ? "Rafael" : "Segundo usuário";
 }
 
 async function loadProfile() {
   await refresh();
   await refreshWhatsApp();
+  await refreshShopeeCredentials();
 }
 
 async function refresh() {
   try {
     const d = await api("/api/status");
 
-    $("products").textContent = d.counts?.products ?? 0;
-    $("destinations").textContent = d.counts?.destinations ?? 0;
-    $("queue").textContent = d.counts?.queue ?? 0;
+    $("products").textContent = d.products ?? 0;
+    $("destinations").textContent = d.destinations ?? 0;
+    $("queue").textContent = d.queue ?? 0;
 
     $("status").textContent =
       "Perfil: " + getProfileName() +
-      " | Shopee: " + (d.integrations?.shopee || "indisponível") +
-      " | WhatsApp: " + (d.whatsapp || "não iniciado") +
-      " | " + (d.note || "");
-
+      " | Shopee: " + (d.shopee || "indisponível") +
+      " | WhatsApp: " + (d.whatsapp || "não iniciado");
   } catch (error) {
     showMessage("status", error.message, "error");
   }
@@ -378,11 +430,7 @@ async function connectQR() {
   showMessage("waMessage", "Solicitando conexão para " + getProfileName() + "...");
 
   try {
-    const d = await api("/api/whatsapp/connect", "POST", {
-      method: "qr"
-    });
-
-    showMessage("waMessage", d.message || "Inicialização solicitada.");
+    await api("/api/whatsapp/connect", "POST", {});
     await refreshWhatsApp();
     startWAPolling();
   } catch (error) {
@@ -405,17 +453,14 @@ async function connectPairing() {
   showMessage("waMessage", "Solicitando código...");
 
   try {
-    const d = await api("/api/whatsapp/connect", "POST", {
-      method: "pairing",
-      phone
-    });
+    const d = await api("/api/whatsapp/pairing", "POST", { phone });
 
     if (d.pairingCode) {
       $("pairCode").textContent = d.pairingCode;
       $("pairArea").classList.remove("hidden");
     }
 
-    showMessage("waMessage", d.message || "Solicitação recebida.");
+    showMessage("waMessage", "Código solicitado. Siga as instruções do WhatsApp.");
     await refreshWhatsApp();
     startWAPolling();
   } catch (error) {
@@ -445,22 +490,18 @@ async function refreshWhatsApp() {
     if (d.pairingCode) {
       $("pairCode").textContent = d.pairingCode;
       $("pairArea").classList.remove("hidden");
-    } else {
-      $("pairArea").classList.add("hidden");
     }
 
-    if (d.status === "ready") {
-      showMessage("waMessage", "WhatsApp conectado e pronto.", "success");
+    if (d.status === "connected") {
+      showMessage("waMessage", "WhatsApp conectado.", "success");
       stopWAPolling();
     } else if (d.status === "error") {
-      showMessage("waMessage", "Falha na conexão. Consulte os logs do Render.", "error");
+      showMessage("waMessage", d.error || "Falha na conexão. Consulte os logs do Render.", "error");
       stopWAPolling();
     } else if (d.status === "qr") {
       showMessage("waMessage", "QR Code disponível. Escaneie pelo celular.", "success");
-    } else if (d.status === "starting" || d.status === "pairing") {
-      showMessage("waMessage", "Conexão inicializando. Aguarde...");
     } else {
-      showMessage("waMessage", "WhatsApp desconectado.");
+      showMessage("waMessage", "Aguardando conexão: " + d.status);
     }
   } catch (error) {
     showMessage("waMessage", error.message, "error");
@@ -512,24 +553,18 @@ async function sendTestMessage() {
     return;
   }
 
-  if (!confirm("Enviar pelo WhatsApp de " + getProfileName() + "?")) {
-    return;
-  }
+  if (!confirm("Enviar pelo WhatsApp de " + getProfileName() + "?")) return;
 
   $("sendButton").disabled = true;
   showMessage("sendResult", "Enviando mensagem...");
 
   try {
-    const result = await api("/api/whatsapp/send", "POST", {
-      phone,
+    await api("/api/whatsapp/send", "POST", {
+      destination: phone,
       message
     });
 
-    showMessage(
-      "sendResult",
-      result.message || "Mensagem aceita pelo WhatsApp.",
-      "success"
-    );
+    showMessage("sendResult", "Mensagem enviada.", "success");
   } catch (error) {
     showMessage("sendResult", error.message, "error");
   } finally {
@@ -542,32 +577,222 @@ async function addDestination() {
   const channel = $("channel").value.trim();
 
   if (!name || !channel) {
-    showMessage("destinationResult", "Informe nome e canal.", "error");
+    showMessage("destinationResult", "Informe nome e identificação do destino.", "error");
     return;
   }
 
   try {
     await api("/api/destinations", "POST", {
       name,
-      channel
+      groupId: channel
     });
 
     $("dname").value = "";
     $("channel").value = "";
 
-    showMessage(
-      "destinationResult",
-      "Destino salvo no perfil " + getProfileName() + ".",
-      "success"
-    );
-
+    showMessage("destinationResult", "Destino salvo no perfil " + getProfileName() + ".", "success");
     await refresh();
   } catch (error) {
     showMessage("destinationResult", error.message, "error");
   }
 }
 
-$("password").addEventListener("keydown", (event) => {
+// SHOPEE
+
+async function refreshShopeeCredentials() {
+  try {
+    const d = await api("/api/shopee/credentials");
+
+    if (d.configured) {
+      $("shopeeCredentialStatus").textContent =
+        "Credenciais cadastradas para " + getProfileName() +
+        ". App ID: " + d.appId +
+        ". A Secret não é exibida.";
+      $("shopeeCredentialStatus").className = "status success";
+      $("shopeeAppId").value = d.appId || "";
+    } else {
+      $("shopeeCredentialStatus").textContent =
+        "Nenhuma credencial cadastrada para este perfil.";
+      $("shopeeCredentialStatus").className = "status";
+      $("shopeeAppId").value = "";
+    }
+  } catch (error) {
+    showMessage("shopeeCredentialStatus", error.message, "error");
+  }
+}
+
+async function saveShopeeCredentials() {
+  const appId = $("shopeeAppId").value.trim();
+  const secret = $("shopeeSecret").value.trim();
+
+  if (!/^\d+$/.test(appId)) {
+    showMessage("shopeeMessage", "Informe um App ID válido, somente números.", "error");
+    return;
+  }
+
+  if (secret.length < 8) {
+    showMessage("shopeeMessage", "Informe a Secret da Shopee.", "error");
+    return;
+  }
+
+  $("saveShopeeButton").disabled = true;
+  showMessage("shopeeMessage", "Salvando credenciais...");
+
+  try {
+    const d = await api("/api/shopee/credentials", "POST", {
+      appId,
+      secret
+    });
+
+    $("shopeeSecret").value = "";
+    showMessage("shopeeMessage", d.message || "Credenciais salvas.", "success");
+    await refreshShopeeCredentials();
+    await refresh();
+  } catch (error) {
+    showMessage("shopeeMessage", error.message, "error");
+  } finally {
+    $("saveShopeeButton").disabled = false;
+  }
+}
+
+async function testShopee() {
+  $("testShopeeButton").disabled = true;
+  showMessage("shopeeMessage", "Testando conexão com a Shopee...");
+
+  try {
+    const d = await api("/api/shopee/test", "POST", {});
+
+    showMessage(
+      "shopeeMessage",
+      "Conexão realizada! Produtos encontrados no teste: " +
+      d.productsFound + ". " + (d.message || ""),
+      "success"
+    );
+
+    await refresh();
+  } catch (error) {
+    showMessage("shopeeMessage", error.message, "error");
+  } finally {
+    $("testShopeeButton").disabled = false;
+  }
+}
+
+function formatPrice(value) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) return "Consulte o preço";
+
+  return number.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
+}
+
+function createProductCard(product) {
+  const card = document.createElement("div");
+  card.className = "product";
+
+  if (product.imageUrl) {
+    const img = document.createElement("img");
+    img.src = product.imageUrl;
+    img.alt = product.productName || "Produto Shopee";
+    img.loading = "lazy";
+    img.onerror = () => img.remove();
+    card.appendChild(img);
+  }
+
+  const details = document.createElement("div");
+
+  const title = document.createElement("h3");
+  title.textContent = product.productName || "Produto sem nome";
+  details.appendChild(title);
+
+  const price = document.createElement("p");
+  price.textContent =
+    "Preço: " + formatPrice(product.priceMin);
+  details.appendChild(price);
+
+  const commission = document.createElement("p");
+  commission.textContent =
+    "Comissão: " + (product.commissionRate ?? "Não informada");
+  details.appendChild(commission);
+
+  const sales = document.createElement("p");
+  sales.textContent = "Vendas: " + (product.sales ?? "Não informado");
+  details.appendChild(sales);
+
+  const rating = document.createElement("p");
+  rating.textContent = "Avaliação: " + (product.ratingStar ?? "Não informada");
+  details.appendChild(rating);
+
+  const link = product.offerLink || product.productLink;
+
+  if (link) {
+    try {
+      const parsed = new URL(link);
+
+      if (parsed.protocol === "https:") {
+        const anchor = document.createElement("a");
+        anchor.href = parsed.href;
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+        anchor.textContent = "Abrir oferta";
+        details.appendChild(anchor);
+      }
+    } catch {
+      // Link inválido não será exibido.
+    }
+  }
+
+  card.appendChild(details);
+  return card;
+}
+
+async function searchShopeeProducts() {
+  const keyword = $("searchKeyword").value.trim();
+  const limit = $("searchLimit").value;
+
+  $("searchButton").disabled = true;
+  $("productResults").replaceChildren();
+
+  showMessage("searchMessage", "Buscando ofertas na Shopee...");
+
+  try {
+    const endpoint =
+      "/api/shopee/products?keyword=" +
+      encodeURIComponent(keyword) +
+      "&limit=" + encodeURIComponent(limit);
+
+    const d = await api(endpoint);
+
+    const products = Array.isArray(d.products) ? d.products : [];
+
+    if (!products.length) {
+      showMessage("searchMessage", "A busca terminou, mas não retornou produtos.", "error");
+      return;
+    }
+
+    showMessage(
+      "searchMessage",
+      products.length + " produto(s) encontrado(s).",
+      "success"
+    );
+
+    const fragment = document.createDocumentFragment();
+
+    products.forEach(product => {
+      fragment.appendChild(createProductCard(product));
+    });
+
+    $("productResults").appendChild(fragment);
+  } catch (error) {
+    showMessage("searchMessage", error.message, "error");
+  } finally {
+    $("searchButton").disabled = false;
+  }
+}
+
+$("password").addEventListener("keydown", event => {
   if (event.key === "Enter") login();
 });
 
