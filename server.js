@@ -709,7 +709,10 @@ async function initializeWhatsApp(profileId) {
       const socket = makeWASocket({
         auth: state,
         printQRInTerminal: false,
-        browser: ["MEDEIROS DIGITAL", "Chrome", "1.0.0"],
+
+        // Identificação padrão para testar o pareamento numérico.
+        browser: ["Ubuntu", "Chrome", "22.04.4"],
+
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         keepAliveIntervalMs: 20000,
@@ -729,8 +732,6 @@ async function initializeWhatsApp(profileId) {
             session.qr = await QRCode.toDataURL(qr);
             session.status = "qr";
 
-            // O evento QR indica que o socket iniciou a etapa
-            // de registro e pode receber a solicitação de pareamento.
             session.pairingReady = true;
             resolvePairingWaiters(session);
           } catch (error) {
@@ -1197,8 +1198,8 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
   }
 });
 
-// PAREAMENTO POR NÚMERO - CORRIGIDO
-app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
+// PAREAMENTO POR NÚMERO
+app.post("/api/whatsapp/pairing', adminOnly, async (req, res) => {
   const profileId = getProfile(req);
   const session = sessions[profileId];
 
@@ -1235,8 +1236,6 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
         );
       }
 
-      // Espera o evento QR da conexão antes de solicitar
-      // o código numérico ao WhatsApp.
       await waitForPairingReady(session, 30000);
 
       if (!session.socket || session.status === "disconnected") {
@@ -1249,7 +1248,6 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
         throw new Error("Este WhatsApp já está conectado.");
       }
 
-      // Pequena pausa para a inicialização do socket.
       await wait(1500);
 
       const code = await session.socket.requestPairingCode(phone);
