@@ -16,6 +16,7 @@ const INDEX_FILE = path.join(__dirname, "index.html");
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "200kb" }));
 
+// Painel principal
 app.get("/", (_req, res) => {
   res.sendFile(INDEX_FILE, (err) => {
     if (err && !res.headersSent) {
@@ -24,12 +25,20 @@ app.get("/", (_req, res) => {
   });
 });
 
+// Banco de dados local
 function loadStore() {
   try {
     if (!fs.existsSync(DATA_FILE)) {
       return { products: [], destinations: [], queue: [] };
     }
-    return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+
+    const data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+
+    return {
+      products: Array.isArray(data.products) ? data.products : [],
+      destinations: Array.isArray(data.destinations) ? data.destinations : [],
+      queue: Array.isArray(data.queue) ? data.queue : []
+    };
   } catch (error) {
     console.error("Erro ao ler dados:", error.message);
     return { products: [], destinations: [], queue: [] };
@@ -41,17 +50,20 @@ function saveStore(store) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2));
 }
 
+// Proteção administrativa
 function adminOnly(req, res, next) {
   const expected = process.env.ADMIN_PASSWORD;
 
   if (!expected) {
     return res.status(503).json({
+      ok: false,
       error: "ADMIN_PASSWORD não configurada."
     });
   }
 
   if (req.headers["x-admin-password"] !== expected) {
     return res.status(401).json({
+      ok: false,
       error: "Senha administrativa inválida."
     });
   }
@@ -59,7 +71,10 @@ function adminOnly(req, res, next) {
   next();
 }
 
-// WhatsApp
+// =====================================
+// WHATSAPP
+// =====================================
+
 let whatsappClient = null;
 let whatsappStatus = "disconnected";
 let whatsappQR = null;
@@ -67,14 +82,27 @@ let whatsappPairingCode = null;
 let whatsappInitPromise = null;
 let lastPairingRequest = 0;
 
-async function startWhatsApp() {
+function clearWhatsAppData() {
+  whatsappQR = null;
+  whatsappPairingCode = null;
+}
+
+// Inicialização protegida contra duplicidade
+function startWhatsApp() {
+  if (whatsappStatus === "ready") {
+    return Promise.resolve();
+  }
+
+  if (whatsappInitPromise) {
+    return whatsappInitPromise;
+  }
+
   if (whatsappClient) {
-    return;
+    return Promise.resolve();
   }
 
   whatsappStatus = "starting";
-  whatsappQR = null;
-  whatsappPairingCode = null;
+  clearWhatsAppData();
 
   const client = new Client({
     authStrategy: new LocalAuth({
@@ -85,7 +113,9 @@ async function startWhatsApp() {
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage"
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-zygote"
       ]
     }
   });
@@ -96,52 +126,75 @@ async function startWhatsApp() {
     try {
       whatsappQR = await QRCode.toDataURL(qr);
       whatsappStatus = "qr";
-      console.log("Novo QR Code do WhatsApp disponível no painel.");
+      console.log("QR Code do WhatsApp disponível.");
     } catch (error) {
       whatsappStatus = "error";
-      console.error("Erro ao gerar QR:", error.message);
+      console.error("Erro ao gerar QR Code:", error.message);
     }
   });
 
   client.on("authenticated", () => {
     whatsappStatus = "authenticated";
-    whatsappQR = null;
-    whatsappPairingCode = null;
+    clearWhatsAppData();
     console.log("WhatsApp autenticado.");
   });
 
   client.on("ready", () => {
     whatsappStatus = "ready";
-    whatsappQR = null;
-    whatsappPairingCode = null;
+    clearWhatsAppData();
     console.log("WhatsApp conectado e pronto.");
   });
 
   client.on("auth_failure", (message) => {
     whatsappStatus = "error";
-    console.error("Falha na autenticação do WhatsApp:", message);
+    clearWhatsAppData();
+    console.error("Falha na autenticação:", message);
   });
 
   client.on("disconnected", (reason) => {
     whatsappStatus = "disconnected";
-    whatsappQR = null;
-    whatsappPairingCode = null;
-    whatsappClient = null;
-    whatsappInitPromise = null;
+    clearWhatsAppData();
+
+    if (whatsappClient === client) {
+      whatsappClient = null;
+    }
+
     console.log("WhatsApp desconectado:", reason);
   });
 
-  whatsappInitPromise = client.initialize().catch((error) => {
-    whatsappStatus = "error";
-    whatsappClient = null;
-    whatsappInitPromise = null;
-    console.error("Erro ao iniciar WhatsApp:", error.message);
-    throw error;
-  });
+  const initPromise = Promise.resolve()
+    .then(() => client.initialize())
+    .catch(async (error) => {
+      whatsappStatus = "error";
 
-  await whatsappInitPromise;
+      if (whatsappClient === client) {
+        whatsappClient = null;
+      }
+
+      clearWhatsAppData();
+
+      console.error("Erro ao iniciar WhatsApp:", error.message);
+
+      try {
+        await client.destroy();
+      } catch (_) {
+        // Cliente pode já estar encerrado
+      }
+
+      throw error;
+    })
+    .finally(() => {
+      if (whatsappInitPromise === initPromise) {
+        whatsappInitPromise = null;
+      }
+    });
+
+  whatsappInitPromise = initPromise;
+
+  return initPromise;
 }
 
+// Status geral
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
@@ -175,19 +228,21 @@ app.get("/api/status", (_req, res) => {
 // Informações privadas da conexão
 app.get("/api/whatsapp", adminOnly, (_req, res) => {
   res.json({
+    ok: true,
     status: whatsappStatus,
     qr: whatsappQR,
     pairingCode: whatsappPairingCode
   });
 });
 
-// Iniciar conexão por QR Code ou código de pareamento
+// Iniciar conexão
 app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
   try {
     const method = req.body?.method;
 
     if (!["qr", "pairing"].includes(method)) {
       return res.status(400).json({
+        ok: false,
         error: "Escolha qr ou pairing."
       });
     }
@@ -200,37 +255,60 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
       });
     }
 
-    if (!whatsappClient) {
-      await startWhatsApp();
-    } else if (whatsappInitPromise) {
-      await whatsappInitPromise;
-    }
-
+    // QR Code: inicia em segundo plano e responde imediatamente.
     if (method === "qr") {
-      return res.json({
+      startWhatsApp().catch((error) => {
+        console.error("Falha na inicialização em segundo plano:", error.message);
+      });
+
+      return res.status(202).json({
         ok: true,
         status: whatsappStatus,
-        message: "Aguardando o QR Code. Consulte a conexão no painel."
+        message: "Inicialização solicitada. Aguarde o QR Code no painel."
       });
     }
 
+    // Código de pareamento
     const phone = String(req.body?.phone || "").replace(/\D/g, "");
 
     if (!/^\d{12,13}$/.test(phone)) {
       return res.status(400).json({
+        ok: false,
         error: "Informe o telefone com código do país e DDD, somente números."
       });
     }
 
     if (Date.now() - lastPairingRequest < 60000) {
       return res.status(429).json({
+        ok: false,
         error: "Aguarde 60 segundos antes de solicitar outro código."
+      });
+    }
+
+    if (!whatsappClient) {
+      startWhatsApp().catch((error) => {
+        console.error("Falha na inicialização:", error.message);
+      });
+
+      return res.status(202).json({
+        ok: true,
+        status: whatsappStatus,
+        message: "WhatsApp está inicializando. Aguarde e tente novamente."
+      });
+    }
+
+    if (whatsappInitPromise) {
+      return res.status(202).json({
+        ok: true,
+        status: whatsappStatus,
+        message: "WhatsApp ainda está inicializando. Aguarde."
       });
     }
 
     lastPairingRequest = Date.now();
 
     const code = await whatsappClient.requestPairingCode(phone);
+
     whatsappPairingCode = code;
     whatsappStatus = "pairing";
 
@@ -239,43 +317,53 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
       status: whatsappStatus,
       pairingCode: code
     });
+
   } catch (error) {
     whatsappStatus = "error";
+
     console.error("Erro na conexão WhatsApp:", error.message);
 
     return res.status(500).json({
-      error: "Não foi possível iniciar a conexão. Verifique os logs do Render."
+      ok: false,
+      status: "error",
+      error: "Não foi possível iniciar a conexão. Consulte os logs do servidor."
     });
   }
 });
 
-// Desconectar WhatsApp
+// Desconectar
 app.post("/api/whatsapp/disconnect", adminOnly, async (_req, res) => {
   try {
-    if (whatsappClient) {
-      const client = whatsappClient;
-      whatsappClient = null;
-      whatsappInitPromise = null;
+    const client = whatsappClient;
+
+    whatsappClient = null;
+    whatsappInitPromise = null;
+    whatsappStatus = "disconnected";
+    clearWhatsAppData();
+
+    if (client) {
       await client.destroy();
     }
 
-    whatsappStatus = "disconnected";
-    whatsappQR = null;
-    whatsappPairingCode = null;
-
-    res.json({
+    return res.json({
       ok: true,
-      status: whatsappStatus
+      status: "disconnected"
     });
+
   } catch (error) {
     console.error("Erro ao desconectar:", error.message);
-    res.status(500).json({
+
+    return res.status(500).json({
+      ok: false,
       error: "Não foi possível desconectar."
     });
   }
 });
 
-// Produtos
+// =====================================
+// PRODUTOS
+// =====================================
+
 app.get("/api/data", adminOnly, (_req, res) => {
   res.json(loadStore());
 });
@@ -285,6 +373,7 @@ app.post("/api/products", adminOnly, (req, res) => {
 
   if (!name || typeof name !== "string") {
     return res.status(400).json({
+      ok: false,
       error: "Informe o nome do produto."
     });
   }
@@ -305,12 +394,16 @@ app.post("/api/products", adminOnly, (req, res) => {
   res.status(201).json(item);
 });
 
-// Destinos
+// =====================================
+// DESTINOS
+// =====================================
+
 app.post("/api/destinations", adminOnly, (req, res) => {
   const { name, channel } = req.body || {};
 
   if (!name || !channel) {
     return res.status(400).json({
+      ok: false,
       error: "Informe nome e canal."
     });
   }
@@ -330,19 +423,24 @@ app.post("/api/destinations", adminOnly, (req, res) => {
   res.status(201).json(item);
 });
 
-// Fila de ofertas
+// =====================================
+// FILA DE OFERTAS
+// =====================================
+
 app.post("/api/queue", adminOnly, (req, res) => {
   const { productId, destinationId, scheduledAt } = req.body || {};
   const store = loadStore();
 
   if (!store.products.some((x) => x.id === productId)) {
     return res.status(400).json({
+      ok: false,
       error: "Produto não encontrado."
     });
   }
 
   if (!store.destinations.some((x) => x.id === destinationId)) {
     return res.status(400).json({
+      ok: false,
       error: "Destino não encontrado."
     });
   }
@@ -362,13 +460,27 @@ app.post("/api/queue", adminOnly, (req, res) => {
   res.status(201).json(item);
 });
 
-app.use((err, _req, res, _next) => {
-  console.error("Erro na requisição:", err.message);
-  res.status(500).json({
-    error: "Erro interno."
+// Rota não encontrada: resposta JSON
+app.use((_req, res) => {
+  res.status(404).json({
+    ok: false,
+    error: "Rota não encontrada."
   });
 });
 
+// Tratamento de erros
+app.use((err, _req, res, _next) => {
+  console.error("Erro na requisição:", err.message);
+
+  if (res.headersSent) return;
+
+  res.status(err.status || 500).json({
+    ok: false,
+    error: "Erro interno na requisição."
+  });
+});
+
+// Inicialização do servidor
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`MEDEIROS DIGITAL iniciado na porta ${PORT}`);
 });
