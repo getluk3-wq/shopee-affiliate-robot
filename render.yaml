@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: medeiros-shopee-affiliate-robot
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: SHOPEE_API_ENABLED
+        value: "false"
+      - key: META_GROUPS_API_ENABLED
+        value: "false"
