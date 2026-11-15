@@ -9,12 +9,54 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const DATA_DIR = path.join(__dirname, "data");
-const DATA_FILE = path.join(DATA_DIR, "store.json");
 const INDEX_FILE = path.join(__dirname, "index.html");
-const AUTH_DIR = path.join(__dirname, ".baileys_auth");
+
+// Rafael mantém a pasta antiga para preservar a sessão já existente.
+const PROFILES = {
+  rafael: {
+    id: "rafael",
+    name: "Rafael",
+    authDir: path.join(__dirname, ".baileys_auth"),
+    dataFile: path.join(DATA_DIR, "store.json")
+  },
+  usuario2: {
+    id: "usuario2",
+    name: "Segundo usuário",
+    authDir: path.join(__dirname, ".baileys_auth_usuario2"),
+    dataFile: path.join(DATA_DIR, "usuario2", "store.json")
+  }
+};
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "200kb" }));
+
+// =====================================
+// ESTADO INDEPENDENTE DOS PERFIS
+// =====================================
+
+const sessions = {};
+
+for (const id of Object.keys(PROFILES)) {
+  sessions[id] = {
+    socket: null,
+    status: "disconnected",
+    qr: null,
+    pairingCode: null,
+    initPromise: null,
+    authState: null,
+    lastPairingRequest: 0,
+    manualDisconnect: false
+  };
+}
+
+function getProfileId(value) {
+  const id = String(value || "rafael").trim().toLowerCase();
+  return PROFILES[id] ? id : null;
+}
+
+function getSession(id) {
+  return sessions[id];
+}
 
 // =====================================
 // PAINEL PRINCIPAL
@@ -29,16 +71,30 @@ app.get("/", (_req, res) => {
 });
 
 // =====================================
-// BANCO DE DADOS LOCAL
+// ARMAZENAMENTO SEPARADO
 // =====================================
 
-function loadStore() {
+function emptyStore() {
+  return {
+    products: [],
+    destinations: [],
+    queue: []
+  };
+}
+
+function loadStore(profileId = "rafael") {
+  const profile = PROFILES[profileId];
+
+  if (!profile) return emptyStore();
+
   try {
-    if (!fs.existsSync(DATA_FILE)) {
-      return { products: [], destinations: [], queue: [] };
+    if (!fs.existsSync(profile.dataFile)) {
+      return emptyStore();
     }
 
-    const data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    const data = JSON.parse(
+      fs.readFileSync(profile.dataFile, "utf8")
+    );
 
     return {
       products: Array.isArray(data.products) ? data.products : [],
@@ -46,14 +102,30 @@ function loadStore() {
       queue: Array.isArray(data.queue) ? data.queue : []
     };
   } catch (error) {
-    console.error("Erro ao ler dados:", error.stack || error.message);
-    return { products: [], destinations: [], queue: [] };
+    console.error(
+      `Erro ao ler dados do perfil ${profileId}:`,
+      error.stack || error.message
+    );
+
+    return emptyStore();
   }
 }
 
-function saveStore(store) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2));
+function saveStore(store, profileId = "rafael") {
+  const profile = PROFILES[profileId];
+
+  if (!profile) {
+    throw new Error("Perfil inválido.");
+  }
+
+  fs.mkdirSync(path.dirname(profile.dataFile), {
+    recursive: true
+  });
+
+  fs.writeFileSync(
+    profile.dataFile,
+    JSON.stringify(store, null, 2)
+  );
 }
 
 // =====================================
@@ -80,53 +152,80 @@ function adminOnly(req, res, next) {
   next();
 }
 
+function requireProfile(req, res, next) {
+  const requested =
+    req.query.profile ||
+    req.body?.profile ||
+    req.headers["x-profile"] ||
+    "rafael";
+
+  const profileId = getProfileId(requested);
+
+  if (!profileId) {
+    return res.status(400).json({
+      ok: false,
+      error: "Perfil inválido. Use rafael ou usuario2."
+    });
+  }
+
+  req.profileId = profileId;
+  req.profile = PROFILES[profileId];
+  req.session = getSession(profileId);
+
+  next();
+}
+
 // =====================================
 // WHATSAPP - BAILEYS
 // =====================================
 
-let whatsappClient = null;
-let whatsappStatus = "disconnected";
-let whatsappQR = null;
-let whatsappPairingCode = null;
-let whatsappInitPromise = null;
-let whatsappAuthState = null;
-let lastPairingRequest = 0;
-let manualDisconnect = false;
-
-function clearWhatsAppData() {
-  whatsappQR = null;
-  whatsappPairingCode = null;
+function clearWhatsAppData(session) {
+  session.qr = null;
+  session.pairingCode = null;
 }
 
-async function startWhatsApp() {
-  if (whatsappClient) {
-    return whatsappClient;
+async function startWhatsApp(profileId) {
+  const profile = PROFILES[profileId];
+  const session = getSession(profileId);
+
+  if (session.socket) {
+    return session.socket;
   }
 
-  if (whatsappInitPromise) {
-    return whatsappInitPromise;
+  if (session.initPromise) {
+    return session.initPromise;
   }
 
-  whatsappStatus = "starting";
-  manualDisconnect = false;
-  clearWhatsAppData();
+  session.status = "starting";
+  session.manualDisconnect = false;
+  clearWhatsAppData(session);
 
   const initPromise = (async () => {
     try {
       const baileys = await import("@whiskeysockets/baileys");
 
-      const makeWASocket = baileys.default || baileys.makeWASocket;
-      const useMultiFileAuthState = baileys.useMultiFileAuthState;
+      const makeWASocket =
+        baileys.default || baileys.makeWASocket;
+
+      const useMultiFileAuthState =
+        baileys.useMultiFileAuthState;
+
       const Browsers = baileys.Browsers;
 
       if (!makeWASocket || !useMultiFileAuthState) {
-        throw new Error("Não foi possível carregar as funções do Baileys.");
+        throw new Error(
+          "Não foi possível carregar as funções do Baileys."
+        );
       }
 
-      fs.mkdirSync(AUTH_DIR, { recursive: true });
+      fs.mkdirSync(profile.authDir, {
+        recursive: true
+      });
 
-      const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-      whatsappAuthState = state;
+      const { state, saveCreds } =
+        await useMultiFileAuthState(profile.authDir);
+
+      session.authState = state;
 
       const socket = makeWASocket({
         auth: state,
@@ -142,35 +241,55 @@ async function startWhatsApp() {
         generateHighQualityLinkPreview: false
       });
 
-      whatsappClient = socket;
+      session.socket = socket;
 
       socket.ev.on("creds.update", saveCreds);
 
       socket.ev.on("connection.update", async (update) => {
-        const { connection, lastDisconnect, qr } = update;
+        const {
+          connection,
+          lastDisconnect,
+          qr
+        } = update;
+
+        // Ignora eventos de uma conexão antiga.
+        if (session.socket !== socket) return;
 
         if (qr) {
           try {
-            whatsappQR = await QRCode.toDataURL(qr);
-            whatsappStatus = "qr";
-            console.log("QR Code do WhatsApp disponível.");
+            session.qr = await QRCode.toDataURL(qr);
+            session.status = "qr";
+
+            console.log(
+              `QR Code disponível para ${profile.name}.`
+            );
           } catch (error) {
-            whatsappStatus = "error";
-            console.error("Erro ao gerar QR:", error.stack || error.message);
+            session.status = "error";
+
+            console.error(
+              "Erro ao gerar QR:",
+              error.stack || error.message
+            );
           }
         }
 
         if (connection === "connecting") {
-          if (whatsappStatus !== "pairing") {
-            whatsappStatus = "starting";
+          if (session.status !== "pairing") {
+            session.status = "starting";
           }
-          console.log("Conectando ao WhatsApp...");
+
+          console.log(
+            `Conectando WhatsApp de ${profile.name}...`
+          );
         }
 
         if (connection === "open") {
-          whatsappStatus = "ready";
-          clearWhatsAppData();
-          console.log("WhatsApp conectado e pronto.");
+          session.status = "ready";
+          clearWhatsAppData(session);
+
+          console.log(
+            `WhatsApp de ${profile.name} conectado.`
+          );
         }
 
         if (connection === "close") {
@@ -180,34 +299,42 @@ async function startWhatsApp() {
           const loggedOut =
             statusCode === baileys.DisconnectReason?.loggedOut;
 
-          whatsappClient = null;
-          clearWhatsAppData();
+          session.socket = null;
+          clearWhatsAppData(session);
 
-          if (manualDisconnect) {
-            whatsappStatus = "disconnected";
+          if (session.manualDisconnect) {
+            session.status = "disconnected";
           } else if (loggedOut) {
-            whatsappStatus = "disconnected";
-            console.log("Sessão do WhatsApp encerrada. Será necessário conectar novamente.");
+            session.status = "disconnected";
+
+            console.log(
+              `Sessão de ${profile.name} encerrada.`
+            );
           } else {
-            whatsappStatus = "error";
+            session.status = "error";
+
             console.error(
-              "Conexão WhatsApp encerrada:",
-              lastDisconnect?.error?.message || "Motivo não informado"
+              `Conexão de ${profile.name} encerrada:`,
+              lastDisconnect?.error?.message ||
+                "Motivo não informado"
             );
           }
         }
       });
 
-      console.log("Cliente Baileys inicializado.");
+      console.log(
+        `Cliente Baileys inicializado para ${profile.name}.`
+      );
+
       return socket;
 
     } catch (error) {
-      whatsappClient = null;
-      whatsappStatus = "error";
-      clearWhatsAppData();
+      session.socket = null;
+      session.status = "error";
+      clearWhatsAppData(session);
 
       console.error(
-        "Erro ao iniciar Baileys:",
+        `Erro ao iniciar WhatsApp de ${profile.name}:`,
         error.stack || error.message
       );
 
@@ -215,386 +342,512 @@ async function startWhatsApp() {
     }
   })();
 
-  whatsappInitPromise = initPromise;
+  session.initPromise = initPromise;
 
   try {
     return await initPromise;
   } finally {
-    if (whatsappInitPromise === initPromise) {
-      whatsappInitPromise = null;
+    if (session.initPromise === initPromise) {
+      session.initPromise = null;
     }
   }
 }
 
 // =====================================
-// STATUS E SAÚDE DO SERVIDOR
+// SAÚDE DO SERVIDOR
 // =====================================
 
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     service: "medeiros-shopee-affiliate-robot",
-    whatsapp: whatsappStatus
+    profiles: {
+      rafael: sessions.rafael.status,
+      usuario2: sessions.usuario2.status
+    }
   });
 });
 
-app.get("/api/status", (_req, res) => {
-  const store = loadStore();
+// =====================================
+// STATUS DOS PERFIS
+// =====================================
 
+app.get("/api/profiles", adminOnly, (_req, res) => {
   res.json({
     ok: true,
-    integrations: {
-      shopee: process.env.SHOPEE_API_ENABLED === "true"
-        ? "configured-for-validation"
-        : "disabled",
-
-      metaGroups: process.env.META_GROUPS_API_ENABLED === "true"
-        ? "configured-for-validation"
-        : "disabled"
-    },
-
-    whatsapp: whatsappStatus,
-
-    counts: {
-      products: store.products.length,
-      destinations: store.destinations.length,
-      queue: store.queue.length
-    },
-
-    note: "Shopee API e publicação automática ainda não estão habilitadas."
+    profiles: [
+      {
+        id: "rafael",
+        name: "Rafael"
+      },
+      {
+        id: "usuario2",
+        name: "Segundo usuário"
+      }
+    ]
   });
 });
+
+app.get(
+  "/api/status",
+  adminOnly,
+  requireProfile,
+  (req, res) => {
+    const store = loadStore(req.profileId);
+
+    res.json({
+      ok: true,
+      profile: req.profileId,
+      integrations: {
+        shopee: "disabled",
+        metaGroups: "disabled"
+      },
+      whatsapp: req.session.status,
+      counts: {
+        products: store.products.length,
+        destinations: store.destinations.length,
+        queue: store.queue.length
+      },
+      note:
+        "A integração Shopee e a publicação automática ainda precisam ser configuradas e testadas."
+    });
+  }
+);
 
 // =====================================
 // INFORMAÇÕES PRIVADAS DO WHATSAPP
 // =====================================
 
-app.get("/api/whatsapp", adminOnly, (_req, res) => {
-  res.json({
-    ok: true,
-    status: whatsappStatus,
-    qr: whatsappQR,
-    pairingCode: whatsappPairingCode
-  });
-});
+app.get(
+  "/api/whatsapp",
+  adminOnly,
+  requireProfile,
+  (req, res) => {
+    res.json({
+      ok: true,
+      profile: req.profileId,
+      status: req.session.status,
+      qr: req.session.qr,
+      pairingCode: req.session.pairingCode
+    });
+  }
+);
 
 // =====================================
 // INICIAR CONEXÃO WHATSAPP
 // =====================================
 
-app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
-  try {
-    const method = req.body?.method;
+app.post(
+  "/api/whatsapp/connect",
+  adminOnly,
+  requireProfile,
+  async (req, res) => {
+    const session = req.session;
+    const profile = req.profile;
 
-    if (!["qr", "pairing"].includes(method)) {
-      return res.status(400).json({
-        ok: false,
-        error: "Escolha qr ou pairing."
-      });
-    }
+    try {
+      const method = req.body?.method;
 
-    if (whatsappStatus === "ready") {
+      if (!["qr", "pairing"].includes(method)) {
+        return res.status(400).json({
+          ok: false,
+          error: "Escolha qr ou pairing."
+        });
+      }
+
+      if (session.status === "ready") {
+        return res.json({
+          ok: true,
+          profile: req.profileId,
+          status: "ready",
+          message: "WhatsApp já está conectado."
+        });
+      }
+
+      if (method === "qr") {
+        startWhatsApp(req.profileId).catch((error) => {
+          console.error(
+            `Falha ao iniciar ${profile.name}:`,
+            error.message
+          );
+        });
+
+        return res.status(202).json({
+          ok: true,
+          profile: req.profileId,
+          status: session.status,
+          message: "Inicialização solicitada. Aguarde o QR Code."
+        });
+      }
+
+      const phone = String(
+        req.body?.phone || ""
+      ).replace(/\D/g, "");
+
+      if (!/^\d{12,13}$/.test(phone)) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "Informe o telefone com código do país e DDD, somente números."
+        });
+      }
+
+      if (
+        Date.now() - session.lastPairingRequest < 60000
+      ) {
+        return res.status(429).json({
+          ok: false,
+          error:
+            "Aguarde 60 segundos antes de solicitar outro código."
+        });
+      }
+
+      if (!session.socket) {
+        startWhatsApp(req.profileId).catch((error) => {
+          console.error(
+            `Falha ao iniciar ${profile.name}:`,
+            error.message
+          );
+        });
+
+        return res.status(202).json({
+          ok: true,
+          profile: req.profileId,
+          status: session.status,
+          message:
+            "WhatsApp está inicializando. Aguarde e tente novamente."
+        });
+      }
+
+      if (session.initPromise) {
+        return res.status(202).json({
+          ok: true,
+          status: session.status,
+          message: "WhatsApp ainda está inicializando."
+        });
+      }
+
+      if (
+        session.status !== "qr" &&
+        session.status !== "starting" &&
+        session.status !== "pairing"
+      ) {
+        return res.status(409).json({
+          ok: false,
+          status: session.status,
+          error:
+            "A conexão ainda não está pronta. Tente novamente."
+        });
+      }
+
+      if (session.authState?.creds?.registered) {
+        return res.status(409).json({
+          ok: false,
+          status: session.status,
+          error:
+            "Esta sessão já possui registro. Tente conectar pelo QR Code."
+        });
+      }
+
+      session.lastPairingRequest = Date.now();
+
+      const code =
+        await session.socket.requestPairingCode(phone);
+
+      session.pairingCode = code;
+      session.status = "pairing";
+
       return res.json({
         ok: true,
-        status: "ready",
-        message: "WhatsApp já está conectado."
-      });
-    }
-
-    if (method === "qr") {
-      startWhatsApp().catch((error) => {
-        console.error(
-          "Falha na inicialização:",
-          error.stack || error.message
-        );
+        profile: req.profileId,
+        status: session.status,
+        pairingCode: code
       });
 
-      return res.status(202).json({
-        ok: true,
-        status: whatsappStatus,
-        message: "Inicialização solicitada. Aguarde o QR Code."
-      });
-    }
+    } catch (error) {
+      session.status = "error";
 
-    const phone = String(req.body?.phone || "").replace(/\D/g, "");
+      console.error(
+        `Erro na conexão de ${profile.name}:`,
+        error.stack || error.message
+      );
 
-    if (!/^\d{12,13}$/.test(phone)) {
-      return res.status(400).json({
+      return res.status(500).json({
         ok: false,
-        error: "Informe o telefone com código do país e DDD, somente números."
+        status: "error",
+        error:
+          "Não foi possível iniciar a conexão. Consulte os logs do servidor."
       });
     }
-
-    if (Date.now() - lastPairingRequest < 60000) {
-      return res.status(429).json({
-        ok: false,
-        error: "Aguarde 60 segundos antes de solicitar outro código."
-      });
-    }
-
-    if (!whatsappClient) {
-      startWhatsApp().catch((error) => {
-        console.error(
-          "Falha na inicialização:",
-          error.stack || error.message
-        );
-      });
-
-      return res.status(202).json({
-        ok: true,
-        status: whatsappStatus,
-        message: "WhatsApp está inicializando. Aguarde alguns segundos e tente novamente."
-      });
-    }
-
-    if (whatsappInitPromise) {
-      return res.status(202).json({
-        ok: true,
-        status: whatsappStatus,
-        message: "WhatsApp ainda está inicializando. Aguarde."
-      });
-    }
-
-    if (
-      whatsappStatus !== "qr" &&
-      whatsappStatus !== "starting" &&
-      whatsappStatus !== "pairing"
-    ) {
-      return res.status(409).json({
-        ok: false,
-        status: whatsappStatus,
-        error: "A conexão ainda não está pronta. Tente novamente."
-      });
-    }
-
-    if (whatsappAuthState?.creds?.registered) {
-      return res.status(409).json({
-        ok: false,
-        status: whatsappStatus,
-        error: "Esta sessão já possui registro. Tente conectar pelo QR Code."
-      });
-    }
-
-    lastPairingRequest = Date.now();
-
-    const code = await whatsappClient.requestPairingCode(phone);
-
-    whatsappPairingCode = code;
-    whatsappStatus = "pairing";
-
-    return res.json({
-      ok: true,
-      status: whatsappStatus,
-      pairingCode: code
-    });
-
-  } catch (error) {
-    whatsappStatus = "error";
-
-    console.error(
-      "Erro na conexão WhatsApp:",
-      error.stack || error.message
-    );
-
-    return res.status(500).json({
-      ok: false,
-      status: "error",
-      error: "Não foi possível iniciar a conexão. Consulte os logs do servidor."
-    });
   }
-});
+);
 
 // =====================================
 // DESCONECTAR WHATSAPP
 // =====================================
 
-app.post("/api/whatsapp/disconnect", adminOnly, async (_req, res) => {
-  try {
-    const socket = whatsappClient;
+app.post(
+  "/api/whatsapp/disconnect",
+  adminOnly,
+  requireProfile,
+  async (req, res) => {
+    const session = req.session;
 
-    manualDisconnect = true;
-    whatsappClient = null;
-    whatsappInitPromise = null;
-    whatsappStatus = "disconnected";
-    clearWhatsAppData();
+    try {
+      const socket = session.socket;
 
-    if (socket) {
-      try {
-        socket.end(undefined);
-      } catch (error) {
-        console.error("Erro ao encerrar socket:", error.message);
+      session.manualDisconnect = true;
+      session.socket = null;
+      session.initPromise = null;
+      session.status = "disconnected";
+
+      clearWhatsAppData(session);
+
+      if (socket) {
+        try {
+          socket.end(undefined);
+        } catch (error) {
+          console.error(
+            "Erro ao encerrar socket:",
+            error.message
+          );
+        }
       }
+
+      return res.json({
+        ok: true,
+        profile: req.profileId,
+        status: "disconnected"
+      });
+
+    } catch (error) {
+      console.error(
+        "Erro ao desconectar:",
+        error.stack || error.message
+      );
+
+      return res.status(500).json({
+        ok: false,
+        error: "Não foi possível desconectar."
+      });
     }
-
-    return res.json({
-      ok: true,
-      status: "disconnected"
-    });
-
-  } catch (error) {
-    console.error("Erro ao desconectar:", error.stack || error.message);
-
-    return res.status(500).json({
-      ok: false,
-      error: "Não foi possível desconectar."
-    });
   }
-});
+);
 
 // =====================================
-// ENVIAR MENSAGEM DE TESTE PELO WHATSAPP
+// ENVIAR MENSAGEM DE TESTE
 // =====================================
 
-app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
-  try {
-    if (!whatsappClient || whatsappStatus !== "ready") {
-      return res.status(409).json({
+app.post(
+  "/api/whatsapp/send",
+  adminOnly,
+  requireProfile,
+  async (req, res) => {
+    try {
+      const session = req.session;
+
+      if (
+        !session.socket ||
+        session.status !== "ready"
+      ) {
+        return res.status(409).json({
+          ok: false,
+          error: "WhatsApp deste perfil não está conectado."
+        });
+      }
+
+      const phone = String(
+        req.body?.phone || ""
+      ).replace(/\D/g, "");
+
+      const message = String(
+        req.body?.message || ""
+      ).trim();
+
+      if (!/^\d{12,13}$/.test(phone)) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "Informe o telefone com código do país e DDD."
+        });
+      }
+
+      if (!message || message.length > 4000) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "A mensagem deve ter entre 1 e 4000 caracteres."
+        });
+      }
+
+      const jid = `${phone}@s.whatsapp.net`;
+
+      const result = await session.socket.sendMessage(
+        jid,
+        { text: message }
+      );
+
+      return res.json({
+        ok: true,
+        profile: req.profileId,
+        message: "Mensagem enviada.",
+        messageId: result?.key?.id || null
+      });
+
+    } catch (error) {
+      console.error(
+        "Erro ao enviar mensagem:",
+        error.stack || error.message
+      );
+
+      return res.status(500).json({
         ok: false,
-        error: "WhatsApp não está conectado."
+        error: "Não foi possível enviar a mensagem."
       });
     }
+  }
+);
 
-    const phone = String(req.body?.phone || "").replace(/\D/g, "");
-    const message = String(req.body?.message || "").trim();
+// =====================================
+// DADOS DO PERFIL
+// =====================================
 
-    if (!/^\d{12,13}$/.test(phone)) {
-      return res.status(400).json({
-        ok: false,
-        error: "Informe o telefone com código do país e DDD."
-      });
-    }
-
-    if (!message || message.length > 4000) {
-      return res.status(400).json({
-        ok: false,
-        error: "A mensagem deve ter entre 1 e 4000 caracteres."
-      });
-    }
-
-    const jid = `${phone}@s.whatsapp.net`;
-
-    const result = await whatsappClient.sendMessage(jid, {
-      text: message
-    });
-
-    return res.json({
+app.get(
+  "/api/data",
+  adminOnly,
+  requireProfile,
+  (req, res) => {
+    res.json({
       ok: true,
-      message: "Mensagem enviada.",
-      messageId: result?.key?.id || null
-    });
-
-  } catch (error) {
-    console.error(
-      "Erro ao enviar mensagem:",
-      error.stack || error.message
-    );
-
-    return res.status(500).json({
-      ok: false,
-      error: "Não foi possível enviar a mensagem."
+      profile: req.profileId,
+      ...loadStore(req.profileId)
     });
   }
-});
+);
 
 // =====================================
 // PRODUTOS
+// Mantido temporariamente para compatibilidade.
+// A busca automática Shopee será implementada depois.
 // =====================================
 
-app.get("/api/data", adminOnly, (_req, res) => {
-  res.json(loadStore());
-});
+app.post(
+  "/api/products",
+  adminOnly,
+  requireProfile,
+  (req, res) => {
+    const { name, affiliateUrl, price } = req.body || {};
 
-app.post("/api/products", adminOnly, (req, res) => {
-  const { name, affiliateUrl, price } = req.body || {};
+    if (!name || typeof name !== "string") {
+      return res.status(400).json({
+        ok: false,
+        error: "Informe o nome do produto."
+      });
+    }
 
-  if (!name || typeof name !== "string") {
-    return res.status(400).json({
-      ok: false,
-      error: "Informe o nome do produto."
-    });
+    const store = loadStore(req.profileId);
+
+    const item = {
+      id: Date.now().toString(),
+      name: name.slice(0, 160),
+      affiliateUrl: String(
+        affiliateUrl || ""
+      ).slice(0, 1000),
+      price: String(price || "").slice(0, 40),
+      createdAt: new Date().toISOString()
+    };
+
+    store.products.unshift(item);
+    saveStore(store, req.profileId);
+
+    res.status(201).json(item);
   }
-
-  const store = loadStore();
-
-  const item = {
-    id: Date.now().toString(),
-    name: name.slice(0, 160),
-    affiliateUrl: String(affiliateUrl || "").slice(0, 1000),
-    price: String(price || "").slice(0, 40),
-    createdAt: new Date().toISOString()
-  };
-
-  store.products.unshift(item);
-  saveStore(store);
-
-  res.status(201).json(item);
-});
+);
 
 // =====================================
 // DESTINOS
 // =====================================
 
-app.post("/api/destinations", adminOnly, (req, res) => {
-  const { name, channel } = req.body || {};
+app.post(
+  "/api/destinations",
+  adminOnly,
+  requireProfile,
+  (req, res) => {
+    const { name, channel } = req.body || {};
 
-  if (!name || !channel) {
-    return res.status(400).json({
-      ok: false,
-      error: "Informe nome e canal."
-    });
+    if (!name || !channel) {
+      return res.status(400).json({
+        ok: false,
+        error: "Informe nome e canal."
+      });
+    }
+
+    const store = loadStore(req.profileId);
+
+    const item = {
+      id: Date.now().toString(),
+      name: String(name).slice(0, 100),
+      channel: String(channel).slice(0, 60),
+      status: "pending_validation"
+    };
+
+    store.destinations.unshift(item);
+    saveStore(store, req.profileId);
+
+    res.status(201).json(item);
   }
-
-  const store = loadStore();
-
-  const item = {
-    id: Date.now().toString(),
-    name: String(name).slice(0, 100),
-    channel: String(channel).slice(0, 60),
-    status: "pending_validation"
-  };
-
-  store.destinations.unshift(item);
-  saveStore(store);
-
-  res.status(201).json(item);
-});
+);
 
 // =====================================
 // FILA DE OFERTAS
 // =====================================
 
-app.post("/api/queue", adminOnly, (req, res) => {
-  const { productId, destinationId, scheduledAt } = req.body || {};
-  const store = loadStore();
+app.post(
+  "/api/queue",
+  adminOnly,
+  requireProfile,
+  (req, res) => {
+    const {
+      productId,
+      destinationId,
+      scheduledAt
+    } = req.body || {};
 
-  if (!store.products.some((x) => x.id === productId)) {
-    return res.status(400).json({
-      ok: false,
-      error: "Produto não encontrado."
-    });
+    const store = loadStore(req.profileId);
+
+    if (!store.products.some((x) => x.id === productId)) {
+      return res.status(400).json({
+        ok: false,
+        error: "Produto não encontrado."
+      });
+    }
+
+    if (
+      !store.destinations.some(
+        (x) => x.id === destinationId
+      )
+    ) {
+      return res.status(400).json({
+        ok: false,
+        error: "Destino não encontrado."
+      });
+    }
+
+    const item = {
+      id: Date.now().toString(),
+      productId,
+      destinationId,
+      scheduledAt: scheduledAt || null,
+      status: "draft",
+      createdAt: new Date().toISOString()
+    };
+
+    store.queue.unshift(item);
+    saveStore(store, req.profileId);
+
+    res.status(201).json(item);
   }
-
-  if (!store.destinations.some((x) => x.id === destinationId)) {
-    return res.status(400).json({
-      ok: false,
-      error: "Destino não encontrado."
-    });
-  }
-
-  const item = {
-    id: Date.now().toString(),
-    productId,
-    destinationId,
-    scheduledAt: scheduledAt || null,
-    status: "draft",
-    createdAt: new Date().toISOString()
-  };
-
-  store.queue.unshift(item);
-  saveStore(store);
-
-  res.status(201).json(item);
-});
+);
 
 // =====================================
 // ROTA NÃO ENCONTRADA
@@ -612,7 +865,10 @@ app.use((_req, res) => {
 // =====================================
 
 app.use((err, _req, res, _next) => {
-  console.error("Erro na requisição:", err.stack || err.message);
+  console.error(
+    "Erro na requisição:",
+    err.stack || err.message
+  );
 
   if (res.headersSent) return;
 
@@ -623,10 +879,19 @@ app.use((err, _req, res, _next) => {
 });
 
 // =====================================
-// INICIALIZAÇÃO DO SERVIDOR
+// INICIALIZAÇÃO
 // =====================================
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`MEDEIROS DIGITAL iniciado na porta ${PORT}`);
-  console.log("Servidor pronto para receber requisições.");
+  console.log(
+    `MEDEIROS DIGITAL iniciado na porta ${PORT}`
+  );
+
+  console.log(
+    "Perfis disponíveis: Rafael e Segundo usuário."
+  );
+
+  console.log(
+    "WhatsApps serão iniciados somente quando solicitados."
+  );
 });
