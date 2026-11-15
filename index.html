@@ -158,7 +158,6 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
     <div id="waMessage" class="status"></div>
   </section>
 
-  <!-- AUTOMAÇÃO -->
   <section class="card">
     <h2>Automação de ofertas Shopee</h2>
     <p class="muted">
@@ -184,18 +183,26 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
     <div class="info-box">
       <label class="muted" for="autoInterval">Intervalo entre os envios</label>
       <select id="autoInterval">
-        <option value="5">A cada 5 minutos</option>
-        <option value="10">A cada 10 minutos</option>
-        <option value="15">A cada 15 minutos</option>
-        <option value="20">A cada 20 minutos</option>
-        <option value="30" selected>A cada 30 minutos</option>
-        <option value="45">A cada 45 minutos</option>
-        <option value="60">A cada 1 hora</option>
-        <option value="90">A cada 1 hora e 30 minutos</option>
-        <option value="120">A cada 2 horas</option>
+        <option value="10">A cada 10 segundos</option>
+        <option value="15">A cada 15 segundos</option>
+        <option value="30">A cada 30 segundos</option>
+        <option value="45">A cada 45 segundos</option>
+        <option value="60">A cada 1 minuto</option>
+        <option value="120">A cada 2 minutos</option>
+        <option value="300">A cada 5 minutos</option>
+        <option value="600">A cada 10 minutos</option>
+        <option value="900">A cada 15 minutos</option>
+        <option value="1200">A cada 20 minutos</option>
+        <option value="1800" selected>A cada 30 minutos</option>
+        <option value="2700">A cada 45 minutos</option>
+        <option value="3600">A cada 1 hora</option>
+        <option value="5400">A cada 1 hora e 30 minutos</option>
+        <option value="7200">A cada 2 horas</option>
       </select>
       <p class="small">
-        Não existe limite diário fixo de ofertas. O intervalo escolhido controla a frequência.
+        O intervalo controla a frequência das ofertas. Evite envios excessivos:
+        mensagens muito frequentes podem ser consideradas spam pelos participantes
+        ou pelo WhatsApp.
       </p>
     </div>
 
@@ -422,6 +429,7 @@ async function changeProfile() {
   $("shopeeSecret").value = "";
   $("searchKeyword").value = "";
   $("groupsList").replaceChildren();
+  $("groupsMessage").textContent = "";
   loadedGroups = [];
 
   await loadProfile();
@@ -621,12 +629,39 @@ async function addDestination() {
 
     showMessage("destinationResult", "Destino salvo no perfil " + getProfileName() + ".", "success");
     await refresh();
+    await loadAutomation();
   } catch (error) {
     showMessage("destinationResult", error.message, "error");
   }
 }
 
 // AUTOMAÇÃO
+
+function formatInterval(seconds) {
+  const value = Number(seconds);
+
+  if (value < 60) return value + " segundos";
+  if (value % 3600 === 0) {
+    const hours = value / 3600;
+    return hours + (hours === 1 ? " hora" : " horas");
+  }
+  if (value % 60 === 0) return (value / 60) + " minutos";
+
+  return value + " segundos";
+}
+
+async function getSavedGroupIds(destinationIds) {
+  const result = await api("/api/data");
+  const destinations = Array.isArray(result.destinations)
+    ? result.destinations
+    : [];
+
+  const selected = new Set(destinationIds.map(String));
+
+  return destinations
+    .filter(item => selected.has(String(item.id)) && item.groupId)
+    .map(item => item.groupId);
+}
 
 async function loadAutomation() {
   try {
@@ -638,8 +673,13 @@ async function loadAutomation() {
       ? automation.scheduleTimes[0]
       : "08:00";
 
+    const intervalSeconds = Number(
+      automation.intervalSeconds ||
+      (Number(automation.intervalMinutes || 30) * 60)
+    );
+
     $("autoStart").value = start;
-    $("autoInterval").value = String(automation.intervalMinutes || 30);
+    $("autoInterval").value = String(intervalSeconds || 1800);
 
     $("automationStatus").textContent =
       automation.active ? "ATIVA" : "PAUSADA";
@@ -648,7 +688,7 @@ async function loadAutomation() {
       automation.active ? "automation-status success" : "automation-status";
 
     let details = "Horário: " + start + " até 18:00";
-    details += " | Intervalo: " + (automation.intervalMinutes || 30) + " minutos";
+    details += " | Intervalo: " + formatInterval(intervalSeconds || 1800);
 
     if (automation.lastSentAt) {
       details += " | Último envio: " +
@@ -671,7 +711,6 @@ async function loadAutomation() {
     $("startAutomationButton").disabled = Boolean(automation.active);
     $("pauseAutomationButton").disabled = !automation.active;
 
-    // Recarrega a seleção dos grupos já cadastrados.
     await renderSavedGroupSelection(automation.destinationIds || []);
   } catch (error) {
     showMessage("automationMessage", error.message, "error");
@@ -685,7 +724,6 @@ async function loadWhatsAppGroups() {
 
   try {
     const result = await api("/api/whatsapp/groups");
-
     loadedGroups = Array.isArray(result.groups) ? result.groups : [];
 
     if (!loadedGroups.length) {
@@ -694,10 +732,16 @@ async function loadWhatsAppGroups() {
       return;
     }
 
-    await renderGroupCheckboxes([]);
+    // Recupera os grupos já selecionados no servidor.
+    const automationResult = await api("/api/automation");
+    const destinationIds = automationResult.automation?.destinationIds || [];
+    const selectedGroupIds = await getSavedGroupIds(destinationIds);
+
+    await renderGroupCheckboxes(selectedGroupIds, loadedGroups);
+
     showMessage(
       "groupsMessage",
-      loadedGroups.length + " grupo(s) carregado(s). Marque os grupos autorizados.",
+      loadedGroups.length + " grupo(s) carregado(s). As seleções salvas foram preservadas.",
       "success"
     );
   } catch (error) {
@@ -714,6 +758,8 @@ async function renderSavedGroupSelection(selectedIds) {
       ? result.destinations
       : [];
 
+    const selectedGroupIds = await getSavedGroupIds(selectedIds);
+
     const savedGroups = destinations
       .filter(item => item.groupId && item.groupId.endsWith("@g.us"))
       .map(item => ({
@@ -722,9 +768,9 @@ async function renderSavedGroupSelection(selectedIds) {
       }));
 
     if (loadedGroups.length) {
-      await renderGroupCheckboxes(selectedIds, loadedGroups);
+      await renderGroupCheckboxes(selectedGroupIds, loadedGroups);
     } else if (savedGroups.length) {
-      await renderGroupCheckboxes(selectedIds, savedGroups);
+      await renderGroupCheckboxes(selectedGroupIds, savedGroups);
       showMessage(
         "groupsMessage",
         "Exibindo grupos cadastrados. Para atualizar a lista, carregue os grupos do WhatsApp."
@@ -742,7 +788,7 @@ async function renderGroupCheckboxes(selectedIds, groups = loadedGroups) {
   const list = $("groupsList");
   list.replaceChildren();
 
-  const selected = new Set(selectedIds);
+  const selected = new Set(selectedIds.map(String));
 
   groups.forEach(group => {
     const label = document.createElement("label");
@@ -752,7 +798,7 @@ async function renderGroupCheckboxes(selectedIds, groups = loadedGroups) {
     checkbox.type = "checkbox";
     checkbox.className = "automation-group";
     checkbox.value = group.id;
-    checkbox.checked = selected.has(group.id);
+    checkbox.checked = selected.has(String(group.id));
 
     const name = document.createElement("span");
     name.textContent = group.name + " ";
@@ -794,6 +840,11 @@ async function saveSelectedGroupsAsDestinations(groupIds) {
       });
 
       existing = result.destination;
+
+      if (!existing?.id) {
+        throw new Error("Não foi possível cadastrar um dos grupos selecionados.");
+      }
+
       destinations.push(existing);
     }
 
@@ -806,7 +857,7 @@ async function saveSelectedGroupsAsDestinations(groupIds) {
 async function saveAutomation(activate) {
   const startTime = $("autoStart").value;
   const endTime = $("autoEnd").value;
-  const intervalMinutes = Number($("autoInterval").value);
+  const intervalSeconds = Number($("autoInterval").value);
   const selectedGroups = getSelectedGroupIds();
 
   if (!startTime) {
@@ -824,8 +875,8 @@ async function saveAutomation(activate) {
     return;
   }
 
-  if (!Number.isInteger(intervalMinutes) || intervalMinutes < 5) {
-    showMessage("automationMessage", "Escolha um intervalo de pelo menos 5 minutos.", "error");
+  if (!Number.isInteger(intervalSeconds) || intervalSeconds < 10 || intervalSeconds > 86400) {
+    showMessage("automationMessage", "Escolha um intervalo válido entre 10 segundos e 24 horas.", "error");
     return;
   }
 
@@ -847,9 +898,9 @@ async function saveAutomation(activate) {
     const current = await api("/api/automation");
     const currentlyActive = Boolean(current.automation?.active);
 
-    const result = await api("/api/automation", "POST", {
+    await api("/api/automation", "POST", {
       scheduleTimes: [startTime],
-      intervalMinutes,
+      intervalSeconds,
       destinationIds,
       active: activate ? true : currentlyActive
     });
@@ -882,7 +933,10 @@ async function pauseAutomation() {
 
     await api("/api/automation", "POST", {
       scheduleTimes: automation.scheduleTimes || ["08:00"],
-      intervalMinutes: automation.intervalMinutes || 30,
+      intervalSeconds: Number(
+        automation.intervalSeconds ||
+        (Number(automation.intervalMinutes || 30) * 60)
+      ),
       destinationIds: automation.destinationIds || [],
       active: false
     });
