@@ -1,3 +1,4 @@
+
 const express = require("express");
 const helmet = require("helmet");
 const fs = require("fs");
@@ -42,6 +43,9 @@ function createSession() {
     qr: null,
     pairingCode: null,
     initPromise: null,
+    pairingPromise: null,
+    pairingReady: false,
+    pairingWaiters: [],
     manualDisconnect: false,
     lastError: null
   };
@@ -88,7 +92,6 @@ function defaultAutomation() {
   };
 }
 
-// Mantém compatibilidade com configurações antigas.
 function normalizeAutomation(saved = {}) {
   const defaults = defaultAutomation();
 
@@ -193,6 +196,10 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// -------------------------
+// ARMAZENAMENTO
+// -------------------------
+
 function loadStore(profileId) {
   const file = PROFILES[profileId].dataFile;
 
@@ -261,8 +268,6 @@ function getDateKey(parts) {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-// Retorna a data anterior usando o calendário, sem depender
-// do fuso horário configurado no servidor.
 function getPreviousDateKey(dateKey) {
   const [year, month, day] = dateKey.split("-").map(Number);
   const previous = new Date(Date.UTC(year, month - 1, day - 1));
@@ -274,8 +279,6 @@ function getPreviousDateKey(dateKey) {
   ].join("-");
 }
 
-// Reconhece horários normais e horários que atravessam a meia-noite.
-// Exemplo: início 20:00 e encerramento 02:00.
 function getCurrentWindow(automation, now = new Date()) {
   const startTime = automation.startTime || "08:00";
   const endTime = automation.endTime || "18:00";
@@ -284,7 +287,6 @@ function getCurrentWindow(automation, now = new Date()) {
     return null;
   }
 
-  // Horários iguais são inválidos: não representam uma janela de 24h.
   if (startTime === endTime) {
     return null;
   }
@@ -299,17 +301,14 @@ function getCurrentWindow(automation, now = new Date()) {
   let sessionDateKey = todayKey;
 
   if (!crossesMidnight) {
-    // Exemplo: 08:00 até 18:00.
     isInsideWindow =
       currentTime >= startTime &&
       currentTime < endTime;
   } else {
-    // Exemplo: 20:00 até 02:00.
     isInsideWindow =
       currentTime >= startTime ||
       currentTime < endTime;
 
-    // Depois da meia-noite, a sessão ainda pertence ao dia anterior.
     if (currentTime < endTime) {
       sessionDateKey = getPreviousDateKey(todayKey);
     }
@@ -612,21 +611,90 @@ function createOfferMessage(product) {
 }
 
 // -------------------------
-// WHATSAPP - BAILEYS
+// WHATSAPP - PAREAMENTO
 // -------------------------
+
+function resolvePairingWaiters(session) {
+  const waiters = session.pairingWaiters.splice(0);
+
+  for (const waiter of waiters) {
+    clearTimeout(waiter.timer);
+    waiter.resolve();
+  }
+}
+
+function rejectPairingWaiters(session, error) {
+  const waiters = session.pairingWaiters.splice(0);
+
+  for (const waiter of waiters) {
+    clearTimeout(waiter.timer);
+    waiter.reject(error);
+  }
+}
+
+function waitForPairingReady(session, timeoutMs = 30000) {
+  if (session.status === "connected") {
+    return Promise.reject(
+      new Error("Este WhatsApp já está conectado.")
+    );
+  }
+
+  if (
+    session.socket &&
+    session.pairingReady &&
+    session.status === "qr"
+  ) {
+    return Promise.resolve();
+  }
+
+  if (!session.socket) {
+    return Promise.reject(
+      new Error("O WhatsApp não iniciou corretamente. Tente conectar novamente.")
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const waiter = {
+      resolve,
+      reject,
+      timer: null
+    };
+
+    waiter.timer = setTimeout(() => {
+      const index = session.pairingWaiters.indexOf(waiter);
+
+      if (index !== -1) {
+        session.pairingWaiters.splice(index, 1);
+      }
+
+      reject(
+        new Error(
+          "O WhatsApp demorou para iniciar. Aguarde alguns segundos e tente novamente."
+        )
+      );
+    }, timeoutMs);
+
+    session.pairingWaiters.push(waiter);
+  });
+}
 
 async function initializeWhatsApp(profileId) {
   const session = sessions[profileId];
 
   if (session.initPromise) return session.initPromise;
 
-  if (session.socket && session.status === "connected") {
+  if (
+    session.socket &&
+    ["connected", "qr", "starting"].includes(session.status)
+  ) {
     return session;
   }
 
   session.manualDisconnect = false;
   session.status = "starting";
   session.lastError = null;
+  session.pairingReady = false;
+  session.pairingCode = null;
 
   session.initPromise = (async () => {
     try {
@@ -657,8 +725,18 @@ async function initializeWhatsApp(profileId) {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-          session.qr = await QRCode.toDataURL(qr);
-          session.status = "qr";
+          try {
+            session.qr = await QRCode.toDataURL(qr);
+            session.status = "qr";
+
+            // O evento QR indica que o socket iniciou a etapa
+            // de registro e pode receber a solicitação de pareamento.
+            session.pairingReady = true;
+            resolvePairingWaiters(session);
+          } catch (error) {
+            session.lastError = error.message;
+            console.error("Erro ao gerar QR:", error.message);
+          }
         }
 
         if (connection === "connecting") {
@@ -669,7 +747,10 @@ async function initializeWhatsApp(profileId) {
           session.status = "connected";
           session.qr = null;
           session.pairingCode = null;
+          session.pairingReady = false;
           session.lastError = null;
+
+          resolvePairingWaiters(session);
 
           console.log(`WhatsApp conectado: ${profileId}`);
         }
@@ -677,6 +758,12 @@ async function initializeWhatsApp(profileId) {
         if (connection === "close") {
           session.socket = null;
           session.qr = null;
+          session.pairingReady = false;
+
+          rejectPairingWaiters(
+            session,
+            new Error("A conexão do WhatsApp foi encerrada. Tente novamente.")
+          );
 
           const statusCode =
             lastDisconnect?.error?.output?.statusCode;
@@ -690,6 +777,13 @@ async function initializeWhatsApp(profileId) {
           if (lastDisconnect?.error) {
             session.lastError =
               lastDisconnect.error.message || "Conexão encerrada";
+
+            console.error(
+              `WhatsApp desconectado (${profileId}). Código:`,
+              statusCode,
+              "Erro:",
+              session.lastError
+            );
           }
 
           if (shouldReconnect) {
@@ -710,6 +804,9 @@ async function initializeWhatsApp(profileId) {
       session.status = "error";
       session.lastError = error.message;
       session.socket = null;
+      session.pairingReady = false;
+
+      rejectPairingWaiters(session, error);
 
       throw error;
     } finally {
@@ -852,7 +949,6 @@ async function runAutomation(profileId) {
     const store = loadStore(profileId);
     store.automation.lastError = error.message;
 
-    // Em caso de falha, aguarda 5 minutos antes de tentar novamente.
     store.automation.nextSendAt = new Date(
       Date.now() + 5 * 60 * 1000
     ).toISOString();
@@ -863,7 +959,6 @@ async function runAutomation(profileId) {
   }
 }
 
-// Verifica a automação a cada segundo.
 setInterval(() => {
   runAutomation("rafael").catch(console.error);
   runAutomation("usuario2").catch(console.error);
@@ -944,7 +1039,6 @@ app.post("/api/automation", adminOnly, (req, res) => {
   const store = loadStore(profileId);
   const body = req.body || {};
 
-  // Compatibilidade: clientes antigos enviam scheduleTimes.
   const legacyStart = Array.isArray(body.scheduleTimes)
     ? body.scheduleTimes[0]
     : undefined;
@@ -1012,7 +1106,6 @@ app.post("/api/automation", adminOnly, (req, res) => {
     });
   }
 
-  // Cada perfil mantém seus próprios horários e configurações.
   store.automation.startTime = startTime;
   store.automation.endTime = endTime;
   store.automation.scheduleTimes = [startTime];
@@ -1047,8 +1140,6 @@ app.post("/api/automation", adminOnly, (req, res) => {
     store.automation.active = body.active;
 
     if (body.active) {
-      // Ao ativar ou salvar a programação ativa, o motor recalcula
-      // a janela com os novos horários.
       store.automation.lastWindowKey = null;
       store.automation.nextSendAt = null;
       store.automation.lastError = null;
@@ -1056,8 +1147,6 @@ app.post("/api/automation", adminOnly, (req, res) => {
       store.automation.nextSendAt = null;
     }
   } else if (store.automation.active) {
-    // Se os horários forem alterados sem enviar o campo active,
-    // reinicia o cálculo da janela sem desativar a automação.
     store.automation.lastWindowKey = null;
     store.automation.nextSendAt = null;
   }
@@ -1108,35 +1197,91 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
   }
 });
 
+// PAREAMENTO POR NÚMERO - CORRIGIDO
 app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
   const profileId = getProfile(req);
+  const session = sessions[profileId];
+
   const phone = String(req.body.phone || "").replace(/\D/g, "");
 
   if (phone.length < 10 || phone.length > 15) {
     return res.status(400).json({
-      error: "Informe o telefone com DDI e DDD."
+      ok: false,
+      error: "Informe o telefone com DDI e DDD, somente números."
     });
   }
 
-  try {
-    await initializeWhatsApp(profileId);
+  if (session.status === "connected") {
+    return res.status(400).json({
+      ok: false,
+      error: "Este WhatsApp já está conectado."
+    });
+  }
 
-    const session = sessions[profileId];
+  if (session.pairingPromise) {
+    return res.status(409).json({
+      ok: false,
+      error: "Já existe uma solicitação de código em andamento. Aguarde."
+    });
+  }
 
-    if (!session.socket) {
-      throw new Error(
-        "WhatsApp ainda está iniciando. Tente novamente."
+  session.pairingPromise = (async () => {
+    try {
+      await initializeWhatsApp(profileId);
+
+      if (!session.socket) {
+        throw new Error(
+          "Não foi possível iniciar o WhatsApp. Tente novamente."
+        );
+      }
+
+      // Espera o evento QR da conexão antes de solicitar
+      // o código numérico ao WhatsApp.
+      await waitForPairingReady(session, 30000);
+
+      if (!session.socket || session.status === "disconnected") {
+        throw new Error(
+          "A conexão foi encerrada antes da solicitação do código."
+        );
+      }
+
+      if (session.status === "connected") {
+        throw new Error("Este WhatsApp já está conectado.");
+      }
+
+      // Pequena pausa para a inicialização do socket.
+      await wait(1500);
+
+      const code = await session.socket.requestPairingCode(phone);
+
+      session.pairingCode = code;
+
+      console.log(
+        `Código de pareamento solicitado para o perfil ${profileId}.`
       );
-    }
 
-    const code = await session.socket.requestPairingCode(phone);
-    session.pairingCode = code;
+      return code;
+    } finally {
+      session.pairingPromise = null;
+    }
+  })();
+
+  try {
+    const code = await session.pairingPromise;
 
     res.json({
       ok: true,
-      pairingCode: code
+      pairingCode: code,
+      message: "Código gerado. Digite-o no WhatsApp do celular."
     });
   } catch (error) {
+    session.lastError = error.message;
+
+    console.error(
+      `Erro no pareamento numérico (${profileId}):`,
+      error
+    );
+
     res.status(500).json({
       ok: false,
       error: error.message
@@ -1150,6 +1295,11 @@ app.post("/api/whatsapp/disconnect", adminOnly, async (req, res) => {
 
   session.manualDisconnect = true;
 
+  rejectPairingWaiters(
+    session,
+    new Error("Pareamento cancelado porque o WhatsApp foi desconectado.")
+  );
+
   try {
     if (session.socket) {
       await session.socket.logout();
@@ -1162,6 +1312,8 @@ app.post("/api/whatsapp/disconnect", adminOnly, async (req, res) => {
   session.socket = null;
   session.qr = null;
   session.pairingCode = null;
+  session.pairingReady = false;
+  session.pairingPromise = null;
   session.status = "disconnected";
 
   res.json({
@@ -1207,7 +1359,6 @@ app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
   }
 });
 
-// Lista os grupos dos quais o WhatsApp conectado participa.
 app.get("/api/whatsapp/groups", adminOnly, async (req, res) => {
   const profileId = getProfile(req);
   const session = sessions[profileId];
