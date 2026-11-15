@@ -10,181 +10,75 @@
 <style>
 :root {
   color-scheme: dark;
-  --bg: #101010;
-  --panel: #1b1b1b;
-  --line: #303030;
-  --orange: #ff7a18;
-  --muted: #aaa;
-  --white: #f7f7f7;
-  --green: #36c982;
-  --red: #ff5757;
+  --bg:#101010;
+  --panel:#1b1b1b;
+  --line:#303030;
+  --orange:#ff7a18;
+  --muted:#aaa;
+  --white:#f7f7f7;
+  --green:#36c982;
+  --red:#ff5757;
 }
-
-* { box-sizing: border-box; }
-
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--white);
-  font: 15px system-ui, Arial, sans-serif;
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--white);
+  font:15px system-ui,Arial,sans-serif
 }
-
-header {
-  padding: 22px 18px;
-  border-bottom: 1px solid var(--line);
-  background: #151515;
+header{padding:22px 18px;border-bottom:1px solid var(--line);background:#151515}
+header strong{color:var(--orange);letter-spacing:.7px;font-size:18px}
+.wrap{max-width:1050px;margin:auto;padding:22px 16px}
+h1{font-size:23px;margin:0 0 6px}
+h2{font-size:17px;margin:0 0 12px}
+h3{font-size:16px;margin:18px 0 8px}
+.sub,.muted{color:var(--muted)}
+.sub{margin:0}
+.muted{font-size:13px;line-height:1.5}
+.notice{
+  border:1px solid #75400f;background:#2b1b0d;color:#ffd7b5;
+  padding:14px;border-radius:12px;margin:18px 0;line-height:1.5
 }
-
-header strong {
-  color: var(--orange);
-  letter-spacing: .7px;
-  font-size: 18px;
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.card{
+  background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;padding:17px;margin-top:18px
 }
-
-.wrap {
-  max-width: 1050px;
-  margin: auto;
-  padding: 22px 16px;
+.metric{font-size:28px;color:var(--orange);font-weight:700}
+input,button,textarea,select{
+  font:inherit;border-radius:9px;padding:12px;border:1px solid var(--line);
+  background:#111;color:white;width:100%;margin:5px 0
 }
-
-h1 { font-size: 23px; margin: 0 0 6px; }
-h2 { font-size: 17px; margin: 0 0 12px; }
-h3 { font-size: 16px; margin: 18px 0 8px; }
-
-.sub, .muted { color: var(--muted); }
-.sub { margin: 0; }
-.muted { font-size: 13px; line-height: 1.5; }
-
-.notice {
-  border: 1px solid #75400f;
-  background: #2b1b0d;
-  color: #ffd7b5;
-  padding: 14px;
-  border-radius: 12px;
-  margin: 18px 0;
-  line-height: 1.5;
+textarea{min-height:120px;resize:vertical}
+button{
+  background:var(--orange);border:0;color:#171717;
+  font-weight:700;cursor:pointer
 }
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 12px;
+button.secondary{background:#333;color:white;border:1px solid #555}
+button:disabled{opacity:.5;cursor:not-allowed}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+.status{font-size:13px;line-height:1.6;overflow-wrap:anywhere;color:#ffd7b5}
+.success{color:var(--green)}
+.error{color:var(--red)}
+.qrbox{
+  background:white;border-radius:12px;padding:12px;margin:12px auto;
+  max-width:280px;text-align:center
 }
-
-.card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 17px;
-  margin-top: 18px;
+.qrbox img{width:100%;height:auto;display:block}
+.code{
+  font-size:25px;letter-spacing:4px;color:var(--orange);
+  font-weight:800;text-align:center;padding:15px;overflow-wrap:anywhere
 }
-
-.metric {
-  font-size: 28px;
-  color: var(--orange);
-  font-weight: 700;
-}
-
-input, button, textarea, select {
-  font: inherit;
-  border-radius: 9px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  background: #111;
-  color: white;
-  width: 100%;
-  margin: 5px 0;
-}
-
-textarea {
-  min-height: 120px;
-  resize: vertical;
-}
-
-button {
-  background: var(--orange);
-  border: 0;
-  color: #171717;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-button.secondary {
-  background: #333;
-  color: white;
-  border: 1px solid #555;
-}
-
-button:disabled {
-  opacity: .5;
-  cursor: not-allowed;
-}
-
-.row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px;
-}
-
-.status {
-  font-size: 13px;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-  color: #ffd7b5;
-}
-
-.success { color: var(--green); }
-.error { color: var(--red); }
-
-.qrbox {
-  background: white;
-  border-radius: 12px;
-  padding: 12px;
-  margin: 12px auto;
-  max-width: 280px;
-  text-align: center;
-}
-
-.qrbox img {
-  width: 100%;
-  height: auto;
-  display: block;
-}
-
-.code {
-  font-size: 25px;
-  letter-spacing: 4px;
-  color: var(--orange);
-  font-weight: 800;
-  text-align: center;
-  padding: 15px;
-  overflow-wrap: anywhere;
-}
-
-.hidden { display: none !important; }
-
-hr {
-  border: 0;
-  border-top: 1px solid var(--line);
-  margin: 20px 0;
-}
-
-footer {
-  padding: 22px;
-  color: var(--muted);
-  font-size: 12px;
-  text-align: center;
-}
-
-@media(max-width: 480px) {
-  .wrap { padding: 18px 12px; }
-  .card { padding: 14px; }
+.hidden{display:none!important}
+hr{border:0;border-top:1px solid var(--line);margin:20px 0}
+footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
+.profile-label{color:var(--orange);font-weight:700;margin-top:12px}
+@media(max-width:480px){
+  .wrap{padding:18px 12px}
+  .card{padding:14px}
 }
 </style>
 </head>
 
 <body>
-
 <header>
   <div class="wrap" style="padding:0 16px">
     <strong>MEDEIROS DIGITAL</strong>
@@ -199,29 +93,10 @@ footer {
 
 <div class="notice">
   <b>Modo de segurança:</b>
-  Shopee e Meta continuam desativadas. O WhatsApp permite conexão e envio de mensagens de teste.
+  Os perfis e as conexões WhatsApp são separados.
+  Shopee e publicação automática ainda não estão ativadas.
   Nenhuma oferta será enviada automaticamente.
 </div>
-
-<div class="grid">
-  <div class="card">
-    <div class="muted">Produtos cadastrados</div>
-    <div class="metric" id="products">—</div>
-  </div>
-  <div class="card">
-    <div class="muted">Destinos cadastrados</div>
-    <div class="metric" id="destinations">—</div>
-  </div>
-  <div class="card">
-    <div class="muted">Itens na fila</div>
-    <div class="metric" id="queue">—</div>
-  </div>
-</div>
-
-<section class="card">
-  <h2>Status das integrações</h2>
-  <div class="status" id="status">Carregando...</div>
-</section>
 
 <section class="card">
   <h2>Acesso administrativo</h2>
@@ -231,11 +106,45 @@ footer {
   <div id="loginmsg" class="status"></div>
 </section>
 
-<section class="card">
-  <h2>WhatsApp — conexão</h2>
-  <p class="muted">Entre primeiro no painel administrativo para acessar a conexão.</p>
+<div id="panel" class="hidden">
 
-  <div id="waArea" class="hidden">
+  <section class="card">
+    <h2>Selecionar perfil</h2>
+    <p class="muted">Escolha qual conta deseja administrar. Cada perfil possui sua própria sessão WhatsApp e seus próprios dados.</p>
+    <select id="profile" onchange="changeProfile()">
+      <option value="rafael">Perfil 1 — Rafael</option>
+      <option value="usuario2">Perfil 2 — Segundo usuário</option>
+    </select>
+    <div class="profile-label" id="profileLabel">Perfil ativo: Rafael</div>
+  </section>
+
+  <div class="grid">
+    <div class="card">
+      <div class="muted">Produtos cadastrados</div>
+      <div class="metric" id="products">0</div>
+    </div>
+    <div class="card">
+      <div class="muted">Destinos cadastrados</div>
+      <div class="metric" id="destinations">0</div>
+    </div>
+    <div class="card">
+      <div class="muted">Itens na fila</div>
+      <div class="metric" id="queue">0</div>
+    </div>
+  </div>
+
+  <section class="card">
+    <h2>Status das integrações</h2>
+    <div class="status" id="status">Carregando...</div>
+  </section>
+
+  <section class="card">
+    <h2>WhatsApp — <span id="waProfileName">Rafael</span></h2>
+    <p class="muted">
+      Conecte o WhatsApp pertencente ao perfil selecionado.
+      A sessão do outro perfil não será utilizada neste envio.
+    </p>
+
     <div class="status" id="waStatus">Consultando conexão...</div>
 
     <h3>Opção 1 — QR Code</h3>
@@ -246,7 +155,7 @@ footer {
       <div class="qrbox">
         <img id="qrImage" alt="QR Code do WhatsApp">
       </div>
-      <p class="muted">Escaneie pelo WhatsApp do celular.</p>
+      <p class="muted">Escaneie pelo WhatsApp do celular correspondente ao perfil.</p>
     </div>
 
     <hr>
@@ -261,59 +170,54 @@ footer {
       <p class="muted">Use a opção de conexão com número de telefone no WhatsApp.</p>
     </div>
 
-    <button class="secondary" onclick="refreshWhatsApp()">Atualizar conexão</button>
-    <button class="secondary" onclick="disconnectWhatsApp()">Desconectar WhatsApp</button>
+    <div class="row">
+      <button class="secondary" onclick="refreshWhatsApp()">Atualizar conexão</button>
+      <button class="secondary" onclick="disconnectWhatsApp()">Desconectar este perfil</button>
+    </div>
+
     <div id="waMessage" class="status"></div>
-  </div>
-</section>
+  </section>
 
-<section class="card">
-  <h2>Enviar mensagem de teste</h2>
-  <p class="muted">
-    Envie uma mensagem individual para um número que autorizou receber o teste.
-    O WhatsApp precisa estar conectado.
-  </p>
+  <section class="card">
+    <h2>Enviar mensagem de teste</h2>
+    <p class="muted">
+      A mensagem será enviada pelo WhatsApp do perfil selecionado.
+      Envie somente para destinatários que autorizaram receber mensagens.
+    </p>
 
-  <label for="testPhone" class="muted">Número de destino</label>
-  <input
-    id="testPhone"
-    inputmode="numeric"
-    placeholder="Ex.: 5511999999999"
-  >
+    <label class="muted" for="testPhone">Número de destino</label>
+    <input id="testPhone" inputmode="numeric" placeholder="Ex.: 5511999999999">
 
-  <label for="testMessage" class="muted">Mensagem</label>
-  <textarea
-    id="testMessage"
-    maxlength="4000"
-    placeholder="Digite sua mensagem de teste..."
-  ></textarea>
+    <label class="muted" for="testMessage">Mensagem</label>
+    <textarea id="testMessage" maxlength="4000" placeholder="Digite sua mensagem de teste..."></textarea>
 
-  <button id="sendButton" onclick="sendTestMessage()">
-    Enviar mensagem de teste
-  </button>
+    <button id="sendButton" onclick="sendTestMessage()">Enviar mensagem de teste</button>
+    <div id="sendResult" class="status"></div>
+  </section>
 
-  <div id="sendResult" class="status"></div>
-</section>
+  <section class="card">
+    <h2>Destinos do perfil</h2>
+    <p class="muted">
+      Cadastro temporário de destinos. A integração e validação de grupos será implementada em uma próxima etapa.
+    </p>
+    <div class="row">
+      <input id="dname" placeholder="Nome do destino">
+      <input id="channel" placeholder="Canal / tipo">
+    </div>
+    <button onclick="addDestination()">Salvar destino</button>
+    <div id="destinationResult" class="status"></div>
+  </section>
 
-<section class="card">
-  <h2>Cadastrar produto manualmente</h2>
-  <div class="row">
-    <input id="pname" placeholder="Nome do produto">
-    <input id="price" placeholder="Preço (opcional)">
-    <input id="url" placeholder="Link de afiliado (opcional)">
-  </div>
-  <button onclick="addProduct()">Salvar produto</button>
-</section>
+  <section class="card">
+    <h2>Integração Shopee</h2>
+    <p class="muted">
+      A busca automática de produtos, comissões, tendências e links de afiliado será configurada nesta área.
+      Ainda não insira suas chaves aqui: primeiro precisamos implementar armazenamento seguro das credenciais e validar a API oficial.
+    </p>
+    <div class="status">Estado: aguardando integração e validação.</div>
+  </section>
 
-<section class="card">
-  <h2>Cadastrar destino (rascunho)</h2>
-  <div class="row">
-    <input id="dname" placeholder="Nome do destino">
-    <input id="channel" placeholder="Canal / tipo">
-  </div>
-  <button onclick="addDestination()">Salvar destino</button>
-</section>
-
+</div>
 </main>
 
 <footer>MEDEIROS DIGITAL • Proteja suas credenciais</footer>
@@ -322,6 +226,7 @@ footer {
 "use strict";
 
 let pass = "";
+let profile = "rafael";
 let waTimer = null;
 let connecting = false;
 
@@ -364,14 +269,18 @@ async function api(endpoint, method = "GET", body) {
     method,
     headers: {
       "Accept": "application/json",
-      "x-admin-password": pass
+      "x-admin-password": pass,
+      "x-profile": profile
     },
     cache: "no-store"
   };
 
   if (body !== undefined) {
     options.headers["Content-Type"] = "application/json";
-    options.body = JSON.stringify(body);
+    options.body = JSON.stringify({
+      ...body,
+      profile
+    });
   }
 
   let response;
@@ -385,42 +294,8 @@ async function api(endpoint, method = "GET", body) {
   return readResponse(response, endpoint);
 }
 
-async function publicApi(endpoint) {
-  let response;
-
-  try {
-    response = await fetch(endpoint, {
-      headers: { "Accept": "application/json" },
-      cache: "no-store"
-    });
-  } catch {
-    throw new Error("Não foi possível conectar ao servidor.");
-  }
-
-  return readResponse(response, endpoint);
-}
-
-async function refresh() {
-  try {
-    const d = await publicApi("/api/status");
-
-    $("products").textContent = d.counts?.products ?? 0;
-    $("destinations").textContent = d.counts?.destinations ?? 0;
-    $("queue").textContent = d.counts?.queue ?? 0;
-
-    $("status").textContent =
-      "Shopee: " + (d.integrations?.shopee || "indisponível") +
-      " | Meta Groups: " + (d.integrations?.metaGroups || "indisponível") +
-      " | WhatsApp: " + (d.whatsapp || "não iniciado") +
-      " — " + (d.note || "");
-
-  } catch (error) {
-    showMessage("status", error.message, "error");
-  }
-}
-
 async function login() {
-  const password = $("password").value;
+  const password = $("password").value.trim();
 
   if (!password) {
     showMessage("loginmsg", "Digite sua senha administrativa.", "error");
@@ -431,16 +306,65 @@ async function login() {
   $("loginButton").disabled = true;
 
   try {
-    await api("/api/data");
-    showMessage("loginmsg", "Senha aceita. Painel liberado.", "success");
-    $("waArea").classList.remove("hidden");
-    await refreshWhatsApp();
+    await api("/api/profiles");
+    $("panel").classList.remove("hidden");
+    showMessage("loginmsg", "Acesso autorizado.", "success");
+    await loadProfile();
   } catch (error) {
     pass = "";
-    $("waArea").classList.add("hidden");
+    $("panel").classList.add("hidden");
     showMessage("loginmsg", error.message, "error");
   } finally {
     $("loginButton").disabled = false;
+  }
+}
+
+async function changeProfile() {
+  profile = $("profile").value;
+  stopWAPolling();
+
+  $("profileLabel").textContent =
+    "Perfil ativo: " + getProfileName();
+
+  $("waProfileName").textContent = getProfileName();
+
+  $("qrArea").classList.add("hidden");
+  $("pairArea").classList.add("hidden");
+  $("qrImage").removeAttribute("src");
+  $("pairCode").textContent = "";
+  $("sendResult").textContent = "";
+  $("waMessage").textContent = "";
+
+  await loadProfile();
+}
+
+function getProfileName() {
+  return profile === "rafael"
+    ? "Rafael"
+    : "Segundo usuário";
+}
+
+async function loadProfile() {
+  await refresh();
+  await refreshWhatsApp();
+}
+
+async function refresh() {
+  try {
+    const d = await api("/api/status");
+
+    $("products").textContent = d.counts?.products ?? 0;
+    $("destinations").textContent = d.counts?.destinations ?? 0;
+    $("queue").textContent = d.counts?.queue ?? 0;
+
+    $("status").textContent =
+      "Perfil: " + getProfileName() +
+      " | Shopee: " + (d.integrations?.shopee || "indisponível") +
+      " | WhatsApp: " + (d.whatsapp || "não iniciado") +
+      " | " + (d.note || "");
+
+  } catch (error) {
+    showMessage("status", error.message, "error");
   }
 }
 
@@ -451,10 +375,13 @@ async function connectQR() {
   $("qrButton").disabled = true;
   $("qrArea").classList.add("hidden");
 
-  showMessage("waMessage", "Solicitando inicialização do WhatsApp...");
+  showMessage("waMessage", "Solicitando conexão para " + getProfileName() + "...");
 
   try {
-    const d = await api("/api/whatsapp/connect", "POST", { method: "qr" });
+    const d = await api("/api/whatsapp/connect", "POST", {
+      method: "qr"
+    });
+
     showMessage("waMessage", d.message || "Inicialização solicitada.");
     await refreshWhatsApp();
     startWAPolling();
@@ -469,13 +396,13 @@ async function connectQR() {
 async function connectPairing() {
   const phone = $("phone").value.replace(/\D/g, "");
 
-  if (!phone) {
-    showMessage("waMessage", "Informe o telefone com código do país e DDD.", "error");
+  if (!/^\d{12,13}$/.test(phone)) {
+    showMessage("waMessage", "Informe o telefone com país e DDD.", "error");
     return;
   }
 
   $("pairButton").disabled = true;
-  showMessage("waMessage", "Solicitando código de pareamento...");
+  showMessage("waMessage", "Solicitando código...");
 
   try {
     const d = await api("/api/whatsapp/connect", "POST", {
@@ -504,7 +431,8 @@ async function refreshWhatsApp() {
   try {
     const d = await api("/api/whatsapp");
 
-    $("waStatus").textContent = "Estado da conexão: " + d.status;
+    $("waStatus").textContent =
+      "WhatsApp de " + getProfileName() + ": " + d.status;
 
     if (d.qr) {
       $("qrImage").src = d.qr;
@@ -517,6 +445,8 @@ async function refreshWhatsApp() {
     if (d.pairingCode) {
       $("pairCode").textContent = d.pairingCode;
       $("pairArea").classList.remove("hidden");
+    } else {
+      $("pairArea").classList.add("hidden");
     }
 
     if (d.status === "ready") {
@@ -527,8 +457,10 @@ async function refreshWhatsApp() {
       stopWAPolling();
     } else if (d.status === "qr") {
       showMessage("waMessage", "QR Code disponível. Escaneie pelo celular.", "success");
-    } else if (d.status === "starting") {
-      showMessage("waMessage", "WhatsApp iniciando. Aguarde...");
+    } else if (d.status === "starting" || d.status === "pairing") {
+      showMessage("waMessage", "Conexão inicializando. Aguarde...");
+    } else {
+      showMessage("waMessage", "WhatsApp desconectado.");
     }
   } catch (error) {
     showMessage("waMessage", error.message, "error");
@@ -537,7 +469,10 @@ async function refreshWhatsApp() {
 
 function startWAPolling() {
   stopWAPolling();
-  waTimer = setInterval(refreshWhatsApp, 4000);
+  waTimer = setInterval(async () => {
+    await refreshWhatsApp();
+    await refresh();
+  }, 4000);
 }
 
 function stopWAPolling() {
@@ -548,15 +483,16 @@ function stopWAPolling() {
 }
 
 async function disconnectWhatsApp() {
-  if (!confirm("Deseja desconectar o WhatsApp?")) return;
+  if (!confirm("Deseja desconectar o WhatsApp deste perfil?")) return;
 
   try {
     await api("/api/whatsapp/disconnect", "POST", {});
     $("qrArea").classList.add("hidden");
     $("pairArea").classList.add("hidden");
-    showMessage("waMessage", "WhatsApp desconectado.");
     stopWAPolling();
+    showMessage("waMessage", "WhatsApp desconectado.");
     await refreshWhatsApp();
+    await refresh();
   } catch (error) {
     showMessage("waMessage", error.message, "error");
   }
@@ -567,16 +503,16 @@ async function sendTestMessage() {
   const message = $("testMessage").value.trim();
 
   if (!/^\d{12,13}$/.test(phone)) {
-    showMessage("sendResult", "Informe o número com país e DDD. Ex.: 5511999999999", "error");
+    showMessage("sendResult", "Informe o número com país e DDD.", "error");
     return;
   }
 
   if (!message) {
-    showMessage("sendResult", "Digite a mensagem que deseja enviar.", "error");
+    showMessage("sendResult", "Digite uma mensagem.", "error");
     return;
   }
 
-  if (!confirm("Confirma o envio desta mensagem para o número informado?")) {
+  if (!confirm("Enviar pelo WhatsApp de " + getProfileName() + "?")) {
     return;
   }
 
@@ -601,37 +537,33 @@ async function sendTestMessage() {
   }
 }
 
-async function addProduct() {
-  try {
-    await api("/api/products", "POST", {
-      name: $("pname").value,
-      price: $("price").value,
-      affiliateUrl: $("url").value
-    });
-
-    showMessage("loginmsg", "Produto salvo com sucesso.", "success");
-    $("pname").value = "";
-    $("price").value = "";
-    $("url").value = "";
-    await refresh();
-  } catch (error) {
-    showMessage("loginmsg", error.message, "error");
-  }
-}
-
 async function addDestination() {
+  const name = $("dname").value.trim();
+  const channel = $("channel").value.trim();
+
+  if (!name || !channel) {
+    showMessage("destinationResult", "Informe nome e canal.", "error");
+    return;
+  }
+
   try {
     await api("/api/destinations", "POST", {
-      name: $("dname").value,
-      channel: $("channel").value
+      name,
+      channel
     });
 
-    showMessage("loginmsg", "Destino salvo como pendente de validação.", "success");
     $("dname").value = "";
     $("channel").value = "";
+
+    showMessage(
+      "destinationResult",
+      "Destino salvo no perfil " + getProfileName() + ".",
+      "success"
+    );
+
     await refresh();
   } catch (error) {
-    showMessage("loginmsg", error.message, "error");
+    showMessage("destinationResult", error.message, "error");
   }
 }
 
@@ -639,7 +571,7 @@ $("password").addEventListener("keydown", (event) => {
   if (event.key === "Enter") login();
 });
 
-refresh();
+$("profile").addEventListener("change", changeProfile);
 </script>
 
 </body>
