@@ -170,14 +170,17 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
       <div class="row">
         <div>
           <label class="muted" for="autoStart">Horário de início</label>
-          <input id="autoStart" type="time" value="08:00" min="08:00" max="17:59">
+          <input id="autoStart" type="time" value="08:00">
         </div>
         <div>
           <label class="muted" for="autoEnd">Horário de encerramento</label>
-          <input id="autoEnd" type="time" value="18:00" disabled>
+          <input id="autoEnd" type="time" value="18:00">
         </div>
       </div>
-      <p class="small">O encerramento está definido para 18:00.</p>
+      <p class="small">
+        Você pode escolher qualquer horário, inclusive atravessando a meia-noite.
+        Exemplo: início às 20:00 e encerramento às 02:00.
+      </p>
     </div>
 
     <div class="info-box">
@@ -668,10 +671,13 @@ async function loadAutomation() {
     const result = await api("/api/automation");
     const automation = result.automation || {};
 
-    const start = Array.isArray(automation.scheduleTimes) &&
-      automation.scheduleTimes.length
-      ? automation.scheduleTimes[0]
-      : "08:00";
+    const start = automation.startTime ||
+      (Array.isArray(automation.scheduleTimes) &&
+       automation.scheduleTimes.length
+        ? automation.scheduleTimes[0]
+        : "08:00");
+
+    const end = automation.endTime || "18:00";
 
     const intervalSeconds = Number(
       automation.intervalSeconds ||
@@ -679,6 +685,7 @@ async function loadAutomation() {
     );
 
     $("autoStart").value = start;
+    $("autoEnd").value = end;
     $("autoInterval").value = String(intervalSeconds || 1800);
 
     $("automationStatus").textContent =
@@ -687,7 +694,7 @@ async function loadAutomation() {
     $("automationStatus").className =
       automation.active ? "automation-status success" : "automation-status";
 
-    let details = "Horário: " + start + " até 18:00";
+    let details = "Horário: " + start + " até " + end;
     details += " | Intervalo: " + formatInterval(intervalSeconds || 1800);
 
     if (automation.lastSentAt) {
@@ -732,7 +739,6 @@ async function loadWhatsAppGroups() {
       return;
     }
 
-    // Recupera os grupos já selecionados no servidor.
     const automationResult = await api("/api/automation");
     const destinationIds = automationResult.automation?.destinationIds || [];
     const selectedGroupIds = await getSavedGroupIds(destinationIds);
@@ -860,18 +866,25 @@ async function saveAutomation(activate) {
   const intervalSeconds = Number($("autoInterval").value);
   const selectedGroups = getSelectedGroupIds();
 
-  if (!startTime) {
-    showMessage("automationMessage", "Informe o horário inicial.", "error");
+  const validTime = value =>
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+
+  if (!validTime(startTime)) {
+    showMessage("automationMessage", "Informe um horário inicial válido.", "error");
     return;
   }
 
-  if (startTime < "08:00" || startTime >= "18:00") {
-    showMessage("automationMessage", "O início precisa ser entre 08:00 e 17:59.", "error");
+  if (!validTime(endTime)) {
+    showMessage("automationMessage", "Informe um horário de encerramento válido.", "error");
     return;
   }
 
-  if (endTime !== "18:00") {
-    showMessage("automationMessage", "O encerramento é fixo às 18:00.", "error");
+  if (startTime === endTime) {
+    showMessage(
+      "automationMessage",
+      "O início e o encerramento não podem ser iguais.",
+      "error"
+    );
     return;
   }
 
@@ -899,6 +912,8 @@ async function saveAutomation(activate) {
     const currentlyActive = Boolean(current.automation?.active);
 
     await api("/api/automation", "POST", {
+      startTime,
+      endTime,
       scheduleTimes: [startTime],
       intervalSeconds,
       destinationIds,
@@ -931,8 +946,15 @@ async function pauseAutomation() {
     const current = await api("/api/automation");
     const automation = current.automation || {};
 
+    const startTime = automation.startTime ||
+      automation.scheduleTimes?.[0] || "08:00";
+
+    const endTime = automation.endTime || "18:00";
+
     await api("/api/automation", "POST", {
-      scheduleTimes: automation.scheduleTimes || ["08:00"],
+      startTime,
+      endTime,
+      scheduleTimes: [startTime],
       intervalSeconds: Number(
         automation.intervalSeconds ||
         (Number(automation.intervalMinutes || 30) * 60)
