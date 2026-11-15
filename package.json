@@ -2,10 +2,14 @@
   "name": "medeiros-digital-shopee-affiliate-robot",
   "version": "1.0.0",
   "private": true,
-  "description": "Starter dashboard for an authorized Shopee affiliate workflow",
-  "main": "src/server.js",
-  "scripts": { "start": "node src/server.js" },
-  "engines": { "node": ">=20" },
+  "description": "Starter dashboard",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "express": "^4.21.2",
     "helmet": "^8.0.0"
