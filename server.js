@@ -3,9 +3,7 @@ const express = require("express");
 const helmet = require("helmet");
 const fs = require("fs");
 const path = require("path");
-const { Client, LocalAuth } = require("whatsapp-web.js");
 const QRCode = require("qrcode");
-const puppeteer = require("puppeteer");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,6 +11,7 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "store.json");
 const INDEX_FILE = path.join(__dirname, "index.html");
+const AUTH_DIR = path.join(__dirname, ".baileys_auth");
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "200kb" }));
@@ -82,7 +81,7 @@ function adminOnly(req, res, next) {
 }
 
 // =====================================
-// WHATSAPP
+// WHATSAPP - BAILEYS
 // =====================================
 
 let whatsappClient = null;
@@ -90,163 +89,142 @@ let whatsappStatus = "disconnected";
 let whatsappQR = null;
 let whatsappPairingCode = null;
 let whatsappInitPromise = null;
+let whatsappAuthState = null;
 let lastPairingRequest = 0;
+let manualDisconnect = false;
 
 function clearWhatsAppData() {
   whatsappQR = null;
   whatsappPairingCode = null;
 }
 
-function getChromePath() {
-  const chromePath =
-    process.env.PUPPETEER_EXECUTABLE_PATH ||
-    puppeteer.executablePath();
-
-  if (!fs.existsSync(chromePath)) {
-    throw new Error(
-      "Chrome não encontrado no caminho configurado: " + chromePath
-    );
-  }
-
-  return chromePath;
-}
-
-// Inicialização do WhatsApp sem duplicidade
-function startWhatsApp() {
-  if (whatsappStatus === "ready") {
-    return Promise.resolve();
+async function startWhatsApp() {
+  if (whatsappClient) {
+    return whatsappClient;
   }
 
   if (whatsappInitPromise) {
     return whatsappInitPromise;
   }
 
-  if (whatsappClient) {
-    return Promise.resolve();
-  }
-
   whatsappStatus = "starting";
+  manualDisconnect = false;
   clearWhatsAppData();
 
-  let chromePath;
-
-  try {
-    chromePath = getChromePath();
-    console.log("Chrome encontrado:", chromePath);
-  } catch (error) {
-    whatsappStatus = "error";
-    console.error("Erro ao localizar Chrome:", error.stack || error.message);
-    return Promise.reject(error);
-  }
-
-  const client = new Client({
-    authStrategy: new LocalAuth({
-      clientId: "medeiros-digital",
-      dataPath: path.join(__dirname, ".wwebjs_auth")
-    }),
-
-    puppeteer: {
-      executablePath: chromePath,
-      headless: true,
-      timeout: 120000,
-      protocolTimeout: 180000,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--disable-extensions",
-        "--disable-background-networking",
-        "--disable-background-timer-throttling",
-        "--disable-renderer-backgrounding",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-software-rasterizer",
-        "--disable-features=Translate,BackForwardCache,IsolateOrigins,site-per-process",
-        "--renderer-process-limit=1",
-        "--no-first-run",
-        "--no-default-browser-check"
-      ]
-    }
-  });
-
-  whatsappClient = client;
-
-  client.on("qr", async (qr) => {
+  const initPromise = (async () => {
     try {
-      whatsappQR = await QRCode.toDataURL(qr);
-      whatsappStatus = "qr";
-      console.log("QR Code do WhatsApp disponível.");
-    } catch (error) {
-      whatsappStatus = "error";
-      console.error("Erro ao gerar QR Code:", error.stack || error.message);
-    }
-  });
+      // Importação compatível com versões ESM do Baileys
+      const baileys = await import("@whiskeysockets/baileys");
 
-  client.on("authenticated", () => {
-    whatsappStatus = "authenticated";
-    clearWhatsAppData();
-    console.log("WhatsApp autenticado.");
-  });
+      const makeWASocket = baileys.default || baileys.makeWASocket;
+      const useMultiFileAuthState = baileys.useMultiFileAuthState;
+      const Browsers = baileys.Browsers;
 
-  client.on("ready", () => {
-    whatsappStatus = "ready";
-    clearWhatsAppData();
-    console.log("WhatsApp conectado e pronto.");
-  });
-
-  client.on("auth_failure", (message) => {
-    whatsappStatus = "error";
-    clearWhatsAppData();
-    console.error("Falha na autenticação:", message);
-  });
-
-  client.on("disconnected", (reason) => {
-    whatsappStatus = "disconnected";
-    clearWhatsAppData();
-
-    if (whatsappClient === client) {
-      whatsappClient = null;
-    }
-
-    console.log("WhatsApp desconectado:", reason);
-  });
-
-  const initPromise = Promise.resolve()
-    .then(() => client.initialize())
-    .catch(async (error) => {
-      whatsappStatus = "error";
-
-      if (whatsappClient === client) {
-        whatsappClient = null;
+      if (!makeWASocket || !useMultiFileAuthState) {
+        throw new Error("Não foi possível carregar as funções do Baileys.");
       }
 
+      fs.mkdirSync(AUTH_DIR, { recursive: true });
+
+      const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+      whatsappAuthState = state;
+
+      const socket = makeWASocket({
+        auth: state,
+        browser: Browsers
+          ? Browsers.macOS("MEDEIROS DIGITAL")
+          : undefined,
+        printQRInTerminal: false,
+        syncFullHistory: false,
+        markOnlineOnConnect: false,
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 60000,
+        retryRequestDelayMs: 250,
+        generateHighQualityLinkPreview: false
+      });
+
+      whatsappClient = socket;
+
+      socket.ev.on("creds.update", saveCreds);
+
+      socket.ev.on("connection.update", async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+          try {
+            whatsappQR = await QRCode.toDataURL(qr);
+            whatsappStatus = "qr";
+            console.log("QR Code do WhatsApp disponível.");
+          } catch (error) {
+            whatsappStatus = "error";
+            console.error("Erro ao gerar QR:", error.stack || error.message);
+          }
+        }
+
+        if (connection === "connecting") {
+          if (whatsappStatus !== "pairing") {
+            whatsappStatus = "starting";
+          }
+          console.log("Conectando ao WhatsApp...");
+        }
+
+        if (connection === "open") {
+          whatsappStatus = "ready";
+          clearWhatsAppData();
+          console.log("WhatsApp conectado e pronto.");
+        }
+
+        if (connection === "close") {
+          const statusCode =
+            lastDisconnect?.error?.output?.statusCode;
+
+          const loggedOut =
+            statusCode === baileys.DisconnectReason?.loggedOut;
+
+          whatsappClient = null;
+          clearWhatsAppData();
+
+          if (manualDisconnect) {
+            whatsappStatus = "disconnected";
+          } else if (loggedOut) {
+            whatsappStatus = "disconnected";
+            console.log("Sessão do WhatsApp encerrada. Será necessário conectar novamente.");
+          } else {
+            whatsappStatus = "error";
+            console.error(
+              "Conexão WhatsApp encerrada:",
+              lastDisconnect?.error?.message || "Motivo não informado"
+            );
+          }
+        }
+      });
+
+      console.log("Cliente Baileys inicializado.");
+      return socket;
+
+    } catch (error) {
+      whatsappClient = null;
+      whatsappStatus = "error";
       clearWhatsAppData();
 
       console.error(
-        "Erro completo ao iniciar WhatsApp:",
+        "Erro ao iniciar Baileys:",
         error.stack || error.message
       );
 
-      try {
-        await client.destroy();
-      } catch (destroyError) {
-        console.error(
-          "Erro ao encerrar navegador:",
-          destroyError.message
-        );
-      }
-
       throw error;
-    })
-    .finally(() => {
-      if (whatsappInitPromise === initPromise) {
-        whatsappInitPromise = null;
-      }
-    });
+    }
+  })();
 
   whatsappInitPromise = initPromise;
 
-  return initPromise;
+  try {
+    return await initPromise;
+  } finally {
+    if (whatsappInitPromise === initPromise) {
+      whatsappInitPromise = null;
+    }
+  }
 }
 
 // =====================================
@@ -328,7 +306,7 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
     if (method === "qr") {
       startWhatsApp().catch((error) => {
         console.error(
-          "Falha na inicialização em segundo plano:",
+          "Falha na inicialização:",
           error.stack || error.message
         );
       });
@@ -368,7 +346,7 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
       return res.status(202).json({
         ok: true,
         status: whatsappStatus,
-        message: "WhatsApp está inicializando. Aguarde e tente novamente."
+        message: "WhatsApp está inicializando. Aguarde alguns segundos e tente novamente."
       });
     }
 
@@ -380,11 +358,23 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
       });
     }
 
-    if (whatsappStatus !== "qr" && whatsappStatus !== "ready") {
+    if (
+      whatsappStatus !== "qr" &&
+      whatsappStatus !== "starting" &&
+      whatsappStatus !== "pairing"
+    ) {
       return res.status(409).json({
         ok: false,
         status: whatsappStatus,
-        error: "A conexão ainda não está pronta. Aguarde."
+        error: "A conexão ainda não está pronta. Tente novamente."
+      });
+    }
+
+    if (whatsappAuthState?.creds?.registered) {
+      return res.status(409).json({
+        ok: false,
+        status: whatsappStatus,
+        error: "Esta sessão já possui registro. Tente conectar pelo QR Code."
       });
     }
 
@@ -423,15 +413,20 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
 
 app.post("/api/whatsapp/disconnect", adminOnly, async (_req, res) => {
   try {
-    const client = whatsappClient;
+    const socket = whatsappClient;
 
+    manualDisconnect = true;
     whatsappClient = null;
     whatsappInitPromise = null;
     whatsappStatus = "disconnected";
     clearWhatsAppData();
 
-    if (client) {
-      await client.destroy();
+    if (socket) {
+      try {
+        socket.end(undefined);
+      } catch (error) {
+        console.error("Erro ao encerrar socket:", error.message);
+      }
     }
 
     return res.json({
