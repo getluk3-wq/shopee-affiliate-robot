@@ -8,22 +8,14 @@
 <title>MEDEIROS DIGITAL | Shopee Affiliate Robot</title>
 
 <style>
-:root {
-  color-scheme: dark;
-  --bg:#101010;
-  --panel:#1b1b1b;
-  --line:#303030;
-  --orange:#ff7a18;
-  --muted:#aaa;
-  --white:#f7f7f7;
-  --green:#36c982;
-  --red:#ff5757;
+:root{
+  color-scheme:dark;
+  --bg:#101010;--panel:#1b1b1b;--line:#303030;
+  --orange:#ff7a18;--muted:#aaa;--white:#f7f7f7;
+  --green:#36c982;--red:#ff5757;
 }
 *{box-sizing:border-box}
-body{
-  margin:0;background:var(--bg);color:var(--white);
-  font:15px system-ui,Arial,sans-serif
-}
+body{margin:0;background:var(--bg);color:var(--white);font:15px system-ui,Arial,sans-serif}
 header{padding:22px 18px;border-bottom:1px solid var(--line);background:#151515}
 header strong{color:var(--orange);letter-spacing:.7px;font-size:18px}
 .wrap{max-width:1050px;margin:auto;padding:22px 16px}
@@ -33,57 +25,39 @@ h3{font-size:16px;margin:18px 0 8px}
 .sub,.muted{color:var(--muted)}
 .sub{margin:0}
 .muted{font-size:13px;line-height:1.5}
-.notice{
-  border:1px solid #75400f;background:#2b1b0d;color:#ffd7b5;
-  padding:14px;border-radius:12px;margin:18px 0;line-height:1.5
-}
+.notice{border:1px solid #75400f;background:#2b1b0d;color:#ffd7b5;padding:14px;border-radius:12px;margin:18px 0;line-height:1.5}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
-.card{
-  background:var(--panel);border:1px solid var(--line);
-  border-radius:14px;padding:17px;margin-top:18px
-}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:17px;margin-top:18px}
 .metric{font-size:28px;color:var(--orange);font-weight:700}
-input,button,textarea,select{
-  font:inherit;border-radius:9px;padding:12px;border:1px solid var(--line);
-  background:#111;color:white;width:100%;margin:5px 0
-}
+input,button,textarea,select{font:inherit;border-radius:9px;padding:12px;border:1px solid var(--line);background:#111;color:white;width:100%;margin:5px 0}
 textarea{min-height:120px;resize:vertical}
-button{
-  background:var(--orange);border:0;color:#171717;
-  font-weight:700;cursor:pointer
-}
+button{background:var(--orange);border:0;color:#171717;font-weight:700;cursor:pointer}
 button.secondary{background:#333;color:white;border:1px solid #555}
 button:disabled{opacity:.5;cursor:not-allowed}
 .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
 .status{font-size:13px;line-height:1.6;overflow-wrap:anywhere;color:#ffd7b5;margin-top:8px}
 .success{color:var(--green)}
 .error{color:var(--red)}
-.qrbox{
-  background:white;border-radius:12px;padding:12px;margin:12px auto;
-  max-width:280px;text-align:center
-}
+.qrbox{background:white;border-radius:12px;padding:12px;margin:12px auto;max-width:280px;text-align:center}
 .qrbox img{width:100%;height:auto;display:block}
-.code{
-  font-size:25px;letter-spacing:4px;color:var(--orange);
-  font-weight:800;text-align:center;padding:15px;overflow-wrap:anywhere
-}
+.code{font-size:25px;letter-spacing:4px;color:var(--orange);font-weight:800;text-align:center;padding:15px;overflow-wrap:anywhere}
 .hidden{display:none!important}
 hr{border:0;border-top:1px solid var(--line);margin:20px 0}
 footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 .profile-label{color:var(--orange);font-weight:700;margin-top:12px}
-.product{
-  display:grid;grid-template-columns:100px 1fr;gap:13px;
-  border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:12px
-}
-.product img{
-  width:100px;height:100px;object-fit:contain;
-  background:#fff;border-radius:8px
-}
+.product{display:grid;grid-template-columns:100px 1fr;gap:13px;border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:12px}
+.product img{width:100px;height:100px;object-fit:contain;background:#fff;border-radius:8px}
 .product h3{margin:0 0 8px}
 .product p{margin:4px 0;font-size:13px;color:#ccc}
 .product a{color:#ff9b52;font-weight:700;text-decoration:none}
 .product a:hover{text-decoration:underline}
-.small-button{padding:8px;font-size:13px;margin-top:7px}
+.group-list{display:grid;gap:8px;margin-top:12px}
+.group-item{display:flex;align-items:center;gap:10px;background:#111;border:1px solid var(--line);padding:11px;border-radius:9px}
+.group-item input{width:20px;height:20px;margin:0;accent-color:var(--orange);flex-shrink:0}
+.group-item span{overflow-wrap:anywhere;font-size:14px}
+.info-box{background:#111;border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px}
+.automation-status{font-weight:700;color:var(--orange)}
+.small{font-size:12px;color:var(--muted)}
 @media(max-width:480px){
   .wrap{padding:18px 12px}
   .card{padding:14px}
@@ -102,15 +76,13 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 </header>
 
 <main class="wrap">
-
 <h1>Painel de controle</h1>
 <p class="sub">Sistema de ofertas e afiliados.</p>
 
 <div class="notice">
-  <b>Modo de segurança:</b>
-  Os perfis e as conexões WhatsApp são separados.
-  As credenciais Shopee também são separadas por perfil.
-  Nenhuma oferta será publicada automaticamente nesta etapa.
+  <b>Automação controlada:</b>
+  cada perfil possui configurações independentes.
+  Nenhuma publicação automática será iniciada sem sua ativação e seleção dos grupos.
 </div>
 
 <section class="card">
@@ -125,7 +97,7 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 
   <section class="card">
     <h2>Selecionar perfil</h2>
-    <p class="muted">Cada perfil possui seus próprios dados, WhatsApp e credenciais Shopee.</p>
+    <p class="muted">Cada perfil possui seus próprios dados, WhatsApp, Shopee e automação.</p>
     <select id="profile">
       <option value="rafael">Perfil 1 — Rafael</option>
       <option value="usuario2">Perfil 2 — Segundo usuário</option>
@@ -155,10 +127,7 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 
   <section class="card">
     <h2>WhatsApp — <span id="waProfileName">Rafael</span></h2>
-    <p class="muted">
-      Conecte o WhatsApp pertencente ao perfil selecionado.
-    </p>
-
+    <p class="muted">Conecte o WhatsApp pertencente ao perfil selecionado.</p>
     <div class="status" id="waStatus">Consultando conexão...</div>
 
     <h3>Opção 1 — QR Code</h3>
@@ -166,16 +135,14 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
     <button id="qrButton" onclick="connectQR()">Gerar QR Code</button>
 
     <div id="qrArea" class="hidden">
-      <div class="qrbox">
-        <img id="qrImage" alt="QR Code do WhatsApp">
-      </div>
+      <div class="qrbox"><img id="qrImage" alt="QR Code do WhatsApp"></div>
       <p class="muted">Escaneie pelo WhatsApp do celular correspondente ao perfil.</p>
     </div>
 
     <hr>
 
     <h3>Opção 2 — Código de pareamento</h3>
-    <p class="muted">Informe o número com código do país e DDD. Exemplo: 5511999999999.</p>
+    <p class="muted">Informe o número com código do país e DDD.</p>
     <input id="phone" inputmode="numeric" placeholder="55 + DDD + número">
     <button id="pairButton" onclick="connectPairing()">Solicitar código</button>
 
@@ -188,33 +155,106 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
       <button class="secondary" onclick="refreshWhatsApp()">Atualizar conexão</button>
       <button class="secondary" onclick="disconnectWhatsApp()">Desconectar este perfil</button>
     </div>
-
     <div id="waMessage" class="status"></div>
+  </section>
+
+  <!-- AUTOMAÇÃO -->
+  <section class="card">
+    <h2>Automação de ofertas Shopee</h2>
+    <p class="muted">
+      Configure os horários, o intervalo e os grupos que receberão as ofertas.
+      As configurações são independentes para cada perfil.
+    </p>
+
+    <div class="info-box">
+      <div class="muted">Janela diária de funcionamento</div>
+      <div class="row">
+        <div>
+          <label class="muted" for="autoStart">Horário de início</label>
+          <input id="autoStart" type="time" value="08:00" min="08:00" max="17:59">
+        </div>
+        <div>
+          <label class="muted" for="autoEnd">Horário de encerramento</label>
+          <input id="autoEnd" type="time" value="18:00" disabled>
+        </div>
+      </div>
+      <p class="small">O encerramento está definido para 18:00.</p>
+    </div>
+
+    <div class="info-box">
+      <label class="muted" for="autoInterval">Intervalo entre os envios</label>
+      <select id="autoInterval">
+        <option value="5">A cada 5 minutos</option>
+        <option value="10">A cada 10 minutos</option>
+        <option value="15">A cada 15 minutos</option>
+        <option value="20">A cada 20 minutos</option>
+        <option value="30" selected>A cada 30 minutos</option>
+        <option value="45">A cada 45 minutos</option>
+        <option value="60">A cada 1 hora</option>
+        <option value="90">A cada 1 hora e 30 minutos</option>
+        <option value="120">A cada 2 horas</option>
+      </select>
+      <p class="small">
+        Não existe limite diário fixo de ofertas. O intervalo escolhido controla a frequência.
+      </p>
+    </div>
+
+    <hr>
+
+    <h3>Grupos do WhatsApp</h3>
+    <p class="muted">
+      Carregue os grupos dos quais este WhatsApp participa e marque somente
+      aqueles que autorizaram receber as divulgações.
+    </p>
+
+    <button class="secondary" id="loadGroupsButton" onclick="loadWhatsAppGroups()">
+      Carregar meus grupos do WhatsApp
+    </button>
+
+    <div id="groupsMessage" class="status"></div>
+    <div id="groupsList" class="group-list"></div>
+
+    <hr>
+
+    <h3>Controle da automação</h3>
+    <div class="info-box">
+      <div class="muted">Estado deste perfil</div>
+      <div id="automationStatus" class="automation-status">Consultando...</div>
+      <div id="automationDetails" class="muted"></div>
+    </div>
+
+    <div class="row">
+      <button id="saveAutomationButton" class="secondary" onclick="saveAutomation(false)">
+        Salvar configurações
+      </button>
+      <button id="startAutomationButton" onclick="saveAutomation(true)">
+        Ativar automação
+      </button>
+    </div>
+
+    <button id="pauseAutomationButton" class="secondary" onclick="pauseAutomation()">
+      Pausar automação
+    </button>
+
+    <div id="automationMessage" class="status"></div>
   </section>
 
   <section class="card">
     <h2>Enviar mensagem de teste</h2>
-    <p class="muted">
-      Envie somente para destinatários que autorizaram receber mensagens.
-    </p>
-
+    <p class="muted">Envie somente para destinatários que autorizaram receber mensagens.</p>
     <label class="muted" for="testPhone">Número de destino</label>
     <input id="testPhone" inputmode="numeric" placeholder="Ex.: 5511999999999">
-
     <label class="muted" for="testMessage">Mensagem</label>
     <textarea id="testMessage" maxlength="4000" placeholder="Digite sua mensagem de teste..."></textarea>
-
     <button id="sendButton" onclick="sendTestMessage()">Enviar mensagem de teste</button>
     <div id="sendResult" class="status"></div>
   </section>
 
   <section class="card">
     <h2>Destinos do perfil</h2>
-    <p class="muted">
-      Cadastre o nome e a identificação do destino para organizar suas futuras divulgações.
-    </p>
+    <p class="muted">Cadastro manual de destinos para organização.</p>
     <input id="dname" placeholder="Nome do destino">
-    <input id="channel" placeholder="Número ou identificação do grupo">
+    <input id="channel" placeholder="Identificação do grupo WhatsApp">
     <button onclick="addDestination()">Salvar destino</button>
     <div id="destinationResult" class="status"></div>
   </section>
@@ -226,25 +266,16 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
       Nunca compartilhe sua Secret com outras pessoas.
     </p>
 
-    <div id="shopeeCredentialStatus" class="status">
-      Verificando credenciais...
-    </div>
+    <div id="shopeeCredentialStatus" class="status">Verificando credenciais...</div>
 
     <h3>App ID</h3>
     <input id="shopeeAppId" inputmode="numeric" placeholder="Digite o App ID da Shopee">
 
     <h3>Secret</h3>
-    <input id="shopeeSecret" type="password" autocomplete="new-password"
-      placeholder="Digite a Secret da Shopee">
+    <input id="shopeeSecret" type="password" autocomplete="new-password" placeholder="Digite a Secret da Shopee">
 
-    <button id="saveShopeeButton" onclick="saveShopeeCredentials()">
-      Salvar credenciais Shopee
-    </button>
-
-    <button id="testShopeeButton" class="secondary" onclick="testShopee()">
-      Testar conexão Shopee
-    </button>
-
+    <button id="saveShopeeButton" onclick="saveShopeeCredentials()">Salvar credenciais Shopee</button>
+    <button id="testShopeeButton" class="secondary" onclick="testShopee()">Testar conexão Shopee</button>
     <div id="shopeeMessage" class="status"></div>
 
     <hr>
@@ -252,11 +283,9 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
     <h2>Pesquisar ofertas</h2>
     <p class="muted">
       Pesquise produtos disponíveis na API de afiliados Shopee.
-      A busca utiliza ordenação por comissão, conforme os parâmetros aceitos pela API.
     </p>
 
     <input id="searchKeyword" placeholder="Ex.: fone bluetooth, cozinha, celular...">
-
     <div class="row">
       <select id="searchLimit">
         <option value="10">10 produtos</option>
@@ -265,7 +294,6 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
       </select>
       <button id="searchButton" onclick="searchShopeeProducts()">Pesquisar ofertas</button>
     </div>
-
     <div id="searchMessage" class="status"></div>
     <div id="productResults"></div>
   </section>
@@ -282,6 +310,7 @@ let pass = "";
 let profile = "rafael";
 let waTimer = null;
 let connecting = false;
+let loadedGroups = [];
 
 const $ = id => document.getElementById(id);
 
@@ -330,10 +359,7 @@ async function api(endpoint, method = "GET", body) {
 
   if (body !== undefined) {
     options.headers["Content-Type"] = "application/json";
-    options.body = JSON.stringify({
-      ...body,
-      profile
-    });
+    options.body = JSON.stringify({ ...body, profile });
   }
 
   let response;
@@ -346,6 +372,8 @@ async function api(endpoint, method = "GET", body) {
 
   return readResponse(response, endpoint);
 }
+
+// LOGIN
 
 async function login() {
   const password = $("password").value.trim();
@@ -372,6 +400,10 @@ async function login() {
   }
 }
 
+function getProfileName() {
+  return profile === "rafael" ? "Rafael" : "Segundo usuário";
+}
+
 async function changeProfile() {
   profile = $("profile").value;
   stopWAPolling();
@@ -389,18 +421,17 @@ async function changeProfile() {
   $("shopeeAppId").value = "";
   $("shopeeSecret").value = "";
   $("searchKeyword").value = "";
+  $("groupsList").replaceChildren();
+  loadedGroups = [];
 
   await loadProfile();
-}
-
-function getProfileName() {
-  return profile === "rafael" ? "Rafael" : "Segundo usuário";
 }
 
 async function loadProfile() {
   await refresh();
   await refreshWhatsApp();
   await refreshShopeeCredentials();
+  await loadAutomation();
 }
 
 async function refresh() {
@@ -414,11 +445,14 @@ async function refresh() {
     $("status").textContent =
       "Perfil: " + getProfileName() +
       " | Shopee: " + (d.shopee || "indisponível") +
-      " | WhatsApp: " + (d.whatsapp || "não iniciado");
+      " | WhatsApp: " + (d.whatsapp || "não iniciado") +
+      " | Automação: " + (d.automation || "pausada");
   } catch (error) {
     showMessage("status", error.message, "error");
   }
 }
+
+// WHATSAPP
 
 async function connectQR() {
   if (connecting) return;
@@ -559,11 +593,7 @@ async function sendTestMessage() {
   showMessage("sendResult", "Enviando mensagem...");
 
   try {
-    await api("/api/whatsapp/send", "POST", {
-      destination: phone,
-      message
-    });
-
+    await api("/api/whatsapp/send", "POST", { destination: phone, message });
     showMessage("sendResult", "Mensagem enviada.", "success");
   } catch (error) {
     showMessage("sendResult", error.message, "error");
@@ -571,6 +601,8 @@ async function sendTestMessage() {
     $("sendButton").disabled = false;
   }
 }
+
+// DESTINOS
 
 async function addDestination() {
   const name = $("dname").value.trim();
@@ -582,10 +614,7 @@ async function addDestination() {
   }
 
   try {
-    await api("/api/destinations", "POST", {
-      name,
-      groupId: channel
-    });
+    await api("/api/destinations", "POST", { name, groupId: channel });
 
     $("dname").value = "";
     $("channel").value = "";
@@ -594,6 +623,277 @@ async function addDestination() {
     await refresh();
   } catch (error) {
     showMessage("destinationResult", error.message, "error");
+  }
+}
+
+// AUTOMAÇÃO
+
+async function loadAutomation() {
+  try {
+    const result = await api("/api/automation");
+    const automation = result.automation || {};
+
+    const start = Array.isArray(automation.scheduleTimes) &&
+      automation.scheduleTimes.length
+      ? automation.scheduleTimes[0]
+      : "08:00";
+
+    $("autoStart").value = start;
+    $("autoInterval").value = String(automation.intervalMinutes || 30);
+
+    $("automationStatus").textContent =
+      automation.active ? "ATIVA" : "PAUSADA";
+
+    $("automationStatus").className =
+      automation.active ? "automation-status success" : "automation-status";
+
+    let details = "Horário: " + start + " até 18:00";
+    details += " | Intervalo: " + (automation.intervalMinutes || 30) + " minutos";
+
+    if (automation.lastSentAt) {
+      details += " | Último envio: " +
+        new Date(automation.lastSentAt).toLocaleString("pt-BR");
+    }
+
+    if (automation.nextSendAt) {
+      details += " | Próxima tentativa: " +
+        new Date(automation.nextSendAt).toLocaleString("pt-BR");
+    }
+
+    $("automationDetails").textContent = details;
+
+    if (automation.lastError) {
+      showMessage("automationMessage", "Aviso da automação: " + automation.lastError, "error");
+    } else {
+      showMessage("automationMessage", "");
+    }
+
+    $("startAutomationButton").disabled = Boolean(automation.active);
+    $("pauseAutomationButton").disabled = !automation.active;
+
+    // Recarrega a seleção dos grupos já cadastrados.
+    await renderSavedGroupSelection(automation.destinationIds || []);
+  } catch (error) {
+    showMessage("automationMessage", error.message, "error");
+    $("automationStatus").textContent = "Não foi possível consultar";
+  }
+}
+
+async function loadWhatsAppGroups() {
+  $("loadGroupsButton").disabled = true;
+  showMessage("groupsMessage", "Buscando grupos do WhatsApp...");
+
+  try {
+    const result = await api("/api/whatsapp/groups");
+
+    loadedGroups = Array.isArray(result.groups) ? result.groups : [];
+
+    if (!loadedGroups.length) {
+      $("groupsList").replaceChildren();
+      showMessage("groupsMessage", "Nenhum grupo foi encontrado neste WhatsApp.");
+      return;
+    }
+
+    await renderGroupCheckboxes([]);
+    showMessage(
+      "groupsMessage",
+      loadedGroups.length + " grupo(s) carregado(s). Marque os grupos autorizados.",
+      "success"
+    );
+  } catch (error) {
+    showMessage("groupsMessage", error.message, "error");
+  } finally {
+    $("loadGroupsButton").disabled = false;
+  }
+}
+
+async function renderSavedGroupSelection(selectedIds) {
+  try {
+    const result = await api("/api/data");
+    const destinations = Array.isArray(result.destinations)
+      ? result.destinations
+      : [];
+
+    const savedGroups = destinations
+      .filter(item => item.groupId && item.groupId.endsWith("@g.us"))
+      .map(item => ({
+        id: item.groupId,
+        name: item.name || item.groupId
+      }));
+
+    if (loadedGroups.length) {
+      await renderGroupCheckboxes(selectedIds, loadedGroups);
+    } else if (savedGroups.length) {
+      await renderGroupCheckboxes(selectedIds, savedGroups);
+      showMessage(
+        "groupsMessage",
+        "Exibindo grupos cadastrados. Para atualizar a lista, carregue os grupos do WhatsApp."
+      );
+    } else {
+      $("groupsList").replaceChildren();
+      showMessage("groupsMessage", "Clique em Carregar meus grupos do WhatsApp.");
+    }
+  } catch (error) {
+    showMessage("groupsMessage", error.message, "error");
+  }
+}
+
+async function renderGroupCheckboxes(selectedIds, groups = loadedGroups) {
+  const list = $("groupsList");
+  list.replaceChildren();
+
+  const selected = new Set(selectedIds);
+
+  groups.forEach(group => {
+    const label = document.createElement("label");
+    label.className = "group-item";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "automation-group";
+    checkbox.value = group.id;
+    checkbox.checked = selected.has(group.id);
+
+    const name = document.createElement("span");
+    name.textContent = group.name + " ";
+
+    const small = document.createElement("span");
+    small.className = "small";
+    small.textContent = group.id;
+
+    const textBox = document.createElement("span");
+    textBox.append(name, small);
+
+    label.append(checkbox, textBox);
+    list.appendChild(label);
+  });
+}
+
+function getSelectedGroupIds() {
+  return Array.from(
+    document.querySelectorAll(".automation-group:checked")
+  ).map(input => input.value);
+}
+
+async function saveSelectedGroupsAsDestinations(groupIds) {
+  const data = await api("/api/data");
+  const destinations = Array.isArray(data.destinations)
+    ? data.destinations
+    : [];
+
+  const destinationIds = [];
+
+  for (const groupId of groupIds) {
+    let existing = destinations.find(item => item.groupId === groupId);
+
+    if (!existing) {
+      const group = loadedGroups.find(item => item.id === groupId);
+      const result = await api("/api/destinations", "POST", {
+        name: group?.name || "Grupo WhatsApp",
+        groupId
+      });
+
+      existing = result.destination;
+      destinations.push(existing);
+    }
+
+    destinationIds.push(existing.id);
+  }
+
+  return destinationIds;
+}
+
+async function saveAutomation(activate) {
+  const startTime = $("autoStart").value;
+  const endTime = $("autoEnd").value;
+  const intervalMinutes = Number($("autoInterval").value);
+  const selectedGroups = getSelectedGroupIds();
+
+  if (!startTime) {
+    showMessage("automationMessage", "Informe o horário inicial.", "error");
+    return;
+  }
+
+  if (startTime < "08:00" || startTime >= "18:00") {
+    showMessage("automationMessage", "O início precisa ser entre 08:00 e 17:59.", "error");
+    return;
+  }
+
+  if (endTime !== "18:00") {
+    showMessage("automationMessage", "O encerramento é fixo às 18:00.", "error");
+    return;
+  }
+
+  if (!Number.isInteger(intervalMinutes) || intervalMinutes < 5) {
+    showMessage("automationMessage", "Escolha um intervalo de pelo menos 5 minutos.", "error");
+    return;
+  }
+
+  if (!selectedGroups.length) {
+    showMessage("automationMessage", "Marque pelo menos um grupo autorizado.", "error");
+    return;
+  }
+
+  const button = activate
+    ? $("startAutomationButton")
+    : $("saveAutomationButton");
+
+  button.disabled = true;
+  showMessage("automationMessage", "Salvando configurações...");
+
+  try {
+    const destinationIds = await saveSelectedGroupsAsDestinations(selectedGroups);
+
+    const current = await api("/api/automation");
+    const currentlyActive = Boolean(current.automation?.active);
+
+    const result = await api("/api/automation", "POST", {
+      scheduleTimes: [startTime],
+      intervalMinutes,
+      destinationIds,
+      active: activate ? true : currentlyActive
+    });
+
+    showMessage(
+      "automationMessage",
+      activate
+        ? "Automação ativada para " + getProfileName() + "."
+        : "Configurações salvas para " + getProfileName() + ".",
+      "success"
+    );
+
+    await loadAutomation();
+    await refresh();
+  } catch (error) {
+    showMessage("automationMessage", error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function pauseAutomation() {
+  if (!confirm("Deseja pausar a automação deste perfil?")) return;
+
+  $("pauseAutomationButton").disabled = true;
+
+  try {
+    const current = await api("/api/automation");
+    const automation = current.automation || {};
+
+    await api("/api/automation", "POST", {
+      scheduleTimes: automation.scheduleTimes || ["08:00"],
+      intervalMinutes: automation.intervalMinutes || 30,
+      destinationIds: automation.destinationIds || [],
+      active: false
+    });
+
+    showMessage("automationMessage", "Automação pausada neste perfil.", "success");
+    await loadAutomation();
+    await refresh();
+  } catch (error) {
+    showMessage("automationMessage", error.message, "error");
+  } finally {
+    $("pauseAutomationButton").disabled = false;
   }
 }
 
@@ -606,8 +906,7 @@ async function refreshShopeeCredentials() {
     if (d.configured) {
       $("shopeeCredentialStatus").textContent =
         "Credenciais cadastradas para " + getProfileName() +
-        ". App ID: " + d.appId +
-        ". A Secret não é exibida.";
+        ". App ID: " + d.appId + ". A Secret não é exibida.";
       $("shopeeCredentialStatus").className = "status success";
       $("shopeeAppId").value = d.appId || "";
     } else {
@@ -639,11 +938,7 @@ async function saveShopeeCredentials() {
   showMessage("shopeeMessage", "Salvando credenciais...");
 
   try {
-    const d = await api("/api/shopee/credentials", "POST", {
-      appId,
-      secret
-    });
-
+    const d = await api("/api/shopee/credentials", "POST", { appId, secret });
     $("shopeeSecret").value = "";
     showMessage("shopeeMessage", d.message || "Credenciais salvas.", "success");
     await refreshShopeeCredentials();
@@ -661,14 +956,12 @@ async function testShopee() {
 
   try {
     const d = await api("/api/shopee/test", "POST", {});
-
     showMessage(
       "shopeeMessage",
       "Conexão realizada! Produtos encontrados no teste: " +
       d.productsFound + ". " + (d.message || ""),
       "success"
     );
-
     await refresh();
   } catch (error) {
     showMessage("shopeeMessage", error.message, "error");
@@ -679,7 +972,6 @@ async function testShopee() {
 
 function formatPrice(value) {
   const number = Number(value);
-
   if (!Number.isFinite(number)) return "Consulte o preço";
 
   return number.toLocaleString("pt-BR", {
@@ -708,13 +1000,11 @@ function createProductCard(product) {
   details.appendChild(title);
 
   const price = document.createElement("p");
-  price.textContent =
-    "Preço: " + formatPrice(product.priceMin);
+  price.textContent = "Preço: " + formatPrice(product.priceMin);
   details.appendChild(price);
 
   const commission = document.createElement("p");
-  commission.textContent =
-    "Comissão: " + (product.commissionRate ?? "Não informada");
+  commission.textContent = "Comissão: " + (product.commissionRate ?? "Não informada");
   details.appendChild(commission);
 
   const sales = document.createElement("p");
@@ -739,9 +1029,7 @@ function createProductCard(product) {
         anchor.textContent = "Abrir oferta";
         details.appendChild(anchor);
       }
-    } catch {
-      // Link inválido não será exibido.
-    }
+    } catch {}
   }
 
   card.appendChild(details);
@@ -754,7 +1042,6 @@ async function searchShopeeProducts() {
 
   $("searchButton").disabled = true;
   $("productResults").replaceChildren();
-
   showMessage("searchMessage", "Buscando ofertas na Shopee...");
 
   try {
@@ -764,7 +1051,6 @@ async function searchShopeeProducts() {
       "&limit=" + encodeURIComponent(limit);
 
     const d = await api(endpoint);
-
     const products = Array.isArray(d.products) ? d.products : [];
 
     if (!products.length) {
@@ -772,18 +1058,10 @@ async function searchShopeeProducts() {
       return;
     }
 
-    showMessage(
-      "searchMessage",
-      products.length + " produto(s) encontrado(s).",
-      "success"
-    );
+    showMessage("searchMessage", products.length + " produto(s) encontrado(s).", "success");
 
     const fragment = document.createDocumentFragment();
-
-    products.forEach(product => {
-      fragment.appendChild(createProductCard(product));
-    });
-
+    products.forEach(product => fragment.appendChild(createProductCard(product)));
     $("productResults").appendChild(fragment);
   } catch (error) {
     showMessage("searchMessage", error.message, "error");
