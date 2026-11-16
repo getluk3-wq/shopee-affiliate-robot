@@ -93,7 +93,8 @@ function createSession() {
     manualDisconnect: false,
     reconnectTimer: null,
     reconnectAttempts: 0,
-    lastError: null
+    lastError: null,
+    connectionId: 0
   };
 }
 
@@ -1212,6 +1213,7 @@ async function clearWhatsAppAuth(profileId) {
   if (error) throw error;
 }
 
+ 
 // =====================================================
 // PRODUTOS E OFERTAS
 // =====================================================
@@ -1497,8 +1499,6 @@ function rejectPairingWaiters(session, error) {
   }
 }
 
-// Aguarda o socket ficar disponível.
-// Não exige que o QR Code seja gerado para liberar o pareamento por número.
 async function waitForPairingSocket(session, timeoutMs = 15000) {
   const startedAt = Date.now();
 
@@ -1596,9 +1596,15 @@ async function initializeWhatsApp(profileId) {
   session.pairingCode = null;
   session.qr = null;
 
+  const connectionId = ++session.connectionId;
+
   session.initPromise = (async () => {
     try {
       const auth = await createSupabaseAuthState(profileId);
+
+      if (session.connectionId !== connectionId) {
+        throw new Error("Inicialização antiga cancelada.");
+      }
 
       session.authState = auth;
 
@@ -1616,6 +1622,11 @@ async function initializeWhatsApp(profileId) {
       session.socket = socket;
 
       socket.ev.on("creds.update", async () => {
+        if (
+          session.connectionId !== connectionId ||
+          session.socket !== socket
+        ) return;
+
         try {
           await auth.saveCreds();
         } catch (error) {
@@ -1629,6 +1640,15 @@ async function initializeWhatsApp(profileId) {
       });
 
       socket.ev.on("connection.update", async update => {
+        if (session.connectionId !== connectionId) {
+          console.log(
+            `Evento antigo ignorado (${profileId}).`
+          );
+          return;
+        }
+
+        if (session.socket !== socket) return;
+
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
@@ -1649,8 +1669,6 @@ async function initializeWhatsApp(profileId) {
             session.status = "starting";
           }
 
-          // O socket já iniciou a conexão.
-          // O pareamento por telefone não depende do evento QR.
           resolvePairingWaiters(session);
         }
 
@@ -1675,6 +1693,11 @@ async function initializeWhatsApp(profileId) {
             );
           }
 
+          if (
+            session.connectionId !== connectionId ||
+            session.socket !== socket
+          ) return;
+
           session.status = "connected";
           session.qr = null;
           session.pairingCode = null;
@@ -1691,6 +1714,11 @@ async function initializeWhatsApp(profileId) {
         }
 
         if (connection === "close") {
+          if (
+            session.connectionId !== connectionId ||
+            session.socket !== socket
+          ) return;
+
           session.socket = null;
           session.qr = null;
           session.pairingReady = false;
@@ -1734,16 +1762,20 @@ async function initializeWhatsApp(profileId) {
 
       return session;
     } catch (error) {
-      session.status = "error";
-      session.lastError = error.message;
-      session.socket = null;
-      session.pairingReady = false;
+      if (session.connectionId === connectionId) {
+        session.status = "error";
+        session.lastError = error.message;
+        session.socket = null;
+        session.pairingReady = false;
 
-      rejectPairingWaiters(session, error);
+        rejectPairingWaiters(session, error);
+      }
 
       throw error;
     } finally {
-      session.initPromise = null;
+      if (session.connectionId === connectionId) {
+        session.initPromise = null;
+      }
     }
   })();
 
@@ -2184,7 +2216,7 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
 });
 
 // =====================================================
-// PAREAMENTO POR NÚMERO - CORRIGIDO
+// PAREAMENTO POR NÚMERO
 // =====================================================
 
 app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
@@ -2230,14 +2262,12 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
         );
       }
 
-      // Aguardar o socket ficar pronto, sem depender da geração de QR.
       const socket = await waitForPairingSocket(session, 15000);
 
       if (session.status === "connected") {
         throw new Error("Este WhatsApp já está conectado.");
       }
 
-      // Pequena pausa para permitir a inicialização do fluxo de conexão.
       await wait(1500);
 
       if (
@@ -2303,6 +2333,7 @@ app.post("/api/whatsapp/disconnect", adminOnly, async (req, res) => {
   const session = sessions[profileId];
 
   session.manualDisconnect = true;
+  session.connectionId++;
 
   if (session.reconnectTimer) {
     clearTimeout(session.reconnectTimer);
