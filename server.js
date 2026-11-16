@@ -15,7 +15,6 @@ const {
 } = require("@whiskeysockets/baileys");
 
 const app = express();
-
 const PORT = process.env.PORT || 3000;
 const TIME_ZONE = "America/Sao_Paulo";
 const MAX_IMAGE_SIZE = 8 * 1024 * 1024;
@@ -28,9 +27,7 @@ app.use(express.json({ limit: "2mb" }));
 // =====================================================
 
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error(
-    "Configure SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no Render."
-  );
+  throw new Error("Configure SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no Render.");
 }
 
 const supabase = createClient(
@@ -44,19 +41,51 @@ const supabase = createClient(
   }
 );
 
+// Atualiza somente uma coluna do perfil.
+// Evita que uma gravação apague dados de outras colunas.
+async function updateProfileColumn(profileId, column, value) {
+  const allowed = [
+    "dados",
+    "credenciais_shopee",
+    "sessao_whatsapp"
+  ];
+
+  if (!allowed.includes(column)) {
+    throw new Error("Coluna de perfil não permitida.");
+  }
+
+  const payload = {
+    [column]: value,
+    atualizado_em: new Date().toISOString()
+  };
+
+  const { data, error } = await supabase
+    .from("robo_perfis")
+    .update(payload)
+    .eq("perfil", profileId)
+    .select("perfil");
+
+  if (error) throw error;
+
+  if (!data || data.length === 0) {
+    const { error: insertError } = await supabase
+      .from("robo_perfis")
+      .insert({
+        perfil: profileId,
+        ...payload
+      });
+
+    if (insertError) throw insertError;
+  }
+}
+
 // =====================================================
 // PERFIS
 // =====================================================
 
 const PROFILES = {
-  rafael: {
-    id: "rafael",
-    name: "Rafael"
-  },
-  usuario2: {
-    id: "usuario2",
-    name: "Usuário 2"
-  }
+  rafael: { id: "rafael", name: "Rafael" },
+  usuario2: { id: "usuario2", name: "Usuário 2" }
 };
 
 function createSession() {
@@ -254,9 +283,9 @@ async function loadStoresFromSupabase() {
 }
 
 function loadStore(profileId) {
-  if (!isValidProfile(profileId)) return defaultStore();
-
-  return storeCache[profileId];
+  return isValidProfile(profileId)
+    ? storeCache[profileId]
+    : defaultStore();
 }
 
 function saveStore(profileId, data) {
@@ -269,35 +298,17 @@ function saveStore(profileId, data) {
 
   storeWriteQueues[profileId] = storeWriteQueues[profileId]
     .catch(() => {})
-    .then(async () => {
-      const { error } = await supabase
-        .from("robo_perfis")
-        .upsert({
-          perfil: profileId,
-          dados: normalized,
-          atualizado_em: new Date().toISOString()
-        }, {
-          onConflict: "perfil"
-        });
-
-      if (error) throw error;
-    });
+    .then(() => updateProfileColumn(profileId, "dados", normalized));
 
   return storeWriteQueues[profileId];
 }
 
 async function persistShopeeCredentials(profileId, credentials) {
-  const { error } = await supabase
-    .from("robo_perfis")
-    .upsert({
-      perfil: profileId,
-      credenciais_shopee: credentials,
-      atualizado_em: new Date().toISOString()
-    }, {
-      onConflict: "perfil"
-    });
-
-  if (error) throw error;
+  await updateProfileColumn(
+    profileId,
+    "credenciais_shopee",
+    credentials
+  );
 }
 
 // =====================================================
@@ -313,11 +324,9 @@ function getSaoPauloDateParts(date = new Date()) {
   }).formatToParts(date);
 
   const result = {};
-
   for (const part of parts) {
     if (part.type !== "literal") result[part.type] = part.value;
   }
-
   return result;
 }
 
@@ -363,7 +372,6 @@ function getCurrentWindow(automation, now = new Date()) {
     isInsideWindow = currentTime >= startTime && currentTime < endTime;
   } else {
     isInsideWindow = currentTime >= startTime || currentTime < endTime;
-
     if (currentTime < endTime) {
       sessionDateKey = getPreviousDateKey(todayKey);
     }
@@ -397,7 +405,6 @@ function getEncryptionKey() {
 function encryptSecret(secret) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", getEncryptionKey(), iv);
-
   const encrypted = Buffer.concat([
     cipher.update(secret, "utf8"),
     cipher.final()
@@ -557,6 +564,9 @@ async function createSupabaseAuthState(profileId) {
     (savedKeys || []).map(row => [row.chave, row.valor])
   );
 
+  // Evita que gravações simultâneas sobrescrevam credenciais mais recentes.
+  let credsWriteQueue = Promise.resolve();
+
   const keys = {
     get: async (type, ids) => {
       const result = {};
@@ -602,9 +612,7 @@ async function createSupabaseAuthState(profileId) {
       if (upserts.length) {
         const { error } = await supabase
           .from("robo_whatsapp_chaves")
-          .upsert(upserts, {
-            onConflict: "perfil,chave"
-          });
+          .upsert(upserts, { onConflict: "perfil,chave" });
 
         if (error) throw error;
 
@@ -630,17 +638,41 @@ async function createSupabaseAuthState(profileId) {
   };
 
   const saveCreds = async () => {
-    const { error } = await supabase
-      .from("robo_perfis")
-      .upsert({
-        perfil: profileId,
-        sessao_whatsapp: serializeBaileys(creds),
-        atualizado_em: new Date().toISOString()
-      }, {
-        onConflict: "perfil"
+    // Captura o estado atualizado no momento em que o evento acontece.
+    const snapshot = serializeBaileys(creds);
+
+    credsWriteQueue = credsWriteQueue
+      .catch(() => {})
+      .then(async () => {
+        let lastError;
+
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            await updateProfileColumn(
+              profileId,
+              "sessao_whatsapp",
+              snapshot
+            );
+
+            console.log(
+              `Credenciais WhatsApp salvas no Supabase: ${profileId}`
+            );
+            return;
+          } catch (error) {
+            lastError = error;
+            console.error(
+              `Tentativa ${attempt}/3 ao salvar sessão (${profileId}):`,
+              error.message
+            );
+
+            if (attempt < 3) await wait(attempt * 1000);
+          }
+        }
+
+        throw lastError;
       });
 
-    if (error) throw error;
+    return credsWriteQueue;
   };
 
   return {
@@ -650,24 +682,14 @@ async function createSupabaseAuthState(profileId) {
 }
 
 async function clearWhatsAppAuth(profileId) {
-  const { error: profileError } = await supabase
-    .from("robo_perfis")
-    .upsert({
-      perfil: profileId,
-      sessao_whatsapp: null,
-      atualizado_em: new Date().toISOString()
-    }, {
-      onConflict: "perfil"
-    });
+  await updateProfileColumn(profileId, "sessao_whatsapp", null);
 
-  if (profileError) throw profileError;
-
-  const { error: keysError } = await supabase
+  const { error } = await supabase
     .from("robo_whatsapp_chaves")
     .delete()
     .eq("perfil", profileId);
 
-  if (keysError) throw keysError;
+  if (error) throw error;
 }
 
 // =====================================================
@@ -733,7 +755,6 @@ async function getAutomaticOffer(profileId, store) {
 
 function formatMoney(value) {
   const number = Number(value);
-
   if (!Number.isFinite(number) || number <= 0) return null;
 
   return number.toLocaleString("pt-BR", {
@@ -745,33 +766,22 @@ function formatMoney(value) {
 function getDiscountPercent(value) {
   const raw = Number(value);
 
-  if (!Number.isFinite(raw) || raw <= 0 || raw >= 100) {
-    return null;
-  }
+  if (!Number.isFinite(raw) || raw <= 0 || raw >= 100) return null;
 
   const percent = raw < 1 ? raw * 100 : raw;
-
-  if (percent <= 0 || percent >= 100) return null;
-
-  return percent;
+  return percent > 0 && percent < 100 ? percent : null;
 }
 
 function createOfferMessage(product) {
   const link = product.offerLink || product.productLink;
 
-  if (!link) {
-    throw new Error("O produto não possui link de afiliado.");
-  }
+  if (!link) throw new Error("O produto não possui link de afiliado.");
 
   let safeLink;
 
   try {
     const parsed = new URL(link);
-
-    if (parsed.protocol !== "https:") {
-      throw new Error("Link não seguro.");
-    }
-
+    if (parsed.protocol !== "https:") throw new Error("Link não seguro.");
     safeLink = parsed.href;
   } catch {
     throw new Error("Link de oferta inválido.");
@@ -791,14 +801,9 @@ function createOfferMessage(product) {
     lines.push(`💰 Por apenas: ${currentPrice}`);
   }
 
-  if (
-    currentPrice &&
-    discountPercent !== null &&
-    currentPriceNumber > 0
-  ) {
+  if (currentPrice && discountPercent !== null && currentPriceNumber > 0) {
     const originalPriceNumber =
       currentPriceNumber / (1 - discountPercent / 100);
-
     const originalPrice = formatMoney(originalPriceNumber);
 
     if (originalPrice && originalPriceNumber > currentPriceNumber) {
@@ -808,7 +813,6 @@ function createOfferMessage(product) {
   }
 
   lines.push("", "👉 Aproveite aqui:", safeLink);
-
   return lines.join("\n");
 }
 
@@ -852,9 +856,7 @@ async function downloadProductImage(imageUrl) {
     throw new Error("O endereço informado não retornou uma imagem.");
   }
 
-  const contentLength = Number(
-    response.headers.get("content-length") || 0
-  );
+  const contentLength = Number(response.headers.get("content-length") || 0);
 
   if (contentLength > MAX_IMAGE_SIZE) {
     throw new Error("A foto do produto ultrapassa o limite de 8 MB.");
@@ -882,19 +884,11 @@ async function sendProductOffer(socket, destination, product, message) {
       caption: message
     });
 
-    return {
-      sent: true,
-      withImage: true
-    };
+    return { sent: true, withImage: true };
   } catch (error) {
-    console.error(
-      "Não foi possível enviar a foto do produto:",
-      error.message
-    );
+    console.error("Não foi possível enviar a foto:", error.message);
 
-    await socket.sendMessage(destination, {
-      text: message
-    });
+    await socket.sendMessage(destination, { text: message });
 
     return {
       sent: true,
@@ -931,9 +925,7 @@ function waitForPairingReady(session, timeoutMs = 30000) {
     return Promise.reject(new Error("Este WhatsApp já está conectado."));
   }
 
-  if (session.socket && session.pairingReady) {
-    return Promise.resolve();
-  }
+  if (session.socket && session.pairingReady) return Promise.resolve();
 
   if (!session.socket) {
     return Promise.reject(
@@ -948,11 +940,9 @@ function waitForPairingReady(session, timeoutMs = 30000) {
       const index = session.pairingWaiters.indexOf(waiter);
       if (index !== -1) session.pairingWaiters.splice(index, 1);
 
-      reject(
-        new Error(
-          "O WhatsApp não disponibilizou o pareamento a tempo. Aguarde e tente novamente."
-        )
-      );
+      reject(new Error(
+        "O WhatsApp não disponibilizou o pareamento a tempo. Aguarde e tente novamente."
+      ));
     }, timeoutMs);
 
     session.pairingWaiters.push(waiter);
@@ -966,9 +956,7 @@ function scheduleReconnect(profileId) {
     session.manualDisconnect ||
     session.reconnectTimer ||
     session.status === "connected"
-  ) {
-    return;
-  }
+  ) return;
 
   session.reconnectAttempts++;
 
@@ -979,17 +967,12 @@ function scheduleReconnect(profileId) {
 
   session.reconnectTimer = setTimeout(async () => {
     session.reconnectTimer = null;
-
     if (session.manualDisconnect) return;
 
     try {
       await initializeWhatsApp(profileId);
     } catch (error) {
-      console.error(
-        `Falha ao reconectar ${profileId}:`,
-        error.message
-      );
-
+      console.error(`Falha ao reconectar ${profileId}:`, error.message);
       scheduleReconnect(profileId);
     }
   }, delay);
@@ -998,18 +981,13 @@ function scheduleReconnect(profileId) {
 async function initializeWhatsApp(profileId) {
   const session = sessions[profileId];
 
-  if (!isValidProfile(profileId)) {
-    throw new Error("Perfil inválido.");
-  }
-
+  if (!isValidProfile(profileId)) throw new Error("Perfil inválido.");
   if (session.initPromise) return session.initPromise;
 
   if (
     session.socket &&
     ["connected", "qr", "starting"].includes(session.status)
-  ) {
-    return session;
-  }
+  ) return session;
 
   if (session.reconnectTimer) {
     clearTimeout(session.reconnectTimer);
@@ -1041,14 +1019,17 @@ async function initializeWhatsApp(profileId) {
 
       session.socket = socket;
 
-      socket.ev.on("creds.update", () => {
-        auth.saveCreds().catch(error => {
+      // Salva cada atualização e aguarda a gravação no Supabase.
+      socket.ev.on("creds.update", async () => {
+        try {
+          await auth.saveCreds();
+        } catch (error) {
           session.lastError = error.message;
           console.error(
             `Erro ao salvar credenciais WhatsApp (${profileId}):`,
             error.message
           );
-        });
+        }
       });
 
       socket.ev.on("connection.update", async update => {
@@ -1071,6 +1052,17 @@ async function initializeWhatsApp(profileId) {
         }
 
         if (connection === "open") {
+          // Confirma a gravação das credenciais quando a conexão abre.
+          try {
+            await auth.saveCreds();
+          } catch (error) {
+            session.lastError = error.message;
+            console.error(
+              `Erro ao confirmar sessão no Supabase (${profileId}):`,
+              error.message
+            );
+          }
+
           session.status = "connected";
           session.qr = null;
           session.pairingCode = null;
@@ -1148,7 +1140,6 @@ async function initializeWhatsApp(profileId) {
 
 async function runAutomation(profileId) {
   if (automationRunning[profileId]) return;
-
   automationRunning[profileId] = true;
 
   try {
@@ -1176,9 +1167,7 @@ async function runAutomation(profileId) {
     if (
       automation.nextSendAt &&
       Date.now() < new Date(automation.nextSendAt).getTime()
-    ) {
-      return;
-    }
+    ) return;
 
     const session = sessions[profileId];
 
@@ -1224,7 +1213,6 @@ async function runAutomation(profileId) {
         );
 
         sentCount++;
-
         if (result.withImage) imageSentCount++;
 
         if (result.imageError) {
@@ -1251,7 +1239,6 @@ async function runAutomation(profileId) {
         automation.sentProductIds.slice(-5000);
 
       automation.lastSentAt = new Date().toISOString();
-
       automation.lastError = errors.length
         ? `Enviado parcialmente. ${errors.join(" | ")}`
         : null;
@@ -1375,15 +1362,11 @@ app.post("/api/automation", adminOnly, async (req, res) => {
     : store.automation.endTime || "18:00";
 
   if (!isValidTime(startTime)) {
-    return res.status(400).json({
-      error: "Informe um horário de início válido."
-    });
+    return res.status(400).json({ error: "Informe um horário de início válido." });
   }
 
   if (!isValidTime(endTime)) {
-    return res.status(400).json({
-      error: "Informe um horário de encerramento válido."
-    });
+    return res.status(400).json({ error: "Informe um horário de encerramento válido." });
   }
 
   if (startTime === endTime) {
@@ -1576,13 +1559,9 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
       await wait(2000);
 
       const code = await session.socket.requestPairingCode(phone);
-
       session.pairingCode = code;
 
-      console.log(
-        `Código de pareamento solicitado para o perfil ${profileId}.`
-      );
-
+      console.log(`Código de pareamento solicitado para ${profileId}.`);
       return code;
     } finally {
       session.pairingPromise = null;
@@ -1600,10 +1579,7 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
   } catch (error) {
     session.lastError = error.message;
 
-    console.error(
-      `Erro no pareamento numérico (${profileId}):`,
-      error.message
-    );
+    console.error(`Erro no pareamento numérico (${profileId}):`, error.message);
 
     res.status(500).json({
       ok: false,
@@ -1674,9 +1650,7 @@ app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
   }
 
   if (!session.socket || session.status !== "connected") {
-    return res.status(400).json({
-      error: "WhatsApp não está conectado."
-    });
+    return res.status(400).json({ error: "WhatsApp não está conectado." });
   }
 
   try {
@@ -1685,13 +1659,9 @@ app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
       : destination;
 
     await session.socket.sendMessage(jid, { text: message });
-
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({
-      ok: false,
-      error: error.message
-    });
+    res.status(500).json({ ok: false, error: error.message });
   }
 });
 
@@ -1728,11 +1698,7 @@ app.get("/api/whatsapp/groups", adminOnly, async (req, res) => {
 
 app.get("/api/destinations", adminOnly, (req, res) => {
   const store = loadStore(getProfile(req));
-
-  res.json({
-    ok: true,
-    destinations: store.destinations
-  });
+  res.json({ ok: true, destinations: store.destinations });
 });
 
 app.post("/api/products", adminOnly, async (req, res) => {
@@ -1750,9 +1716,7 @@ app.post("/api/products", adminOnly, async (req, res) => {
   };
 
   if (!product.name) {
-    return res.status(400).json({
-      error: "Informe o nome do produto."
-    });
+    return res.status(400).json({ error: "Informe o nome do produto." });
   }
 
   store.products.unshift(product);
@@ -1879,10 +1843,7 @@ app.post("/api/shopee/credentials", adminOnly, async (req, res) => {
       message: "Credenciais salvas com segurança para este perfil."
     });
   } catch (error) {
-    res.status(500).json({
-      ok: false,
-      error: error.message
-    });
+    res.status(500).json({ ok: false, error: error.message });
   }
 });
 
@@ -2026,9 +1987,7 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
           successfulSearches++;
           pagesRead++;
 
-          const products = Array.isArray(result.nodes)
-            ? result.nodes
-            : [];
+          const products = Array.isArray(result.nodes) ? result.nodes : [];
 
           for (const product of products) {
             const id = String(product.itemId || "").trim();
@@ -2054,7 +2013,6 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
           }
 
           if (!result.pageInfo?.hasNextPage) break;
-
           await wait(500);
         } catch (error) {
           errors.push({
@@ -2062,7 +2020,6 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
             page,
             error: error.message
           });
-
           break;
         }
       }
@@ -2129,9 +2086,7 @@ app.use((error, req, res, next) => {
 
 async function initializeApp() {
   console.log("Carregando dados do Supabase...");
-
   await loadStoresFromSupabase();
-
   console.log("Dados do painel carregados.");
 
   for (const profileId of Object.keys(PROFILES)) {
@@ -2139,7 +2094,9 @@ async function initializeApp() {
       const auth = await createSupabaseAuthState(profileId);
 
       if (auth.state.creds.registered) {
-        console.log(`Sessão WhatsApp encontrada para ${profileId}. Reconectando...`);
+        console.log(
+          `Sessão WhatsApp encontrada para ${profileId}. Reconectando...`
+        );
 
         initializeWhatsApp(profileId).catch(error => {
           console.error(
@@ -2148,7 +2105,9 @@ async function initializeApp() {
           );
         });
       } else {
-        console.log(`Nenhuma sessão WhatsApp registrada para ${profileId}.`);
+        console.log(
+          `Nenhuma sessão WhatsApp registrada para ${profileId}.`
+        );
       }
     } catch (error) {
       console.error(
