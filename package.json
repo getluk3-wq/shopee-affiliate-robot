@@ -12,6 +12,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
     "@whiskeysockets/baileys": "6.7.24",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
