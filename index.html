@@ -52,9 +52,16 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 .product a{color:#ff9b52;font-weight:700;text-decoration:none}
 .product a:hover{text-decoration:underline}
 .group-list{display:grid;gap:8px;margin-top:12px}
-.group-item{display:flex;align-items:center;gap:10px;background:#111;border:1px solid var(--line);padding:11px;border-radius:9px}
-.group-item input{width:20px;height:20px;margin:0;accent-color:var(--orange);flex-shrink:0}
+.group-item{display:flex;align-items:flex-start;gap:10px;background:#111;border:1px solid var(--line);padding:11px;border-radius:9px}
+.group-item input{width:20px;height:20px;margin:2px 0 0;accent-color:var(--orange);flex-shrink:0}
 .group-item span{overflow-wrap:anywhere;font-size:14px}
+.group-info{display:flex;flex-direction:column;gap:4px;min-width:0}
+.group-name{font-weight:700;color:var(--white)}
+.group-niche{font-size:12px;color:var(--green)}
+.group-niche.unknown{color:var(--red)}
+.group-id{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.group-confidence{font-size:11px;color:#aaa}
+.group-warning{font-size:12px;color:var(--red);margin-top:3px}
 .info-box{background:#111;border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px}
 .automation-status{font-weight:700;color:var(--orange)}
 .small{font-size:12px;color:var(--muted)}
@@ -213,9 +220,24 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 
     <h3>Grupos do WhatsApp</h3>
     <p class="muted">
-      Carregue os grupos dos quais este WhatsApp participa e marque somente
-      aqueles que autorizaram receber as divulgações.
+      Carregue os grupos dos quais este WhatsApp participa. O painel exibirá
+      o nicho identificado pelo servidor, quando essa informação estiver disponível.
+      Marque somente grupos autorizados a receber divulgações.
     </p>
+
+    <div class="info-box">
+      <b>Como funciona a identificação</b>
+      <p class="small">
+        O sistema deverá reconhecer referências no nome do grupo, mesmo que
+        não sejam nomes exatos de categorias. Exemplo: "Tudo para Elas",
+        "Estilo dos Homens", "Cantinho dos Pets" e "Mundo Tech".
+      </p>
+      <p class="small">
+        Grupos não identificados ou ambíguos serão sinalizados para conferência.
+        A validação efetiva e o bloqueio de produtos incompatíveis dependem
+        também do servidor.
+      </p>
+    </div>
 
     <button class="secondary" id="loadGroupsButton" onclick="loadWhatsAppGroups()">
       Carregar meus grupos do WhatsApp
@@ -725,6 +747,37 @@ async function loadAutomation() {
   }
 }
 
+// IDENTIFICAÇÃO E EXIBIÇÃO DOS GRUPOS
+
+function getGroupClassification(group) {
+  const niche = String(group.niche || "").trim();
+  const label = String(group.nicheLabel || "").trim();
+  const confidence = group.confidence;
+
+  const ambiguous =
+    group.ambiguous === true ||
+    group.identified === false ||
+    ["unknown", "ambiguous", "unidentified", "não identificado"].includes(niche.toLowerCase());
+
+  if (ambiguous || (!niche && !label)) {
+    return {
+      text: "Nicho não identificado — aguardando análise do servidor",
+      safe: false,
+      confidence
+    };
+  }
+
+  const general =
+    niche.toLowerCase() === "general" ||
+    niche.toLowerCase() === "geral";
+
+  return {
+    text: "Nicho: " + (label || (general ? "Grupo geral" : niche)),
+    safe: true,
+    confidence
+  };
+}
+
 async function loadWhatsAppGroups() {
   $("loadGroupsButton").disabled = true;
   showMessage("groupsMessage", "Buscando grupos do WhatsApp...");
@@ -747,7 +800,7 @@ async function loadWhatsAppGroups() {
 
     showMessage(
       "groupsMessage",
-      loadedGroups.length + " grupo(s) carregado(s). As seleções salvas foram preservadas.",
+      loadedGroups.length + " grupo(s) carregado(s). Confira os nichos antes de salvar.",
       "success"
     );
   } catch (error) {
@@ -770,7 +823,12 @@ async function renderSavedGroupSelection(selectedIds) {
       .filter(item => item.groupId && item.groupId.endsWith("@g.us"))
       .map(item => ({
         id: item.groupId,
-        name: item.name || item.groupId
+        name: item.groupName || item.name || item.groupId,
+        niche: item.niche,
+        nicheLabel: item.nicheLabel,
+        confidence: item.confidence,
+        identified: item.identified,
+        ambiguous: item.ambiguous
       }));
 
     if (loadedGroups.length) {
@@ -779,7 +837,7 @@ async function renderSavedGroupSelection(selectedIds) {
       await renderGroupCheckboxes(selectedGroupIds, savedGroups);
       showMessage(
         "groupsMessage",
-        "Exibindo grupos cadastrados. Para atualizar a lista, carregue os grupos do WhatsApp."
+        "Exibindo grupos cadastrados. Carregue novamente os grupos do WhatsApp para atualizar a classificação."
       );
     } else {
       $("groupsList").replaceChildren();
@@ -804,18 +862,52 @@ async function renderGroupCheckboxes(selectedIds, groups = loadedGroups) {
     checkbox.type = "checkbox";
     checkbox.className = "automation-group";
     checkbox.value = group.id;
-    checkbox.checked = selected.has(String(group.id));
 
-    const name = document.createElement("span");
-    name.textContent = group.name + " ";
+    const classification = getGroupClassification(group);
 
-    const small = document.createElement("span");
-    small.className = "small";
-    small.textContent = group.id;
+    checkbox.checked =
+      selected.has(String(group.id)) && classification.safe;
+
+    checkbox.disabled = !classification.safe;
 
     const textBox = document.createElement("span");
-    textBox.append(name, small);
+    textBox.className = "group-info";
 
+    const name = document.createElement("span");
+    name.className = "group-name";
+    name.textContent = group.name || "Grupo sem nome";
+
+    const niche = document.createElement("span");
+    niche.className = classification.safe
+      ? "group-niche"
+      : "group-niche unknown";
+    niche.textContent = classification.text;
+
+    const small = document.createElement("span");
+    small.className = "group-id";
+    small.textContent = group.id || "";
+
+    textBox.append(name, niche);
+
+    if (
+      classification.confidence !== undefined &&
+      classification.confidence !== null
+    ) {
+      const confidence = document.createElement("span");
+      confidence.className = "group-confidence";
+      confidence.textContent = "Confiança informada: " +
+        classification.confidence;
+      textBox.appendChild(confidence);
+    }
+
+    if (!classification.safe) {
+      const warning = document.createElement("span");
+      warning.className = "group-warning";
+      warning.textContent = "Seleção desativada até o servidor identificar o nicho.";
+      textBox.appendChild(warning);
+    }
+
+    textBox.appendChild(small);
     label.append(checkbox, textBox);
     list.appendChild(label);
   });
@@ -836,13 +928,27 @@ async function saveSelectedGroupsAsDestinations(groupIds) {
   const destinationIds = [];
 
   for (const groupId of groupIds) {
+    const group = loadedGroups.find(item => item.id === groupId);
+
+    if (group && !getGroupClassification(group).safe) {
+      throw new Error(
+        "O grupo " + (group.name || groupId) +
+        " não possui classificação segura."
+      );
+    }
+
     let existing = destinations.find(item => item.groupId === groupId);
 
     if (!existing) {
-      const group = loadedGroups.find(item => item.id === groupId);
       const result = await api("/api/destinations", "POST", {
         name: group?.name || "Grupo WhatsApp",
-        groupId
+        groupName: group?.name || "Grupo WhatsApp",
+        groupId,
+        niche: group?.niche || null,
+        nicheLabel: group?.nicheLabel || null,
+        confidence: group?.confidence ?? null,
+        identified: group?.identified ?? false,
+        ambiguous: group?.ambiguous ?? false
       });
 
       existing = result.destination;
@@ -880,11 +986,7 @@ async function saveAutomation(activate) {
   }
 
   if (startTime === endTime) {
-    showMessage(
-      "automationMessage",
-      "O início e o encerramento não podem ser iguais.",
-      "error"
-    );
+    showMessage("automationMessage", "O início e o encerramento não podem ser iguais.", "error");
     return;
   }
 
@@ -894,7 +996,7 @@ async function saveAutomation(activate) {
   }
 
   if (!selectedGroups.length) {
-    showMessage("automationMessage", "Marque pelo menos um grupo autorizado.", "error");
+    showMessage("automationMessage", "Marque pelo menos um grupo autorizado e identificado.", "error");
     return;
   }
 
