@@ -1,4 +1,3 @@
-
 const express = require("express");
 const helmet = require("helmet");
 const crypto = require("crypto");
@@ -71,7 +70,7 @@ async function updateProfileColumn(profileId, column, value) {
 }
 
 // =====================================================
-// PERFIS E SESSÕES
+// PERFIS
 // =====================================================
 
 const PROFILES = {
@@ -93,8 +92,7 @@ function createSession() {
     manualDisconnect: false,
     reconnectTimer: null,
     reconnectAttempts: 0,
-    lastError: null,
-    connectionId: 0
+    lastError: null
   };
 }
 
@@ -303,113 +301,137 @@ const NICHE_DEFINITIONS = [
 
 const GROUP_NICHE_ALIASES = {
   moda_feminina: [
-    "tudo feminino", "tudo delas", "mundo delas",
-    "achadinhos delas", "achadinhos das meninas",
-    "achadinhos das mulheres", "achadinhos feminino",
-    "universo feminino", "universo das mulheres",
-    "cantinho feminino", "ofertas para elas",
-    "estilo das mulheres", "mulheres que amam ofertas",
-    "moda para elas", "look das meninas", "closet feminino",
-    "closet das meninas", "roupas para elas",
-    "roupas femininas", "moda das mulheres",
-    "divas e ofertas", "mundo feminino",
-    "cantinho das mulheres", "achadinhos das divas"
+    "tudo feminino",
+    "mundo delas",
+    "achadinhos das mulheres",
+    "achadinhos feminino",
+    "universo feminino",
+    "cantinho feminino",
+    "ofertas para elas",
+    "estilo das mulheres",
+    "mulheres que amam ofertas",
+    "moda para elas",
+    "look das meninas",
+    "closet feminino"
   ],
   moda_masculina: [
-    "tudo masculino", "tudo deles", "estilo masculino",
-    "estilo dos homens", "moda dos homens",
-    "achadinhos masculinos", "achadinhos dos homens",
-    "achadinhos deles", "mundo masculino",
-    "ofertas para eles", "moda para eles",
-    "universo masculino", "closet masculino",
-    "roupas para eles", "roupas masculinas",
-    "moda dos rapazes", "mundo dos homens"
+    "tudo masculino",
+    "estilo masculino",
+    "estilo dos homens",
+    "moda dos homens",
+    "achadinhos masculinos",
+    "achadinhos dos homens",
+    "mundo masculino",
+    "ofertas para eles",
+    "moda para eles",
+    "universo masculino",
+    "closet masculino"
   ],
   calcados_bolsas: [
-    "mundo dos calcados", "ofertas de calcados",
-    "bolsas e sapatos", "achadinhos de bolsas",
-    "mundo das bolsas", "calcados e acessorios",
-    "bolsas e calcados", "amantes de bolsas",
-    "clube dos calcados"
+    "mundo dos calcados",
+    "ofertas de calcados",
+    "bolsas e sapatos",
+    "achadinhos de bolsas",
+    "mundo das bolsas",
+    "calcados e acessorios"
   ],
   eletronicos: [
-    "mundo tech", "universo tech", "tecnologia",
-    "achadinhos de tecnologia", "ofertas tech",
-    "gadgets", "mundo dos eletronicos",
-    "ofertas de tecnologia", "clube da tecnologia"
+    "mundo tech",
+    "universo tech",
+    "tecnologia",
+    "achadinhos de tecnologia",
+    "ofertas tech",
+    "gadgets",
+    "mundo dos eletronicos"
   ],
   informatica: [
-    "mundo da informatica", "pecas de pc",
-    "setup gamer", "setup pc", "computacao",
-    "universo gamer", "mundo dos computadores",
-    "acessorios para pc"
+    "mundo da informatica",
+    "pecas de pc",
+    "setup gamer",
+    "setup pc",
+    "computacao",
+    "universo gamer"
   ],
   casa_decoracao: [
-    "lar e decoracao", "meu lar", "cantinho da casa",
-    "casa organizada", "utilidades para casa",
-    "achadinhos para casa", "mundo da cozinha",
-    "casa e lar", "ofertas para o lar", "decorando meu lar"
+    "lar e decoracao",
+    "meu lar",
+    "cantinho da casa",
+    "casa organizada",
+    "utilidades para casa",
+    "achadinhos para casa",
+    "mundo da cozinha"
   ],
   beleza_cosmeticos: [
-    "mundo da beleza", "cantinho da beleza",
-    "beleza feminina", "achadinhos de beleza",
-    "universo da maquiagem", "maquiagem e cuidados",
-    "clube da beleza", "cuidados pessoais", "pele e beleza"
+    "mundo da beleza",
+    "cantinho da beleza",
+    "beleza feminina",
+    "achadinhos de beleza",
+    "universo da maquiagem",
+    "maquiagem e cuidados"
   ],
   perfumes: [
-    "mundo dos perfumes", "achadinhos de perfumes",
-    "perfumaria e ofertas", "clube dos perfumes",
-    "fragrancias e perfumes", "amantes de perfumes",
-    "ofertas de perfumaria"
+    "mundo dos perfumes",
+    "achadinhos de perfumes",
+    "perfumaria e ofertas",
+    "clube dos perfumes",
+    "fragrancias e perfumes"
   ],
   infantil_bebe: [
-    "mundo infantil", "universo do bebe", "maes e bebes",
-    "achadinhos para criancas", "cantinho do bebe",
-    "mundo das criancas", "ofertas para bebe",
-    "tudo para bebe", "pais e bebes"
+    "mundo infantil",
+    "universo do bebe",
+    "maes e bebes",
+    "achadinhos para criancas",
+    "cantinho do bebe",
+    "mundo das criancas"
   ],
   esportes_fitness: [
-    "vida fitness", "mundo fitness", "projeto fitness",
-    "treino e academia", "universo fitness",
-    "achadinhos fitness", "clube fitness",
-    "vida de academia", "mundo dos esportes"
+    "vida fitness",
+    "mundo fitness",
+    "projeto fitness",
+    "treino e academia",
+    "universo fitness",
+    "achadinhos fitness"
   ],
   mercado_alimentos: [
-    "ofertas de mercado", "achadinhos de mercado",
-    "economia no mercado", "cesta de ofertas",
-    "mundo das ofertas de mercado", "economia nas compras",
-    "ofertas de supermercado"
+    "ofertas de mercado",
+    "achadinhos de mercado",
+    "economia no mercado",
+    "cesta de ofertas",
+    "mundo das ofertas de mercado"
   ],
   automotivo: [
-    "mundo automotivo", "acessorios para carros",
-    "universo automotivo", "ofertas para carros",
-    "ofertas para motos", "clube dos motoristas",
-    "mundo das motos"
+    "mundo automotivo",
+    "acessorios para carros",
+    "universo automotivo",
+    "ofertas para carros",
+    "ofertas para motos"
   ],
   eletricos: [
-    "tudo de eletrica", "tudo sobre eletrica",
-    "materiais de eletrica", "mundo da eletrica",
-    "eletricista", "eletricistas", "instalacoes eletricas",
+    "tudo de eletrica",
+    "tudo sobre eletrica",
+    "materiais de eletrica",
+    "mundo da eletrica",
+    "eletricista",
+    "eletricistas",
+    "instalacoes eletricas",
     "ferramentas de eletrica"
   ],
   pet: [
-    "universo pet", "mundo pet", "amantes de pets",
-    "amantes dos pets", "amantes dos bichinhos",
-    "mundo dos bichinhos", "amigos dos animais",
-    "amigos dos pets", "pais de pet", "pais de pets",
-    "maes de pet", "maes de pets", "tudo para pets",
-    "tudo para pet", "achadinhos pet", "cantinho pet",
-    "cantinho dos pets", "caes e gatos",
-    "cachorros e gatos", "dog lovers", "pet lovers",
-    "doguinhos", "gatinho e cachorro", "gatunos",
-    "meu bichinho", "meus bichinhos",
-    "universo dos animais", "animais de estimacao",
-    "ofertas para pets", "produtos para pets", "mundo animal"
+    "universo pet",
+    "mundo pet",
+    "amantes de pets",
+    "amigos dos animais",
+    "pais de pet",
+    "maes de pet",
+    "tudo para pets",
+    "achadinhos pet",
+    "cantinho pet"
   ]
 };
 
 function scoreNiche(text, definition) {
   const normalized = normalizeText(text);
+
   if (!normalized) return 0;
 
   let score = 0;
@@ -427,11 +449,16 @@ function classifyGroupNiche(groupName) {
   const text = normalizeText(groupName);
 
   if (!text) {
-    return { id: "unknown", label: "Não identificado", confidence: 0 };
+    return {
+      id: "unknown",
+      label: "Não identificado",
+      confidence: 0
+    };
   }
 
   const scores = NICHE_DEFINITIONS.map(definition => {
     let score = scoreNiche(text, definition);
+
     const aliases = GROUP_NICHE_ALIASES[definition.id] || [];
 
     for (const alias of aliases) {
@@ -440,24 +467,25 @@ function classifyGroupNiche(groupName) {
       }
     }
 
-    return { id: definition.id, label: definition.label, score };
+    return {
+      id: definition.id,
+      label: definition.label,
+      score
+    };
   }).sort((a, b) => b.score - a.score);
 
   const best = scores[0];
   const second = scores[1];
 
-  if (!best || best.score < 3) {
-    return { id: "unknown", label: "Não identificado", confidence: 0 };
-  }
-
-  if (second && best.score === second.score && second.score >= 3) {
+  if (
+    !best ||
+    best.score < 3 ||
+    (second && best.score === second.score)
+  ) {
     return {
-      id: "ambiguous",
-      label: "Mais de um nicho identificado",
-      confidence: 0,
-      possibleNiches: scores
-        .filter(item => item.score === best.score)
-        .map(item => item.id)
+      id: "unknown",
+      label: "Não identificado",
+      confidence: 0
     };
   }
 
@@ -470,19 +498,20 @@ function classifyGroupNiche(groupName) {
 
 const CLOTHING_TERMS = [
   "roupa", "roupas", "vestido", "vestidos",
-  "blusa", "blusas", "saia", "saias", "cropped",
-  "lingerie", "sutia", "calcinha", "body", "top",
-  "calca", "short", "shorts", "bermuda", "cueca",
-  "camisa", "camiseta", "polo", "moletom", "jaqueta",
-  "casaco", "conjunto", "macacao", "legging", "regata",
+  "blusa", "blusas", "saia", "saias",
+  "cropped", "lingerie", "sutia", "calcinha",
+  "body", "top", "calca", "short", "shorts",
+  "bermuda", "cueca", "camisa", "camiseta",
+  "polo", "moletom", "jaqueta", "casaco",
+  "conjunto", "macacao", "legging", "regata",
   "sueter", "cardigan", "pijama"
 ];
 
 const FOOTWEAR_TERMS = [
-  "calcado", "calcados", "sapato", "sapatos", "tenis",
-  "sandalia", "sandalias", "chinelo", "chinelos",
-  "bota", "botas", "rasteirinha", "scarpin",
-  "sapatilha", "papete"
+  "calcado", "calcados", "sapato", "sapatos",
+  "tenis", "sandalia", "sandalias", "chinelo",
+  "chinelos", "bota", "botas", "rasteirinha",
+  "scarpin", "sapatilha", "papete"
 ];
 
 const FEMALE_TERMS = [
@@ -501,7 +530,10 @@ function containsAnyTerm(text, terms) {
 
 function classifyProductNiches(product) {
   const title = normalizeText(
-    product?.productName || product?.name || product?.title || ""
+    product?.productName ||
+    product?.name ||
+    product?.title ||
+    ""
   );
 
   const category = normalizeText(
@@ -512,8 +544,8 @@ function classifyProductNiches(product) {
   );
 
   const description = normalizeText(product?.description || "");
-  const fullText = `${title} ${category} ${description}`;
 
+  const mainText = `${title} ${category}`;
   const results = [];
 
   for (const definition of NICHE_DEFINITIONS) {
@@ -521,7 +553,10 @@ function classifyProductNiches(product) {
     const categoryScore = scoreNiche(category, definition);
     const descriptionScore = scoreNiche(description, definition);
 
-    const total = titleScore * 3 + categoryScore * 3 + descriptionScore;
+    const total =
+      titleScore * 3 +
+      categoryScore * 3 +
+      descriptionScore;
 
     const confident =
       titleScore >= 2 ||
@@ -537,34 +572,40 @@ function classifyProductNiches(product) {
     }
   }
 
-  const hasClothing = containsAnyTerm(fullText, CLOTHING_TERMS);
-  const hasFootwear = containsAnyTerm(fullText, FOOTWEAR_TERMS);
-  const isFemale = containsAnyTerm(fullText, FEMALE_TERMS);
-  const isMale = containsAnyTerm(fullText, MALE_TERMS);
+  const hasClothing = containsAnyTerm(mainText, CLOTHING_TERMS);
+  const hasFootwear = containsAnyTerm(mainText, FOOTWEAR_TERMS);
+
+  const isFemale = containsAnyTerm(mainText, FEMALE_TERMS);
+  const isMale = containsAnyTerm(mainText, MALE_TERMS);
+
   const hasPerfume = results.some(item => item.id === "perfumes");
 
   if (!hasPerfume && (hasClothing || hasFootwear)) {
-    if (isFemale && !isMale &&
-        !results.some(item => item.id === "moda_feminina")) {
-      results.push({
-        id: "moda_feminina",
-        label: "Moda Feminina",
-        score: 8
-      });
+    if (isFemale && !isMale) {
+      if (!results.some(item => item.id === "moda_feminina")) {
+        results.push({
+          id: "moda_feminina",
+          label: "Moda Feminina",
+          score: 8
+        });
+      }
     }
 
-    if (isMale && !isFemale &&
-        !results.some(item => item.id === "moda_masculina")) {
-      results.push({
-        id: "moda_masculina",
-        label: "Moda Masculina",
-        score: 8
-      });
+    if (isMale && !isFemale) {
+      if (!results.some(item => item.id === "moda_masculina")) {
+        results.push({
+          id: "moda_masculina",
+          label: "Moda Masculina",
+          score: 8
+        });
+      }
     }
   }
 
-  if (hasFootwear &&
-      !results.some(item => item.id === "calcados_bolsas")) {
+  if (
+    hasFootwear &&
+    !results.some(item => item.id === "calcados_bolsas")
+  ) {
     results.push({
       id: "calcados_bolsas",
       label: "Calçados e Bolsas",
@@ -573,6 +614,7 @@ function classifyProductNiches(product) {
   }
 
   results.sort((a, b) => b.score - a.score);
+
   return results;
 }
 
@@ -581,25 +623,13 @@ function getProductNicheLabels(product) {
 }
 
 function destinationMatchesProduct(destination, product) {
-  const groupName =
-    destination.groupName || destination.subject || destination.name;
-
-  const groupNiche = classifyGroupNiche(groupName);
+  const groupNiche = classifyGroupNiche(destination.name);
   const productNiches = classifyProductNiches(product);
 
   if (groupNiche.id === "unknown") {
     return {
       matches: true,
       reason: "Grupo geral: aceita qualquer categoria.",
-      groupNiche,
-      productNiches
-    };
-  }
-
-  if (groupNiche.id === "ambiguous") {
-    return {
-      matches: false,
-      reason: "O nome do grupo indica mais de um nicho. Verifique o nome cadastrado.",
       groupNiche,
       productNiches
     };
@@ -614,7 +644,9 @@ function destinationMatchesProduct(destination, product) {
     };
   }
 
-  const matches = productNiches.some(item => item.id === groupNiche.id);
+  const matches = productNiches.some(
+    item => item.id === groupNiche.id
+  );
 
   return {
     matches,
@@ -1076,7 +1108,6 @@ async function createSupabaseAuthState(profileId) {
   );
 
   let credsWriteQueue = Promise.resolve();
-  let keysWriteQueue = Promise.resolve();
 
   const keys = {
     get: async (type, ids) => {
@@ -1100,59 +1131,51 @@ async function createSupabaseAuthState(profileId) {
     },
 
     set: async data => {
-      const operation = async () => {
-        const upserts = [];
-        const deletions = [];
+      const upserts = [];
+      const deletions = [];
 
-        for (const [type, entries] of Object.entries(data)) {
-          for (const [id, value] of Object.entries(entries || {})) {
-            const chave = `${type}-${id}`;
+      for (const [type, entries] of Object.entries(data)) {
+        for (const [id, value] of Object.entries(entries || {})) {
+          const chave = `${type}-${id}`;
 
-            if (value === null || value === undefined) {
-              deletions.push(chave);
-            } else {
-              upserts.push({
-                perfil: profileId,
-                chave,
-                valor: serializeBaileys(value),
-                atualizado_em: new Date().toISOString()
-              });
-            }
+          if (value === null || value === undefined) {
+            deletions.push(chave);
+          } else {
+            upserts.push({
+              perfil: profileId,
+              chave,
+              valor: serializeBaileys(value),
+              atualizado_em: new Date().toISOString()
+            });
           }
         }
+      }
 
-        if (upserts.length) {
-          const { error } = await supabase
-            .from("robo_whatsapp_chaves")
-            .upsert(upserts, { onConflict: "perfil,chave" });
+      if (upserts.length) {
+        const { error } = await supabase
+          .from("robo_whatsapp_chaves")
+          .upsert(upserts, { onConflict: "perfil,chave" });
 
-          if (error) throw error;
+        if (error) throw error;
 
-          for (const item of upserts) {
-            keysMap.set(item.chave, item.valor);
-          }
+        for (const item of upserts) {
+          keysMap.set(item.chave, item.valor);
         }
+      }
 
-        if (deletions.length) {
-          const { error } = await supabase
-            .from("robo_whatsapp_chaves")
-            .delete()
-            .eq("perfil", profileId)
-            .in("chave", deletions);
+      if (deletions.length) {
+        const { error } = await supabase
+          .from("robo_whatsapp_chaves")
+          .delete()
+          .eq("perfil", profileId)
+          .in("chave", deletions);
 
-          if (error) throw error;
+        if (error) throw error;
 
-          for (const key of deletions) {
-            keysMap.delete(key);
-          }
+        for (const key of deletions) {
+          keysMap.delete(key);
         }
-      };
-
-      keysWriteQueue = keysWriteQueue
-        .catch(() => {})
-        .then(operation);
-
-      return keysWriteQueue;
+      }
     }
   };
 
@@ -1213,9 +1236,8 @@ async function clearWhatsAppAuth(profileId) {
   if (error) throw error;
 }
 
- 
 // =====================================================
-// PRODUTOS E OFERTAS
+// PRODUTOS E OFERTAS - SELEÇÃO CORRIGIDA
 // =====================================================
 
 async function getAutomaticOffer(profileId, store, destinations) {
@@ -1274,7 +1296,9 @@ async function getAutomaticOffer(profileId, store, destinations) {
     for (const product of products) {
       const id = String(product.itemId || "").trim();
 
-      if (!id || sent.has(id) || checked.has(id)) continue;
+      if (!id || sent.has(id) || checked.has(id)) {
+        continue;
+      }
 
       checked.add(id);
 
@@ -1284,6 +1308,7 @@ async function getAutomaticOffer(profileId, store, destinations) {
 
       try {
         const parsed = new URL(link);
+
         if (parsed.protocol !== "https:") continue;
       } catch {
         continue;
@@ -1300,6 +1325,7 @@ async function getAutomaticOffer(profileId, store, destinations) {
     }
 
     if (eligible.length > 0) break;
+
     if (!result?.pageInfo?.hasNextPage) break;
 
     await wait(500);
@@ -1370,7 +1396,11 @@ function createOfferMessage(product) {
     lines.push(`💰 Por apenas: ${currentPrice}`);
   }
 
-  if (currentPrice && discountPercent !== null && currentPriceNumber > 0) {
+  if (
+    currentPrice &&
+    discountPercent !== null &&
+    currentPriceNumber > 0
+  ) {
     const originalPriceNumber =
       currentPriceNumber / (1 - discountPercent / 100);
 
@@ -1388,7 +1418,7 @@ function createOfferMessage(product) {
 }
 
 // =====================================================
-// DOWNLOAD DA FOTO DO PRODUTO
+// ENVIO DA FOTO DO PRODUTO
 // =====================================================
 
 async function downloadProductImage(imageUrl) {
@@ -1449,10 +1479,6 @@ async function downloadProductImage(imageUrl) {
   };
 }
 
-// =====================================================
-// ENVIO DA FOTO DO PRODUTO
-// =====================================================
-
 async function sendProductOffer(socket, destination, product, message) {
   try {
     const image = await downloadProductImage(product.imageUrl);
@@ -1499,39 +1525,40 @@ function rejectPairingWaiters(session, error) {
   }
 }
 
-async function waitForPairingSocket(session, timeoutMs = 15000) {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    if (session.status === "connected") {
-      throw new Error("Este WhatsApp já está conectado.");
-    }
-
-    if (session.status === "error") {
-      throw new Error(
-        session.lastError || "Ocorreu um erro ao iniciar o WhatsApp."
-      );
-    }
-
-    if (
-      session.socket &&
-      typeof session.socket.requestPairingCode === "function"
-    ) {
-      return session.socket;
-    }
-
-    if (!session.socket && session.status === "disconnected") {
-      throw new Error(
-        "A conexão foi encerrada antes de liberar o pareamento."
-      );
-    }
-
-    await wait(300);
+function waitForPairingReady(session, timeoutMs = 30000) {
+  if (session.status === "connected") {
+    return Promise.reject(
+      new Error("Este WhatsApp já está conectado.")
+    );
   }
 
-  throw new Error(
-    "O WhatsApp demorou para iniciar. Tente novamente."
-  );
+  if (session.socket && session.pairingReady) {
+    return Promise.resolve();
+  }
+
+  if (!session.socket) {
+    return Promise.reject(
+      new Error("O WhatsApp não iniciou corretamente. Tente conectar novamente.")
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const waiter = { resolve, reject, timer: null };
+
+    waiter.timer = setTimeout(() => {
+      const index = session.pairingWaiters.indexOf(waiter);
+
+      if (index !== -1) {
+        session.pairingWaiters.splice(index, 1);
+      }
+
+      reject(new Error(
+        "O WhatsApp não disponibilizou o pareamento a tempo. Aguarde e tente novamente."
+      ));
+    }, timeoutMs);
+
+    session.pairingWaiters.push(waiter);
+  });
 }
 
 function scheduleReconnect(profileId) {
@@ -1596,15 +1623,9 @@ async function initializeWhatsApp(profileId) {
   session.pairingCode = null;
   session.qr = null;
 
-  const connectionId = ++session.connectionId;
-
   session.initPromise = (async () => {
     try {
       const auth = await createSupabaseAuthState(profileId);
-
-      if (session.connectionId !== connectionId) {
-        throw new Error("Inicialização antiga cancelada.");
-      }
 
       session.authState = auth;
 
@@ -1622,11 +1643,6 @@ async function initializeWhatsApp(profileId) {
       session.socket = socket;
 
       socket.ev.on("creds.update", async () => {
-        if (
-          session.connectionId !== connectionId ||
-          session.socket !== socket
-        ) return;
-
         try {
           await auth.saveCreds();
         } catch (error) {
@@ -1640,15 +1656,6 @@ async function initializeWhatsApp(profileId) {
       });
 
       socket.ev.on("connection.update", async update => {
-        if (session.connectionId !== connectionId) {
-          console.log(
-            `Evento antigo ignorado (${profileId}).`
-          );
-          return;
-        }
-
-        if (session.socket !== socket) return;
-
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
@@ -1668,8 +1675,6 @@ async function initializeWhatsApp(profileId) {
           if (!session.pairingReady) {
             session.status = "starting";
           }
-
-          resolvePairingWaiters(session);
         }
 
         if (connection === "open") {
@@ -1693,11 +1698,6 @@ async function initializeWhatsApp(profileId) {
             );
           }
 
-          if (
-            session.connectionId !== connectionId ||
-            session.socket !== socket
-          ) return;
-
           session.status = "connected";
           session.qr = null;
           session.pairingCode = null;
@@ -1714,11 +1714,6 @@ async function initializeWhatsApp(profileId) {
         }
 
         if (connection === "close") {
-          if (
-            session.connectionId !== connectionId ||
-            session.socket !== socket
-          ) return;
-
           session.socket = null;
           session.qr = null;
           session.pairingReady = false;
@@ -1762,20 +1757,16 @@ async function initializeWhatsApp(profileId) {
 
       return session;
     } catch (error) {
-      if (session.connectionId === connectionId) {
-        session.status = "error";
-        session.lastError = error.message;
-        session.socket = null;
-        session.pairingReady = false;
+      session.status = "error";
+      session.lastError = error.message;
+      session.socket = null;
+      session.pairingReady = false;
 
-        rejectPairingWaiters(session, error);
-      }
+      rejectPairingWaiters(session, error);
 
       throw error;
     } finally {
-      if (session.connectionId === connectionId) {
-        session.initPromise = null;
-      }
+      session.initPromise = null;
     }
   })();
 
@@ -2215,9 +2206,7 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
   }
 });
 
-// =====================================================
 // PAREAMENTO POR NÚMERO
-// =====================================================
 
 app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
   const profileId = getProfile(req);
@@ -2252,44 +2241,33 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
 
       if (!session.socket || !session.authState) {
         throw new Error(
-          "Não foi possível iniciar o WhatsApp. Tente conectar novamente."
+          "Não foi possível iniciar o WhatsApp. Tente novamente."
         );
       }
 
       if (session.authState.state.creds.registered) {
         throw new Error(
-          "Este perfil já possui uma sessão registrada. Verifique a conexão existente antes de solicitar outro código."
+          "Este perfil já possui uma sessão registrada. Não solicite outro código antes de verificar a conexão existente."
         );
       }
 
-      const socket = await waitForPairingSocket(session, 15000);
+      await waitForPairingReady(session, 30000);
+
+      if (!session.socket || session.status === "disconnected") {
+        throw new Error(
+          "A conexão foi encerrada antes da solicitação do código."
+        );
+      }
 
       if (session.status === "connected") {
         throw new Error("Este WhatsApp já está conectado.");
       }
 
-      await wait(1500);
+      await wait(2000);
 
-      if (
-        !session.socket ||
-        session.socket !== socket ||
-        session.status === "disconnected"
-      ) {
-        throw new Error(
-          "A conexão foi encerrada antes da geração do código. Tente novamente."
-        );
-      }
-
-      const code = await socket.requestPairingCode(phone);
-
-      if (!code) {
-        throw new Error(
-          "O WhatsApp não retornou um código de pareamento. Tente novamente."
-        );
-      }
+      const code = await session.socket.requestPairingCode(phone);
 
       session.pairingCode = code;
-      session.lastError = null;
 
       console.log(
         `Código de pareamento solicitado para ${profileId}.`
@@ -2324,16 +2302,11 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
   }
 });
 
-// =====================================================
-// DESCONECTAR WHATSAPP
-// =====================================================
-
 app.post("/api/whatsapp/disconnect", adminOnly, async (req, res) => {
   const profileId = getProfile(req);
   const session = sessions[profileId];
 
   session.manualDisconnect = true;
-  session.connectionId++;
 
   if (session.reconnectTimer) {
     clearTimeout(session.reconnectTimer);
@@ -2382,10 +2355,6 @@ app.post("/api/whatsapp/disconnect", adminOnly, async (req, res) => {
   });
 });
 
-// =====================================================
-// ENVIAR MENSAGEM DE TESTE
-// =====================================================
-
 app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
   const profileId = getProfile(req);
   const session = sessions[profileId];
@@ -2421,10 +2390,6 @@ app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
   }
 });
 
-// =====================================================
-// CARREGAR GRUPOS DO WHATSAPP
-// =====================================================
-
 app.get("/api/whatsapp/groups", adminOnly, async (req, res) => {
   const profileId = getProfile(req);
   const session = sessions[profileId];
@@ -2450,7 +2415,7 @@ app.get("/api/whatsapp/groups", adminOnly, async (req, res) => {
           niche: niche.id,
           nicheLabel: niche.label,
           confidence: niche.confidence,
-          identified: niche.id !== "unknown" && niche.id !== "ambiguous"
+          identified: niche.id !== "unknown"
         };
       })
     });
@@ -2495,7 +2460,7 @@ app.post("/api/niches/classify", adminOnly, (req, res) => {
     type: "group",
     text,
     niche,
-    identified: niche.id !== "unknown" && niche.id !== "ambiguous"
+    identified: niche.id !== "unknown"
   });
 });
 
@@ -2519,17 +2484,13 @@ app.get("/api/destinations", adminOnly, (req, res) => {
   res.json({
     ok: true,
     destinations: store.destinations.map(destination => {
-      const niche = classifyGroupNiche(
-        destination.groupName ||
-        destination.subject ||
-        destination.name
-      );
+      const niche = classifyGroupNiche(destination.name);
 
       return {
         ...destination,
         detectedNiche: niche.id,
         nicheLabel: niche.label,
-        nicheIdentified: niche.id !== "unknown" && niche.id !== "ambiguous"
+        nicheIdentified: niche.id !== "unknown"
       };
     })
   });
@@ -2579,11 +2540,6 @@ app.post("/api/destinations", adminOnly, async (req, res) => {
   const destination = {
     id: crypto.randomUUID(),
     name: String(req.body.name || "").trim(),
-    groupName: String(
-      req.body.groupName ||
-      req.body.subject ||
-      ""
-    ).trim(),
     phone: String(req.body.phone || "").trim(),
     groupId: String(req.body.groupId || "").trim(),
     active: req.body.active !== false,
@@ -2601,9 +2557,7 @@ app.post("/api/destinations", adminOnly, async (req, res) => {
   try {
     await saveStore(profileId, store);
 
-    const niche = classifyGroupNiche(
-      destination.groupName || destination.name
-    );
+    const niche = classifyGroupNiche(destination.name);
 
     res.json({
       ok: true,
@@ -2703,325 +2657,3 @@ app.post("/api/shopee/credentials", adminOnly, async (req, res) => {
       ok: true,
       configured: true,
       message: "Credenciais salvas com segurança para este perfil."
-    });
-  } catch (error) {
-    res.status(500).json({
-      ok: false,
-      error: error.message
-    });
-  }
-});
-
-// =====================================================
-// SHOPEE - TESTAR CONEXÃO
-// =====================================================
-
-app.post("/api/shopee/test", adminOnly, async (req, res) => {
-  const profileId = getProfile(req);
-
-  const query = `
-    query {
-      productOfferV2(keyword: "", sortType: 5, page: 1, limit: 1) {
-        nodes {
-          itemId
-          productName
-          offerLink
-          commissionRate
-        }
-        pageInfo {
-          page
-          limit
-          hasNextPage
-        }
-      }
-    }
-  `;
-
-  try {
-    const data = await shopeeRequest(profileId, query);
-    const products = data?.productOfferV2?.nodes || [];
-
-    res.json({
-      ok: true,
-      connected: true,
-      productsFound: products.length,
-      message: "A API respondeu corretamente."
-    });
-  } catch (error) {
-    res.status(400).json({
-      ok: false,
-      connected: false,
-      error: error.message
-    });
-  }
-});
-
-// =====================================================
-// SHOPEE - PESQUISAR OFERTAS
-// =====================================================
-
-app.get("/api/shopee/products", adminOnly, async (req, res) => {
-  const profileId = getProfile(req);
-  const keyword = String(req.query.keyword || "").trim();
-
-  const limit = Math.min(
-    Math.max(parseInt(req.query.limit || "30", 10) || 30, 1),
-    30
-  );
-
-  if (activeSearches[profileId]) {
-    return res.status(429).json({
-      ok: false,
-      error: "Já existe uma pesquisa em andamento. Aguarde terminar."
-    });
-  }
-
-  activeSearches[profileId] = true;
-
-  const sortModes = [
-    { type: 1, name: "Relevância" },
-    { type: 2, name: "Mais vendidos" },
-    { type: 3, name: "Maior preço" },
-    { type: 4, name: "Menor preço" },
-    { type: 5, name: "Maior comissão" }
-  ];
-
-  const maxPages = 3;
-
-  const query = `
-    query SearchOffers(
-      $keyword: String,
-      $sortType: Int,
-      $page: Int,
-      $limit: Int
-    ) {
-      productOfferV2(
-        keyword: $keyword,
-        sortType: $sortType,
-        page: $page,
-        limit: $limit
-      ) {
-        nodes {
-          itemId
-          productName
-          productLink
-          offerLink
-          imageUrl
-          priceMin
-          priceMax
-          priceDiscountRate
-          sales
-          ratingStar
-          commissionRate
-          sellerCommissionRate
-          shopeeCommissionRate
-          commission
-          shopName
-        }
-        pageInfo {
-          page
-          limit
-          hasNextPage
-        }
-      }
-    }
-  `;
-
-  const productsMap = new Map();
-  const errors = [];
-
-  let pagesRead = 0;
-  let successfulSearches = 0;
-
-  try {
-    for (const mode of sortModes) {
-      for (let page = 1; page <= maxPages; page++) {
-        try {
-          const data = await shopeeRequest(profileId, query, {
-            keyword,
-            sortType: mode.type,
-            page,
-            limit
-          });
-
-          const result = data?.productOfferV2;
-
-          if (!result) {
-            throw new Error(
-              "A Shopee não retornou a lista de ofertas."
-            );
-          }
-
-          successfulSearches++;
-          pagesRead++;
-
-          const products = Array.isArray(result.nodes)
-            ? result.nodes
-            : [];
-
-          for (const product of products) {
-            const id = String(product.itemId || "").trim();
-            const link = String(
-              product.offerLink || product.productLink || ""
-            ).trim();
-            const name = String(product.productName || "").trim();
-
-            const uniqueKey = id
-              ? `id:${id}`
-              : link
-                ? `link:${link}`
-                : name.toLowerCase();
-
-            if (!uniqueKey || uniqueKey === "id:") continue;
-
-            if (!productsMap.has(uniqueKey)) {
-              const niches = classifyProductNiches(product);
-
-              productsMap.set(uniqueKey, {
-                ...product,
-                detectedNiches: niches.map(item => item.id),
-                nicheLabels: niches.map(item => item.label),
-                searchSort: mode.name
-              });
-            }
-          }
-
-          if (!result.pageInfo?.hasNextPage) break;
-
-          await wait(500);
-        } catch (error) {
-          errors.push({
-            sort: mode.name,
-            page,
-            error: error.message
-          });
-
-          break;
-        }
-      }
-
-      await wait(700);
-    }
-
-    const products = Array.from(productsMap.values());
-
-    if (successfulSearches === 0) {
-      return res.status(502).json({
-        ok: false,
-        error: errors[0]?.error ||
-          "Não foi possível pesquisar ofertas na Shopee.",
-        details: errors
-      });
-    }
-
-    res.json({
-      ok: true,
-      keyword: keyword || "Todas as ofertas",
-      products,
-      total: products.length,
-      pagesRead,
-      successfulSearches,
-      duplicateFilter: true,
-      partial: errors.length > 0,
-      warnings: errors,
-      message: products.length
-        ? `${products.length} ofertas encontradas sem produtos repetidos.`
-        : "A pesquisa terminou, mas não encontrou produtos."
-    });
-  } catch (error) {
-    console.error("Erro geral na pesquisa Shopee:", error);
-
-    res.status(500).json({
-      ok: false,
-      error: error.message
-    });
-  } finally {
-    activeSearches[profileId] = false;
-  }
-});
-
-// =====================================================
-// ERROS E INICIALIZAÇÃO
-// =====================================================
-
-app.use((req, res) => {
-  res.status(404).json({
-    ok: false,
-    error: "Rota não encontrada."
-  });
-});
-
-app.use((error, req, res, next) => {
-  console.error("Erro no servidor:", error);
-
-  res.status(500).json({
-    ok: false,
-    error: "Erro interno do servidor."
-  });
-});
-
-async function initializeApp() {
-  console.log("Carregando dados do Supabase...");
-
-  await loadStoresFromSupabase();
-
-  console.log("Dados do painel carregados.");
-
-  for (const profileId of Object.keys(PROFILES)) {
-    try {
-      const auth = await createSupabaseAuthState(profileId);
-
-      const hasRegisteredSession =
-        auth.state.creds.registered === true;
-
-      const hasSavedKeys =
-        auth.storedKeysCount > 0;
-
-      if (hasRegisteredSession || hasSavedKeys) {
-        console.log(
-          `Sessão ou chaves encontradas para ${profileId}. Tentando recuperar WhatsApp...`
-        );
-
-        initializeWhatsApp(profileId).catch(error => {
-          console.error(
-            `Erro ao restaurar WhatsApp (${profileId}):`,
-            error.message
-          );
-        });
-      } else {
-        console.log(
-          `Nenhuma sessão ou chave encontrada para ${profileId}.`
-        );
-      }
-    } catch (error) {
-      console.error(
-        `Erro ao verificar sessão WhatsApp (${profileId}):`,
-        error.message
-      );
-    }
-  }
-
-  setInterval(() => {
-    runAutomation("rafael").catch(console.error);
-    runAutomation("usuario2").catch(console.error);
-  }, 1000);
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(
-      `MEDEIROS DIGITAL iniciado na porta ${PORT}`
-    );
-
-    console.log("Persistência de dados: Supabase");
-    console.log("Identificação automática de nichos: ativada");
-    console.log("Seleção de ofertas compatíveis: ativada");
-  });
-}
-
-initializeApp().catch(error => {
-  console.error(
-    "Não foi possível iniciar o sistema:",
-    error
-  );
-
-  process.exit(1);
-});
