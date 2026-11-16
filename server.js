@@ -1,4 +1,3 @@
-
 const express = require("express");
 const helmet = require("helmet");
 const crypto = require("crypto");
@@ -300,42 +299,70 @@ const NICHE_DEFINITIONS = [
   }
 ];
 
+// Apelidos e expressões comuns usados nos nomes dos grupos.
+// Não é necessário que o nome do grupo seja igual ao nome do nicho.
+
 const GROUP_NICHE_ALIASES = {
   moda_feminina: [
     "tudo feminino",
+    "tudo delas",
     "mundo delas",
+    "achadinhos delas",
+    "achadinhos das meninas",
     "achadinhos das mulheres",
     "achadinhos feminino",
     "universo feminino",
+    "universo das mulheres",
     "cantinho feminino",
     "ofertas para elas",
     "estilo das mulheres",
     "mulheres que amam ofertas",
     "moda para elas",
     "look das meninas",
-    "closet feminino"
+    "closet feminino",
+    "closet das meninas",
+    "roupas para elas",
+    "roupas femininas",
+    "moda das mulheres",
+    "divas e ofertas",
+    "mundo feminino",
+    "cantinho das mulheres",
+    "achadinhos das divas"
   ],
+
   moda_masculina: [
     "tudo masculino",
+    "tudo deles",
     "estilo masculino",
     "estilo dos homens",
     "moda dos homens",
     "achadinhos masculinos",
     "achadinhos dos homens",
+    "achadinhos deles",
     "mundo masculino",
     "ofertas para eles",
     "moda para eles",
     "universo masculino",
-    "closet masculino"
+    "closet masculino",
+    "roupas para eles",
+    "roupas masculinas",
+    "moda dos rapazes",
+    "mundo dos homens",
+    "achadinhos masculinos"
   ],
+
   calcados_bolsas: [
     "mundo dos calcados",
     "ofertas de calcados",
     "bolsas e sapatos",
     "achadinhos de bolsas",
     "mundo das bolsas",
-    "calcados e acessorios"
+    "calcados e acessorios",
+    "bolsas e calcados",
+    "amantes de bolsas",
+    "clube dos calcados"
   ],
+
   eletronicos: [
     "mundo tech",
     "universo tech",
@@ -343,16 +370,22 @@ const GROUP_NICHE_ALIASES = {
     "achadinhos de tecnologia",
     "ofertas tech",
     "gadgets",
-    "mundo dos eletronicos"
+    "mundo dos eletronicos",
+    "ofertas de tecnologia",
+    "clube da tecnologia"
   ],
+
   informatica: [
     "mundo da informatica",
     "pecas de pc",
     "setup gamer",
     "setup pc",
     "computacao",
-    "universo gamer"
+    "universo gamer",
+    "mundo dos computadores",
+    "acessorios para pc"
   ],
+
   casa_decoracao: [
     "lar e decoracao",
     "meu lar",
@@ -360,53 +393,78 @@ const GROUP_NICHE_ALIASES = {
     "casa organizada",
     "utilidades para casa",
     "achadinhos para casa",
-    "mundo da cozinha"
+    "mundo da cozinha",
+    "casa e lar",
+    "ofertas para o lar",
+    "decorando meu lar"
   ],
+
   beleza_cosmeticos: [
     "mundo da beleza",
     "cantinho da beleza",
     "beleza feminina",
     "achadinhos de beleza",
     "universo da maquiagem",
-    "maquiagem e cuidados"
+    "maquiagem e cuidados",
+    "clube da beleza",
+    "cuidados pessoais",
+    "pele e beleza"
   ],
+
   perfumes: [
     "mundo dos perfumes",
     "achadinhos de perfumes",
     "perfumaria e ofertas",
     "clube dos perfumes",
-    "fragrancias e perfumes"
+    "fragrancias e perfumes",
+    "amantes de perfumes",
+    "ofertas de perfumaria"
   ],
+
   infantil_bebe: [
     "mundo infantil",
     "universo do bebe",
     "maes e bebes",
     "achadinhos para criancas",
     "cantinho do bebe",
-    "mundo das criancas"
+    "mundo das criancas",
+    "ofertas para bebe",
+    "tudo para bebe",
+    "pais e bebes"
   ],
+
   esportes_fitness: [
     "vida fitness",
     "mundo fitness",
     "projeto fitness",
     "treino e academia",
     "universo fitness",
-    "achadinhos fitness"
+    "achadinhos fitness",
+    "clube fitness",
+    "vida de academia",
+    "mundo dos esportes"
   ],
+
   mercado_alimentos: [
     "ofertas de mercado",
     "achadinhos de mercado",
     "economia no mercado",
     "cesta de ofertas",
-    "mundo das ofertas de mercado"
+    "mundo das ofertas de mercado",
+    "economia nas compras",
+    "ofertas de supermercado"
   ],
+
   automotivo: [
     "mundo automotivo",
     "acessorios para carros",
     "universo automotivo",
     "ofertas para carros",
-    "ofertas para motos"
+    "ofertas para motos",
+    "clube dos motoristas",
+    "mundo das motos"
   ],
+
   eletricos: [
     "tudo de eletrica",
     "tudo sobre eletrica",
@@ -417,16 +475,41 @@ const GROUP_NICHE_ALIASES = {
     "instalacoes eletricas",
     "ferramentas de eletrica"
   ],
+
   pet: [
     "universo pet",
     "mundo pet",
     "amantes de pets",
+    "amantes dos pets",
+    "amantes dos bichinhos",
+    "mundo dos bichinhos",
     "amigos dos animais",
+    "amigos dos pets",
     "pais de pet",
+    "pais de pets",
     "maes de pet",
+    "maes de pets",
+    "mães de pets",
     "tudo para pets",
+    "tudo para pet",
     "achadinhos pet",
-    "cantinho pet"
+    "cantinho pet",
+    "cantinho dos pets",
+    "caes e gatos",
+    "cachorros e gatos",
+    "cães e gatos",
+    "dog lovers",
+    "pet lovers",
+    "doguinhos",
+    "gatinho e cachorro",
+    "gatunos",
+    "meu bichinho",
+    "meus bichinhos",
+    "universo dos animais",
+    "animais de estimacao",
+    "ofertas para pets",
+    "produtos para pets",
+    "mundo animal"
   ]
 };
 
@@ -478,15 +561,24 @@ function classifyGroupNiche(groupName) {
   const best = scores[0];
   const second = scores[1];
 
-  if (
-    !best ||
-    best.score < 3 ||
-    (second && best.score === second.score)
-  ) {
+  if (!best || best.score < 3) {
     return {
       id: "unknown",
       label: "Não identificado",
       confidence: 0
+    };
+  }
+
+  // Se o nome indicar dois nichos com a mesma força,
+  // não tratar o grupo como geral.
+  if (second && best.score === second.score && second.score >= 3) {
+    return {
+      id: "ambiguous",
+      label: "Mais de um nicho identificado",
+      confidence: 0,
+      possibleNiches: scores
+        .filter(item => item.score === best.score)
+        .map(item => item.id)
     };
   }
 
@@ -547,6 +639,8 @@ function classifyProductNiches(product) {
   const description = normalizeText(product?.description || "");
 
   const mainText = `${title} ${category}`;
+  const fullText = `${title} ${category} ${description}`;
+
   const results = [];
 
   for (const definition of NICHE_DEFINITIONS) {
@@ -573,14 +667,16 @@ function classifyProductNiches(product) {
     }
   }
 
-  const hasClothing = containsAnyTerm(mainText, CLOTHING_TERMS);
-  const hasFootwear = containsAnyTerm(mainText, FOOTWEAR_TERMS);
+  const hasClothing = containsAnyTerm(fullText, CLOTHING_TERMS);
+  const hasFootwear = containsAnyTerm(fullText, FOOTWEAR_TERMS);
 
-  const isFemale = containsAnyTerm(mainText, FEMALE_TERMS);
-  const isMale = containsAnyTerm(mainText, MALE_TERMS);
+  const isFemale = containsAnyTerm(fullText, FEMALE_TERMS);
+  const isMale = containsAnyTerm(fullText, MALE_TERMS);
 
   const hasPerfume = results.some(item => item.id === "perfumes");
 
+  // Só atribui gênero quando existe indicação explícita.
+  // Perfume feminino, por exemplo, continua sendo Perfumes.
   if (!hasPerfume && (hasClothing || hasFootwear)) {
     if (isFemale && !isMale) {
       if (!results.some(item => item.id === "moda_feminina")) {
@@ -603,6 +699,8 @@ function classifyProductNiches(product) {
     }
   }
 
+  // Calçados também podem pertencer ao nicho de calçados,
+  // sem depender de gênero.
   if (
     hasFootwear &&
     !results.some(item => item.id === "calcados_bolsas")
@@ -624,9 +722,15 @@ function getProductNicheLabels(product) {
 }
 
 function destinationMatchesProduct(destination, product) {
-  const groupNiche = classifyGroupNiche(destination.name);
+  const groupName =
+    destination.groupName ||
+    destination.subject ||
+    destination.name;
+
+  const groupNiche = classifyGroupNiche(groupName);
   const productNiches = classifyProductNiches(product);
 
+  // Grupo sem referência a um nicho: pode receber ofertas variadas.
   if (groupNiche.id === "unknown") {
     return {
       matches: true,
@@ -636,6 +740,17 @@ function destinationMatchesProduct(destination, product) {
     };
   }
 
+  // Nome com mais de um nicho identificado: bloqueia por segurança.
+  if (groupNiche.id === "ambiguous") {
+    return {
+      matches: false,
+      reason: "O nome do grupo indica mais de um nicho. Verifique o nome cadastrado.",
+      groupNiche,
+      productNiches
+    };
+  }
+
+  // Produto sem classificação não entra em grupo especializado.
   if (!productNiches.length) {
     return {
       matches: false,
@@ -1342,7 +1457,6 @@ async function getAutomaticOffer(profileId, store, destinations) {
     Math.floor(Math.random() * eligible.length)
   ];
 }
-
 function formatMoney(value) {
   const number = Number(value);
 
@@ -2416,7 +2530,7 @@ app.get("/api/whatsapp/groups", adminOnly, async (req, res) => {
           niche: niche.id,
           nicheLabel: niche.label,
           confidence: niche.confidence,
-          identified: niche.id !== "unknown"
+          identified: niche.id !== "unknown" && niche.id !== "ambiguous"
         };
       })
     });
@@ -2461,7 +2575,7 @@ app.post("/api/niches/classify", adminOnly, (req, res) => {
     type: "group",
     text,
     niche,
-    identified: niche.id !== "unknown"
+    identified: niche.id !== "unknown" && niche.id !== "ambiguous"
   });
 });
 
@@ -2485,13 +2599,17 @@ app.get("/api/destinations", adminOnly, (req, res) => {
   res.json({
     ok: true,
     destinations: store.destinations.map(destination => {
-      const niche = classifyGroupNiche(destination.name);
+      const niche = classifyGroupNiche(
+        destination.groupName ||
+        destination.subject ||
+        destination.name
+      );
 
       return {
         ...destination,
         detectedNiche: niche.id,
         nicheLabel: niche.label,
-        nicheIdentified: niche.id !== "unknown"
+        nicheIdentified: niche.id !== "unknown" && niche.id !== "ambiguous"
       };
     })
   });
@@ -2541,6 +2659,11 @@ app.post("/api/destinations", adminOnly, async (req, res) => {
   const destination = {
     id: crypto.randomUUID(),
     name: String(req.body.name || "").trim(),
+    groupName: String(
+      req.body.groupName ||
+      req.body.subject ||
+      ""
+    ).trim(),
     phone: String(req.body.phone || "").trim(),
     groupId: String(req.body.groupId || "").trim(),
     active: req.body.active !== false,
@@ -2558,7 +2681,9 @@ app.post("/api/destinations", adminOnly, async (req, res) => {
   try {
     await saveStore(profileId, store);
 
-    const niche = classifyGroupNiche(destination.name);
+    const niche = classifyGroupNiche(
+      destination.groupName || destination.name
+    );
 
     res.json({
       ok: true,
