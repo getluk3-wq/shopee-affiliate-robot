@@ -264,7 +264,6 @@ function scoreNiche(text, definition) {
     if (!normalizedKeyword) continue;
 
     if (normalized.includes(normalizedKeyword)) {
-      // Expressões específicas têm mais peso.
       score += normalizedKeyword.includes(" ") ? 3 : 2;
     }
   }
@@ -294,7 +293,6 @@ function classifyGroupNiche(groupName) {
   const best = scores[0];
   const second = scores[1];
 
-  // Para grupos, exige um nome suficientemente específico.
   if (
     !best ||
     best.score < 2 ||
@@ -315,11 +313,19 @@ function classifyGroupNiche(groupName) {
 }
 
 function classifyProductNiches(product) {
-  const title = normalizeText(product?.productName || product?.name || product?.title);
-  const description = normalizeText(product?.description || "");
-  const category = normalizeText(
-    product?.category || product?.categoryName || product?.category_name || ""
+  const title = normalizeText(
+    product?.productName || product?.name || product?.title
   );
+
+  const description = normalizeText(product?.description || "");
+
+  const category = normalizeText(
+    product?.category ||
+    product?.categoryName ||
+    product?.category_name ||
+    ""
+  );
+
   const shop = normalizeText(product?.shopName || "");
 
   const titleScores = NICHE_DEFINITIONS.map(definition => ({
@@ -358,14 +364,12 @@ function classifyProductNiches(product) {
     const shopScore =
       shopScores.find(item => item.id === definition.id)?.score || 0;
 
-    // O título é a principal fonte de identificação.
     const total =
       titleScore * 3 +
       categoryScore * 3 +
       descriptionScore +
       shopScore;
 
-    // Sem evidência suficiente no título ou categoria, não classifica.
     const confident =
       titleScore >= 2 ||
       categoryScore >= 2 ||
@@ -380,7 +384,6 @@ function classifyProductNiches(product) {
     }
   }
 
-  // Ordena os nichos identificados por força da correspondência.
   results.sort((a, b) => b.score - a.score);
 
   return results;
@@ -390,14 +393,15 @@ function getProductNicheLabels(product) {
   return classifyProductNiches(product).map(item => item.label);
 }
 
+// GRUPO NÃO IDENTIFICADO = GRUPO GERAL
 function destinationMatchesProduct(destination, product) {
   const groupNiche = classifyGroupNiche(destination.name);
   const productNiches = classifyProductNiches(product);
 
   if (groupNiche.id === "unknown") {
     return {
-      matches: false,
-      reason: `Nicho do grupo "${destination.name}" não identificado.`,
+      matches: true,
+      reason: "Grupo geral: aceita qualquer categoria.",
       groupNiche,
       productNiches
     };
@@ -412,7 +416,9 @@ function destinationMatchesProduct(destination, product) {
     };
   }
 
-  const matches = productNiches.some(item => item.id === groupNiche.id);
+  const matches = productNiches.some(
+    item => item.id === groupNiche.id
+  );
 
   return {
     matches,
@@ -525,7 +531,7 @@ function normalizeAutomation(saved = {}) {
       ? saved.destinationIds
       : [],
     sentProductIds: Array.isArray(saved.sentProductIds)
-      ? saved.sentProductIds
+      ? saved.sentProductIds.map(String)
       : []
   };
 }
@@ -1003,10 +1009,10 @@ async function clearWhatsAppAuth(profileId) {
 }
 
 // =====================================================
-// PRODUTOS E OFERTAS
+// PRODUTOS E OFERTAS - SELEÇÃO CORRIGIDA
 // =====================================================
 
-async function getAutomaticOffer(profileId, store) {
+async function getAutomaticOffer(profileId, store, destinations) {
   const query = `
     query AutomaticOffers($page: Int, $limit: Int) {
       productOfferV2(
@@ -1041,26 +1047,77 @@ async function getAutomaticOffer(profileId, store) {
     }
   `;
 
-  const data = await shopeeRequest(profileId, query, {
-    page: 1,
-    limit: 30
-  });
+  const sent = new Set(
+    store.automation.sentProductIds.map(String)
+  );
 
-  const products = data?.productOfferV2?.nodes || [];
-  const sent = new Set(store.automation.sentProductIds);
+  const checked = new Set();
+  const eligible = [];
 
-  const available = products.find(product => {
-    const id = String(product.itemId || "").trim();
-    return id && !sent.has(id);
-  });
+  // Examina até 5 páginas, com até 30 produtos por página.
+  for (let page = 1; page <= 5; page++) {
+    const data = await shopeeRequest(profileId, query, {
+      page,
+      limit: 30
+    });
 
-  if (!available) {
+    const result = data?.productOfferV2;
+    const products = Array.isArray(result?.nodes)
+      ? result.nodes
+      : [];
+
+    for (const product of products) {
+      const id = String(product.itemId || "").trim();
+
+      if (!id || sent.has(id) || checked.has(id)) {
+        continue;
+      }
+
+      checked.add(id);
+
+      const link = String(
+        product.offerLink || product.productLink || ""
+      ).trim();
+
+      // Só aceita links HTTPS válidos.
+      try {
+        const parsed = new URL(link);
+
+        if (parsed.protocol !== "https:") continue;
+      } catch {
+        continue;
+      }
+
+      // Só aceita produto que tenha pelo menos um destino compatível.
+      const matchingDestinations = destinations.filter(
+        destination =>
+          destinationMatchesProduct(destination, product).matches
+      );
+
+      if (!matchingDestinations.length) continue;
+
+      eligible.push(product);
+    }
+
+    // Se já encontrou produtos compatíveis nesta página,
+    // não precisa consultar as próximas páginas.
+    if (eligible.length > 0) break;
+
+    if (!result?.pageInfo?.hasNextPage) break;
+
+    await wait(500);
+  }
+
+  if (!eligible.length) {
     throw new Error(
-      "Não há novos produtos nesta página da Shopee. Nenhum produto repetido será enviado."
+      "Não encontrei ofertas novas compatíveis com os grupos selecionados. Verifique os nomes dos grupos ou tente novamente mais tarde."
     );
   }
 
-  return available;
+  // Escolhe aleatoriamente entre os produtos elegíveis.
+  return eligible[
+    Math.floor(Math.random() * eligible.length)
+  ];
 }
 
 function formatMoney(value) {
@@ -1463,7 +1520,7 @@ async function initializeWhatsApp(profileId) {
             );
           }
 
-          // IMPORTANTE: não apaga automaticamente as credenciais.
+          // Não apaga automaticamente as credenciais.
           if (loggedOut) {
             session.lastError =
               "WhatsApp retornou loggedOut. Dados preservados no Supabase. Verifique a sessão antes de parear novamente.";
@@ -1558,14 +1615,14 @@ async function runAutomation(profileId) {
       }
     }
 
-    const product = await getAutomaticOffer(profileId, store);
-    const productNiches = classifyProductNiches(product);
+    // Busca um produto que combine com pelo menos um grupo.
+    const product = await getAutomaticOffer(
+      profileId,
+      store,
+      selectedDestinations
+    );
 
-    if (!productNiches.length) {
-      throw new Error(
-        `Produto ignorado: não foi possível identificar com segurança o nicho de "${product.productName}". Nenhum grupo recebeu esta oferta.`
-      );
-    }
+    const productNiches = classifyProductNiches(product);
 
     const matchingDestinations = [];
     const skippedDestinations = [];
@@ -1584,16 +1641,8 @@ async function runAutomation(profileId) {
     }
 
     if (!matchingDestinations.length) {
-      const productLabels = productNiches
-        .map(item => item.label)
-        .join(", ");
-
-      const skippedText = skippedDestinations
-        .map(item => `${item.name}: ${item.reason}`)
-        .join(" | ");
-
       throw new Error(
-        `Nenhum grupo compatível com o produto "${product.productName}". Nicho identificado: ${productLabels}. ${skippedText}`
+        `Nenhum grupo compatível com o produto "${product.productName}".`
       );
     }
 
@@ -1645,7 +1694,7 @@ async function runAutomation(profileId) {
       automation.lastSentAt = new Date().toISOString();
 
       const skippedSummary = skippedDestinations.length
-        ? ` Grupos ignorados por nicho diferente ou não identificado: ${skippedDestinations.map(item => item.name).join(", ")}.`
+        ? ` Grupos ignorados por nicho diferente: ${skippedDestinations.map(item => item.name).join(", ")}.`
         : "";
 
       automation.lastError = errors.length
@@ -1668,7 +1717,7 @@ async function runAutomation(profileId) {
       ).toISOString();
 
       console.log(
-        `Oferta ${productId} (${productNiches.map(item => item.label).join(", ")}) enviada pelo perfil ${profileId} para ${sentCount} grupo(s). Com foto: ${imageSentCount}.`
+        `Oferta ${productId} (${productNiches.map(item => item.label).join(", ") || "Nicho geral"}) enviada pelo perfil ${profileId} para ${sentCount} grupo(s). Com foto: ${imageSentCount}.`
       );
 
       if (skippedDestinations.length) {
@@ -2288,14 +2337,14 @@ app.post("/api/destinations", adminOnly, async (req, res) => {
   try {
     await saveStore(profileId, store);
 
+    const niche = classifyGroupNiche(destination.name);
+
     res.json({
       ok: true,
       destination: {
         ...destination,
-        ...{
-          detectedNiche: classifyGroupNiche(destination.name).id,
-          nicheLabel: classifyGroupNiche(destination.name).label
-        }
+        detectedNiche: niche.id,
+        nicheLabel: niche.label
       }
     });
   } catch (error) {
@@ -2698,6 +2747,7 @@ async function initializeApp() {
 
     console.log("Persistência de dados: Supabase");
     console.log("Identificação automática de nichos: ativada");
+    console.log("Seleção de ofertas compatíveis: ativada");
   });
 }
 
