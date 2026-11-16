@@ -42,11 +42,7 @@ const supabase = createClient(
 );
 
 async function updateProfileColumn(profileId, column, value) {
-  const allowed = [
-    "dados",
-    "credenciais_shopee",
-    "sessao_whatsapp"
-  ];
+  const allowed = ["dados", "credenciais_shopee", "sessao_whatsapp"];
 
   if (!allowed.includes(column)) {
     throw new Error("Coluna de perfil não permitida.");
@@ -68,10 +64,7 @@ async function updateProfileColumn(profileId, column, value) {
   if (!data || data.length === 0) {
     const { error: insertError } = await supabase
       .from("robo_perfis")
-      .insert({
-        perfil: profileId,
-        ...payload
-      });
+      .insert({ perfil: profileId, ...payload });
 
     if (insertError) throw insertError;
   }
@@ -123,6 +116,313 @@ const automationRunning = {
   rafael: false,
   usuario2: false
 };
+
+// =====================================================
+// IDENTIFICAÇÃO AUTOMÁTICA DE NICHOS
+// =====================================================
+
+function normalizeText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const NICHE_DEFINITIONS = [
+  {
+    id: "moda_feminina",
+    label: "Moda Feminina",
+    keywords: [
+      "moda feminina", "roupa feminina", "vestido", "blusa feminina",
+      "saia", "cropped", "conjunto feminino", "lingerie", "sutia",
+      "calcinha", "body feminino", "top feminino", "calca feminina",
+      "short feminino", "moda mulher", "feminino"
+    ]
+  },
+  {
+    id: "moda_masculina",
+    label: "Moda Masculina",
+    keywords: [
+      "moda masculina", "roupa masculina", "camisa masculina",
+      "camiseta masculina", "bermuda masculina", "calca masculina",
+      "cueca", "polo masculina", "moletom masculino",
+      "masculino"
+    ]
+  },
+  {
+    id: "calcados_bolsas",
+    label: "Calçados e Bolsas",
+    keywords: [
+      "calcados", "sapato", "tenis", "sandalia", "chinelo",
+      "bota", "rasteirinha", "scarpin", "bolsa", "mochila",
+      "carteira", "mala", "sapatilha"
+    ]
+  },
+  {
+    id: "eletronicos",
+    label: "Eletrônicos",
+    keywords: [
+      "eletronicos", "celular", "smartphone", "fone", "headphone",
+      "bluetooth", "caixa de som", "televisao", "televisor",
+      "smartwatch", "carregador", "cabo usb", "camera digital",
+      "tablet", "controle remoto", "videogame", "console",
+      "power bank", "tv"
+    ]
+  },
+  {
+    id: "informatica",
+    label: "Informática",
+    keywords: [
+      "informatica", "notebook", "laptop", "computador",
+      "teclado", "mouse", "monitor", "impressora", "roteador",
+      "webcam", "hd externo", "ssd", "memoria ram",
+      "placa de video", "gabinete"
+    ]
+  },
+  {
+    id: "casa_decoracao",
+    label: "Casa e Decoração",
+    keywords: [
+      "casa e decoracao", "decoracao", "cozinha", "panela",
+      "utensilio", "organizador", "sofa", "mesa", "cadeira",
+      "cama", "banho", "cortina", "tapete", "luminaria",
+      "eletrodomestico", "ventilador", "liquidificador",
+      "air fryer", "fritadeira", "cafeteira", "torneira"
+    ]
+  },
+  {
+    id: "beleza_cosmeticos",
+    label: "Beleza e Cosméticos",
+    keywords: [
+      "beleza", "cosmeticos", "maquiagem", "batom",
+      "rimel", "mascara de cilios", "base facial", "corretivo",
+      "skincare", "hidratante", "shampoo", "condicionador",
+      "esmalte", "unha", "creme facial", "protetor solar",
+      "cosmetico", "pincel de maquiagem"
+    ]
+  },
+  {
+    id: "perfumes",
+    label: "Perfumes",
+    keywords: [
+      "perfume", "perfumaria", "colonia", "deo parfum",
+      "eau de parfum", "body splash", "fragrancia",
+      "desodorante"
+    ]
+  },
+  {
+    id: "infantil_bebe",
+    label: "Infantil e Bebê",
+    keywords: [
+      "infantil", "bebe", "brinquedo", "fralda", "mamadeira",
+      "carrinho de bebe", "roupa infantil", "crianca",
+      "boneca", "lego", "chocalho", "berco", "puericultura"
+    ]
+  },
+  {
+    id: "esportes_fitness",
+    label: "Esportes e Fitness",
+    keywords: [
+      "esportes", "fitness", "academia", "halter", "anilha",
+      "bicicleta", "corrida", "treino", "yoga", "pilates",
+      "bola esportiva", "tenis esportivo", "colchonete",
+      "equipamento de ginastica"
+    ]
+  },
+  {
+    id: "mercado_alimentos",
+    label: "Mercado e Alimentos",
+    keywords: [
+      "mercado", "alimentos", "cafe", "arroz", "feijao",
+      "acucar", "oleo de cozinha", "biscoito", "chocolate",
+      "alimento", "bebida", "mantimento", "mercearia"
+    ]
+  },
+  {
+    id: "automotivo",
+    label: "Automotivo",
+    keywords: [
+      "automotivo", "carro", "moto", "veiculo", "pneu",
+      "peca automotiva", "acessorios carro", "capacete",
+      "oleo motor", "ferramenta automotiva", "som automotivo"
+    ]
+  }
+];
+
+function scoreNiche(text, definition) {
+  const normalized = normalizeText(text);
+  if (!normalized) return 0;
+
+  let score = 0;
+
+  for (const keyword of definition.keywords) {
+    const normalizedKeyword = normalizeText(keyword);
+
+    if (!normalizedKeyword) continue;
+
+    if (normalized.includes(normalizedKeyword)) {
+      // Expressões específicas têm mais peso.
+      score += normalizedKeyword.includes(" ") ? 3 : 2;
+    }
+  }
+
+  return score;
+}
+
+function classifyGroupNiche(groupName) {
+  const text = normalizeText(groupName);
+
+  if (!text) {
+    return {
+      id: "unknown",
+      label: "Não identificado",
+      confidence: 0
+    };
+  }
+
+  const scores = NICHE_DEFINITIONS
+    .map(definition => ({
+      id: definition.id,
+      label: definition.label,
+      score: scoreNiche(text, definition)
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const best = scores[0];
+  const second = scores[1];
+
+  // Para grupos, exige um nome suficientemente específico.
+  if (
+    !best ||
+    best.score < 2 ||
+    (second && best.score === second.score)
+  ) {
+    return {
+      id: "unknown",
+      label: "Não identificado",
+      confidence: 0
+    };
+  }
+
+  return {
+    id: best.id,
+    label: best.label,
+    confidence: Math.min(100, best.score * 20)
+  };
+}
+
+function classifyProductNiches(product) {
+  const title = normalizeText(product?.productName || product?.name || product?.title);
+  const description = normalizeText(product?.description || "");
+  const category = normalizeText(
+    product?.category || product?.categoryName || product?.category_name || ""
+  );
+  const shop = normalizeText(product?.shopName || "");
+
+  const titleScores = NICHE_DEFINITIONS.map(definition => ({
+    id: definition.id,
+    label: definition.label,
+    score: scoreNiche(title, definition)
+  }));
+
+  const categoryScores = NICHE_DEFINITIONS.map(definition => ({
+    id: definition.id,
+    score: scoreNiche(category, definition)
+  }));
+
+  const descriptionScores = NICHE_DEFINITIONS.map(definition => ({
+    id: definition.id,
+    score: scoreNiche(description, definition)
+  }));
+
+  const shopScores = NICHE_DEFINITIONS.map(definition => ({
+    id: definition.id,
+    score: scoreNiche(shop, definition)
+  }));
+
+  const results = [];
+
+  for (const definition of NICHE_DEFINITIONS) {
+    const titleScore =
+      titleScores.find(item => item.id === definition.id)?.score || 0;
+
+    const categoryScore =
+      categoryScores.find(item => item.id === definition.id)?.score || 0;
+
+    const descriptionScore =
+      descriptionScores.find(item => item.id === definition.id)?.score || 0;
+
+    const shopScore =
+      shopScores.find(item => item.id === definition.id)?.score || 0;
+
+    // O título é a principal fonte de identificação.
+    const total =
+      titleScore * 3 +
+      categoryScore * 3 +
+      descriptionScore +
+      shopScore;
+
+    // Sem evidência suficiente no título ou categoria, não classifica.
+    const confident =
+      titleScore >= 2 ||
+      categoryScore >= 2 ||
+      (titleScore >= 1 && descriptionScore >= 3);
+
+    if (total >= 4 && confident) {
+      results.push({
+        id: definition.id,
+        label: definition.label,
+        score: total
+      });
+    }
+  }
+
+  // Ordena os nichos identificados por força da correspondência.
+  results.sort((a, b) => b.score - a.score);
+
+  return results;
+}
+
+function getProductNicheLabels(product) {
+  return classifyProductNiches(product).map(item => item.label);
+}
+
+function destinationMatchesProduct(destination, product) {
+  const groupNiche = classifyGroupNiche(destination.name);
+  const productNiches = classifyProductNiches(product);
+
+  if (groupNiche.id === "unknown") {
+    return {
+      matches: false,
+      reason: `Nicho do grupo "${destination.name}" não identificado.`,
+      groupNiche,
+      productNiches
+    };
+  }
+
+  if (!productNiches.length) {
+    return {
+      matches: false,
+      reason: `Nicho do produto "${product.productName || product.name}" não identificado.`,
+      groupNiche,
+      productNiches
+    };
+  }
+
+  const matches = productNiches.some(item => item.id === groupNiche.id);
+
+  return {
+    matches,
+    reason: matches
+      ? "Nicho compatível."
+      : `Produto não pertence ao nicho ${groupNiche.label}.`,
+    groupNiche,
+    productNiches
+  };
+}
 
 // =====================================================
 // UTILITÁRIOS
@@ -302,11 +602,7 @@ function saveStore(profileId, data) {
 }
 
 async function persistShopeeCredentials(profileId, credentials) {
-  await updateProfileColumn(
-    profileId,
-    "credenciais_shopee",
-    credentials
-  );
+  await updateProfileColumn(profileId, "credenciais_shopee", credentials);
 }
 
 // =====================================================
@@ -690,7 +986,8 @@ async function createSupabaseAuthState(profileId) {
 
   return {
     state: { creds, keys },
-    saveCreds
+    saveCreds,
+    storedKeysCount: keysMap.size
   };
 }
 
@@ -1091,7 +1388,6 @@ async function initializeWhatsApp(profileId) {
             resolvePairingWaiters(session);
           } catch (error) {
             session.lastError = error.message;
-
             console.error("Erro ao gerar QR:", error.message);
           }
         }
@@ -1103,14 +1399,12 @@ async function initializeWhatsApp(profileId) {
         }
 
         if (connection === "open") {
-          // A conexão aberta confirma que a autenticação foi concluída.
           auth.state.creds.registered = true;
 
           let credentialsSaved = false;
 
           try {
             await auth.saveCreds();
-
             credentialsSaved = true;
 
             console.log(
@@ -1153,9 +1447,7 @@ async function initializeWhatsApp(profileId) {
           );
 
           const statusCode = lastDisconnect?.error?.output?.statusCode;
-
-          const loggedOut =
-            statusCode === DisconnectReason.loggedOut;
+          const loggedOut = statusCode === DisconnectReason.loggedOut;
 
           session.status = "disconnected";
 
@@ -1171,16 +1463,14 @@ async function initializeWhatsApp(profileId) {
             );
           }
 
+          // IMPORTANTE: não apaga automaticamente as credenciais.
           if (loggedOut) {
-            try {
-              await clearWhatsAppAuth(profileId);
-              session.authState = null;
-            } catch (error) {
-              console.error(
-                `Erro ao limpar sessão (${profileId}):`,
-                error.message
-              );
-            }
+            session.lastError =
+              "WhatsApp retornou loggedOut. Dados preservados no Supabase. Verifique a sessão antes de parear novamente.";
+
+            console.warn(
+              `WhatsApp retornou loggedOut (${profileId}). Sessão e chaves preservadas.`
+            );
           } else if (!session.manualDisconnect) {
             scheduleReconnect(profileId);
           }
@@ -1206,7 +1496,7 @@ async function initializeWhatsApp(profileId) {
 }
 
 // =====================================================
-// MOTOR DE AUTOMAÇÃO
+// MOTOR DE AUTOMAÇÃO COM FILTRO DE NICHOS
 // =====================================================
 
 async function runAutomation(profileId) {
@@ -1225,9 +1515,7 @@ async function runAutomation(profileId) {
     if (!window) {
       automation.lastWindowKey = null;
       automation.nextSendAt = null;
-
       await saveStore(profileId, store);
-
       return;
     }
 
@@ -1235,7 +1523,6 @@ async function runAutomation(profileId) {
       automation.lastWindowKey = window.key;
       automation.nextSendAt = new Date().toISOString();
       automation.lastError = null;
-
       await saveStore(profileId, store);
     }
 
@@ -1272,6 +1559,44 @@ async function runAutomation(profileId) {
     }
 
     const product = await getAutomaticOffer(profileId, store);
+    const productNiches = classifyProductNiches(product);
+
+    if (!productNiches.length) {
+      throw new Error(
+        `Produto ignorado: não foi possível identificar com segurança o nicho de "${product.productName}". Nenhum grupo recebeu esta oferta.`
+      );
+    }
+
+    const matchingDestinations = [];
+    const skippedDestinations = [];
+
+    for (const destination of selectedDestinations) {
+      const result = destinationMatchesProduct(destination, product);
+
+      if (result.matches) {
+        matchingDestinations.push(destination);
+      } else {
+        skippedDestinations.push({
+          name: destination.name,
+          reason: result.reason
+        });
+      }
+    }
+
+    if (!matchingDestinations.length) {
+      const productLabels = productNiches
+        .map(item => item.label)
+        .join(", ");
+
+      const skippedText = skippedDestinations
+        .map(item => `${item.name}: ${item.reason}`)
+        .join(" | ");
+
+      throw new Error(
+        `Nenhum grupo compatível com o produto "${product.productName}". Nicho identificado: ${productLabels}. ${skippedText}`
+      );
+    }
+
     const message = createOfferMessage(product);
 
     let sentCount = 0;
@@ -1279,7 +1604,7 @@ async function runAutomation(profileId) {
 
     const errors = [];
 
-    for (const destination of selectedDestinations) {
+    for (const destination of matchingDestinations) {
       try {
         const result = await sendProductOffer(
           session.socket,
@@ -1319,9 +1644,13 @@ async function runAutomation(profileId) {
 
       automation.lastSentAt = new Date().toISOString();
 
+      const skippedSummary = skippedDestinations.length
+        ? ` Grupos ignorados por nicho diferente ou não identificado: ${skippedDestinations.map(item => item.name).join(", ")}.`
+        : "";
+
       automation.lastError = errors.length
-        ? `Enviado parcialmente. ${errors.join(" | ")}`
-        : null;
+        ? `Enviado parcialmente. ${errors.join(" | ")}${skippedSummary}`
+        : skippedSummary || null;
 
       const intervalSeconds = Math.max(
         10,
@@ -1339,13 +1668,18 @@ async function runAutomation(profileId) {
       ).toISOString();
 
       console.log(
-        `Oferta ${productId} enviada pelo perfil ${profileId} para ${sentCount} destino(s). ` +
-        `Com foto: ${imageSentCount}. Próximo envio em ${intervalSeconds} segundo(s).`
+        `Oferta ${productId} (${productNiches.map(item => item.label).join(", ")}) enviada pelo perfil ${profileId} para ${sentCount} grupo(s). Com foto: ${imageSentCount}.`
       );
+
+      if (skippedDestinations.length) {
+        console.log(
+          `Grupos ignorados: ${skippedDestinations.map(item => item.name).join(", ")}`
+        );
+      }
     } else {
       throw new Error(
         errors.join(" | ") ||
-        "Não foi possível enviar para os grupos."
+        "Não foi possível enviar para os grupos compatíveis."
       );
     }
 
@@ -1644,7 +1978,7 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
 
       if (session.authState.state.creds.registered) {
         throw new Error(
-          "Este perfil já possui uma sessão registrada. Desconecte o aparelho vinculado antes de solicitar outro código."
+          "Este perfil já possui uma sessão registrada. Não solicite outro código antes de verificar a conexão existente."
         );
       }
 
@@ -1776,9 +2110,7 @@ app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
       ? `${destination}@s.whatsapp.net`
       : destination;
 
-    await session.socket.sendMessage(jid, {
-      text: message
-    });
+    await session.socket.sendMessage(jid, { text: message });
 
     res.json({ ok: true });
   } catch (error) {
@@ -1804,16 +2136,73 @@ app.get("/api/whatsapp/groups", adminOnly, async (req, res) => {
 
     res.json({
       ok: true,
-      groups: Object.entries(groups).map(([id, group]) => ({
-        id,
-        name: group.subject || "Grupo sem nome"
-      }))
+      groups: Object.entries(groups).map(([id, group]) => {
+        const name = group.subject || "Grupo sem nome";
+        const niche = classifyGroupNiche(name);
+
+        return {
+          id,
+          name,
+          niche: niche.id,
+          nicheLabel: niche.label,
+          confidence: niche.confidence,
+          identified: niche.id !== "unknown"
+        };
+      })
     });
   } catch (error) {
     res.status(500).json({
       error: "Não foi possível carregar os grupos: " + error.message
     });
   }
+});
+
+// =====================================================
+// CLASSIFICAÇÃO - TESTE DE NICHOS
+// =====================================================
+
+app.post("/api/niches/classify", adminOnly, (req, res) => {
+  const text = String(req.body.text || "").trim();
+  const product = req.body.product || null;
+
+  if (product) {
+    const niches = classifyProductNiches(product);
+
+    return res.json({
+      ok: true,
+      type: "product",
+      product: product.productName || product.name || product.title || "",
+      niches,
+      labels: niches.map(item => item.label)
+    });
+  }
+
+  if (!text) {
+    return res.status(400).json({
+      ok: false,
+      error: "Informe o texto do grupo ou produto."
+    });
+  }
+
+  const niche = classifyGroupNiche(text);
+
+  res.json({
+    ok: true,
+    type: "group",
+    text,
+    niche,
+    identified: niche.id !== "unknown"
+  });
+});
+
+app.get("/api/niches", adminOnly, (req, res) => {
+  res.json({
+    ok: true,
+    niches: NICHE_DEFINITIONS.map(item => ({
+      id: item.id,
+      label: item.label
+    }))
+  });
 });
 
 // =====================================================
@@ -1825,7 +2214,16 @@ app.get("/api/destinations", adminOnly, (req, res) => {
 
   res.json({
     ok: true,
-    destinations: store.destinations
+    destinations: store.destinations.map(destination => {
+      const niche = classifyGroupNiche(destination.name);
+
+      return {
+        ...destination,
+        detectedNiche: niche.id,
+        nicheLabel: niche.label,
+        nicheIdentified: niche.id !== "unknown"
+      };
+    })
   });
 });
 
@@ -1892,7 +2290,13 @@ app.post("/api/destinations", adminOnly, async (req, res) => {
 
     res.json({
       ok: true,
-      destination
+      destination: {
+        ...destination,
+        ...{
+          detectedNiche: classifyGroupNiche(destination.name).id,
+          nicheLabel: classifyGroupNiche(destination.name).label
+        }
+      }
     });
   } catch (error) {
     res.status(500).json({
@@ -1934,7 +2338,7 @@ app.post("/api/queue", adminOnly, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       ok: false,
-      error: "Erro ao salvar fila no Supabase: " + error.message
+      error: "Erro ao salvar fila: " + error.message
     });
   }
 });
@@ -1978,7 +2382,6 @@ app.post("/api/shopee/credentials", adminOnly, async (req, res) => {
     };
 
     await persistShopeeCredentials(profileId, saved);
-
     shopeeCredentials[profileId] = saved;
 
     res.json({
@@ -2021,7 +2424,6 @@ app.post("/api/shopee/test", adminOnly, async (req, res) => {
 
   try {
     const data = await shopeeRequest(profileId, query);
-
     const products = data?.productOfferV2?.nodes || [];
 
     res.json({
@@ -2144,11 +2546,9 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
 
           for (const product of products) {
             const id = String(product.itemId || "").trim();
-
             const link = String(
               product.offerLink || product.productLink || ""
             ).trim();
-
             const name = String(product.productName || "").trim();
 
             const uniqueKey = id
@@ -2160,8 +2560,12 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
             if (!uniqueKey || uniqueKey === "id:") continue;
 
             if (!productsMap.has(uniqueKey)) {
+              const niches = classifyProductNiches(product);
+
               productsMap.set(uniqueKey, {
                 ...product,
+                detectedNiches: niches.map(item => item.id),
+                nicheLabels: niches.map(item => item.label),
                 searchSort: mode.name
               });
             }
@@ -2252,9 +2656,15 @@ async function initializeApp() {
     try {
       const auth = await createSupabaseAuthState(profileId);
 
-      if (auth.state.creds.registered) {
+      const hasRegisteredSession =
+        auth.state.creds.registered === true;
+
+      const hasSavedKeys =
+        auth.storedKeysCount > 0;
+
+      if (hasRegisteredSession || hasSavedKeys) {
         console.log(
-          `Sessão WhatsApp encontrada para ${profileId}. Reconectando...`
+          `Sessão ou chaves encontradas para ${profileId}. Tentando recuperar WhatsApp...`
         );
 
         initializeWhatsApp(profileId).catch(error => {
@@ -2265,7 +2675,7 @@ async function initializeApp() {
         });
       } else {
         console.log(
-          `Nenhuma sessão WhatsApp registrada para ${profileId}.`
+          `Nenhuma sessão ou chave encontrada para ${profileId}.`
         );
       }
     } catch (error) {
@@ -2287,6 +2697,7 @@ async function initializeApp() {
     );
 
     console.log("Persistência de dados: Supabase");
+    console.log("Identificação automática de nichos: ativada");
   });
 }
 
