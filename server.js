@@ -1,5 +1,4 @@
-
-const express = require("express");
+ const express = require("express");
 const helmet = require("helmet");
 const fs = require("fs");
 const path = require("path");
@@ -16,6 +15,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const TIME_ZONE = "America/Sao_Paulo";
 const DATA_DIR = path.join(__dirname, "data");
+const MAX_IMAGE_SIZE = 8 * 1024 * 1024;
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "2mb" }));
@@ -497,7 +497,8 @@ async function getAutomaticOffer(profileId, store) {
 
 function formatMoney(value) {
   const number = Number(value);
-  if (!Number.isFinite(number)) return null;
+
+  if (!Number.isFinite(number) || number <= 0) return null;
 
   return number.toLocaleString("pt-BR", {
     style: "currency",
@@ -505,38 +506,179 @@ function formatMoney(value) {
   });
 }
 
+// Converte a taxa de desconto da Shopee em porcentagem.
+// A API pode retornar 0.20 (20) ou 20 (20%).
+function getDiscountPercent(value) {
+  const raw = Number(value);
+
+  if (!Number.isFinite(raw) || raw <= 0 || raw >= 100) {
+    return null;
+  }
+
+  const percent = raw < 1 ? raw * 100 : raw;
+
+  if (percent <= 0 || percent >= 100) return null;
+
+  return percent;
+}
+
 function createOfferMessage(product) {
   const link = product.offerLink || product.productLink;
 
-  if (!link) throw new Error("O produto não possui link de afiliado.");
+  if (!link) {
+    throw new Error("O produto não possui link de afiliado.");
+  }
 
   let safeLink;
 
   try {
     const parsed = new URL(link);
-    if (parsed.protocol !== "https:") throw new Error("Link não seguro.");
+
+    if (parsed.protocol !== "https:") {
+      throw new Error("Link não seguro.");
+    }
+
     safeLink = parsed.href;
   } catch {
     throw new Error("Link de oferta inválido.");
   }
 
-  const price = formatMoney(product.priceMin);
-  const commission = product.commissionRate;
+  const currentPriceNumber = Number(product.priceMin);
+  const currentPrice = formatMoney(currentPriceNumber);
+  const discountPercent = getDiscountPercent(product.priceDiscountRate);
 
   const lines = [
-    "🔥 OFERTA ENCONTRADA!",
+    "🔥 OFERTA IMPERDÍVEL!",
     "",
     `🛍️ ${product.productName || "Confira esta oferta"}`
   ];
 
-  if (price) lines.push(`💰 Preço: ${price}`);
-
-  if (commission !== undefined && commission !== null) {
-    lines.push(`⭐ Comissão informada: ${commission}`);
+  if (currentPrice) {
+    lines.push(`💰 Por apenas: ${currentPrice}`);
   }
 
-  lines.push("", "👉 Confira aqui:", safeLink);
+  // Só apresenta preço anterior e desconto se os dados permitirem
+  // calcular um valor anterior válido.
+  if (
+    currentPrice &&
+    discountPercent !== null &&
+    currentPriceNumber > 0
+  ) {
+    const originalPriceNumber =
+      currentPriceNumber / (1 - discountPercent / 100);
+
+    const originalPrice = formatMoney(originalPriceNumber);
+
+    if (originalPrice && originalPriceNumber > currentPriceNumber) {
+      lines.push(`❌ De: ${originalPrice}`);
+      lines.push(`🔥 Desconto de ${Math.round(discountPercent)}%`);
+    }
+  }
+
+  lines.push(
+    "",
+    "👉 Aproveite aqui:",
+    safeLink
+  );
+
   return lines.join("\n");
+}
+
+// -------------------------
+// ENVIO DA FOTO DO PRODUTO
+// -------------------------
+
+async function downloadProductImage(imageUrl) {
+  if (!imageUrl || typeof imageUrl !== "string") {
+    throw new Error("O produto não possui foto disponível.");
+  }
+
+  let parsed;
+
+  try {
+    parsed = new URL(imageUrl);
+  } catch {
+    throw new Error("Endereço da foto inválido.");
+  }
+
+  if (parsed.protocol !== "https:") {
+    throw new Error("A foto precisa utilizar uma conexão HTTPS.");
+  }
+
+  const response = await fetch(parsed.href, {
+    method: "GET",
+    redirect: "follow",
+    signal: AbortSignal.timeout(15000),
+    headers: {
+      "User-Agent": "Mozilla/5.0 MEDEIROS-DIGITAL"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Não foi possível baixar a foto. HTTP ${response.status}.`);
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+
+  if (!contentType.toLowerCase().startsWith("image/")) {
+    throw new Error("O endereço informado não retornou uma imagem.");
+  }
+
+  const contentLength = Number(
+    response.headers.get("content-length") || 0
+  );
+
+  if (contentLength > MAX_IMAGE_SIZE) {
+    throw new Error("A foto do produto ultrapassa o limite de 8 MB.");
+  }
+
+  const imageBuffer = Buffer.from(await response.arrayBuffer());
+
+  if (!imageBuffer.length) {
+    throw new Error("A foto recebida está vazia.");
+  }
+
+  if (imageBuffer.length > MAX_IMAGE_SIZE) {
+    throw new Error("A foto do produto ultrapassa o limite de 8 MB.");
+  }
+
+  return {
+    buffer: imageBuffer,
+    mimetype: contentType.split(";")[0].trim()
+  };
+}
+
+async function sendProductOffer(socket, destination, product, message) {
+  try {
+    const image = await downloadProductImage(product.imageUrl);
+
+    await socket.sendMessage(destination, {
+      image: image.buffer,
+      mimetype: image.mimetype,
+      caption: message
+    });
+
+    return {
+      sent: true,
+      withImage: true
+    };
+  } catch (error) {
+    console.error(
+      "Não foi possível enviar a foto do produto:",
+      error.message
+    );
+
+    // Se a foto falhar, a oferta ainda é enviada em texto.
+    await socket.sendMessage(destination, {
+      text: message
+    });
+
+    return {
+      sent: true,
+      withImage: false,
+      imageError: error.message
+    };
+  }
 }
 
 // -------------------------
@@ -566,8 +708,6 @@ function waitForPairingReady(session, timeoutMs = 30000) {
     return Promise.reject(new Error("Este WhatsApp já está conectado."));
   }
 
-  // Não exige que o status continue sendo "qr".
-  // O evento pode ser seguido por outro status, como "connecting".
   if (session.socket && session.pairingReady) {
     return Promise.resolve();
   }
@@ -653,7 +793,6 @@ async function initializeWhatsApp(profileId) {
         }
 
         if (connection === "connecting") {
-          // Não apaga pairingReady quando o QR já foi recebido.
           if (!session.pairingReady) session.status = "starting";
         }
 
@@ -720,9 +859,7 @@ async function initializeWhatsApp(profileId) {
   })();
 
   return session.initPromise;
-}
-
-// -------------------------
+}// -------------------------
 // MOTOR DE AUTOMAÇÃO
 // -------------------------
 
@@ -789,15 +926,33 @@ async function runAutomation(profileId) {
 
     const product = await getAutomaticOffer(profileId, store);
     const message = createOfferMessage(product);
+
     let sentCount = 0;
+    let imageSentCount = 0;
     const errors = [];
 
     for (const destination of selectedDestinations) {
       try {
-        await session.socket.sendMessage(destination.groupId, {
-          text: message
-        });
+        const result = await sendProductOffer(
+          session.socket,
+          destination.groupId,
+          product,
+          message
+        );
+
         sentCount++;
+
+        if (result.withImage) {
+          imageSentCount++;
+        }
+
+        if (result.imageError) {
+          console.warn(
+            `Oferta enviada sem foto para ${destination.name}:`,
+            result.imageError
+          );
+        }
+
         await wait(1500);
       } catch (error) {
         errors.push(`${destination.name}: ${error.message}`);
@@ -830,7 +985,8 @@ async function runAutomation(profileId) {
       ).toISOString();
 
       console.log(
-        `Oferta ${productId} enviada pelo perfil ${profileId} para ${sentCount} destino(s). Próximo envio em ${intervalSeconds} segundo(s).`
+        `Oferta ${productId} enviada pelo perfil ${profileId} para ${sentCount} destino(s). ` +
+        `Com foto: ${imageSentCount}. Próximo envio em ${intervalSeconds} segundo(s).`
       );
     } else {
       throw new Error(
@@ -940,11 +1096,15 @@ app.post("/api/automation", adminOnly, (req, res) => {
     : store.automation.endTime || "18:00";
 
   if (!isValidTime(startTime)) {
-    return res.status(400).json({ error: "Informe um horário de início válido." });
+    return res.status(400).json({
+      error: "Informe um horário de início válido."
+    });
   }
 
   if (!isValidTime(endTime)) {
-    return res.status(400).json({ error: "Informe um horário de encerramento válido." });
+    return res.status(400).json({
+      error: "Informe um horário de encerramento válido."
+    });
   }
 
   if (startTime === endTime) {
@@ -1108,7 +1268,6 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
         throw new Error("Não foi possível iniciar o WhatsApp. Tente novamente.");
       }
 
-      // Se já existe uma sessão registrada, não solicita outro código.
       const authState = await useMultiFileAuthState(
         PROFILES[profileId].authDir
       );
@@ -1131,7 +1290,6 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
         throw new Error("Este WhatsApp já está conectado.");
       }
 
-      // Pequena espera para estabilizar a conexão.
       await wait(2000);
 
       const code = await session.socket.requestPairingCode(phone);
@@ -1215,7 +1373,9 @@ app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
   }
 
   if (!session.socket || session.status !== "connected") {
-    return res.status(400).json({ error: "WhatsApp não está conectado." });
+    return res.status(400).json({
+      error: "WhatsApp não está conectado."
+    });
   }
 
   try {
@@ -1224,9 +1384,13 @@ app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
       : destination;
 
     await session.socket.sendMessage(jid, { text: message });
+
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({ ok: false, error: error.message });
+    res.status(500).json({
+      ok: false,
+      error: error.message
+    });
   }
 });
 
@@ -1263,7 +1427,11 @@ app.get("/api/whatsapp/groups", adminOnly, async (req, res) => {
 
 app.get("/api/destinations", adminOnly, (req, res) => {
   const store = loadStore(getProfile(req));
-  res.json({ ok: true, destinations: store.destinations });
+
+  res.json({
+    ok: true,
+    destinations: store.destinations
+  });
 });
 
 app.post("/api/products", adminOnly, (req, res) => {
@@ -1281,12 +1449,18 @@ app.post("/api/products", adminOnly, (req, res) => {
   };
 
   if (!product.name) {
-    return res.status(400).json({ error: "Informe o nome do produto." });
+    return res.status(400).json({
+      error: "Informe o nome do produto."
+    });
   }
 
   store.products.unshift(product);
   saveStore(profileId, store);
-  res.json({ ok: true, product });
+
+  res.json({
+    ok: true,
+    product
+  });
 });
 
 app.post("/api/destinations", adminOnly, (req, res) => {
@@ -1310,7 +1484,11 @@ app.post("/api/destinations", adminOnly, (req, res) => {
 
   store.destinations.push(destination);
   saveStore(profileId, store);
-  res.json({ ok: true, destination });
+
+  res.json({
+    ok: true,
+    destination
+  });
 });
 
 app.post("/api/queue", adminOnly, (req, res) => {
@@ -1335,7 +1513,11 @@ app.post("/api/queue", adminOnly, (req, res) => {
 
   store.queue.push(item);
   saveStore(profileId, store);
-  res.json({ ok: true, item });
+
+  res.json({
+    ok: true,
+    item
+  });
 });
 
 // -------------------------
@@ -1381,7 +1563,10 @@ app.post("/api/shopee/credentials", adminOnly, (req, res) => {
       message: "Credenciais salvas para este perfil."
     });
   } catch (error) {
-    res.status(500).json({ ok: false, error: error.message });
+    res.status(500).json({
+      ok: false,
+      error: error.message
+    });
   }
 });
 
@@ -1525,7 +1710,9 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
           successfulSearches++;
           pagesRead++;
 
-          const products = Array.isArray(result.nodes) ? result.nodes : [];
+          const products = Array.isArray(result.nodes)
+            ? result.nodes
+            : [];
 
           for (const product of products) {
             const id = String(product.itemId || "").trim();
@@ -1551,6 +1738,7 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
           }
 
           if (!result.pageInfo?.hasNextPage) break;
+
           await wait(500);
         } catch (error) {
           errors.push({
@@ -1558,6 +1746,7 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
             page,
             error: error.message
           });
+
           break;
         }
       }
