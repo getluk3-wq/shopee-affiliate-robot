@@ -1,3 +1,4 @@
+
 const express = require("express");
 const helmet = require("helmet");
 const crypto = require("crypto");
@@ -70,7 +71,7 @@ async function updateProfileColumn(profileId, column, value) {
 }
 
 // =====================================================
-// PERFIS
+// PERFIS E SESSÕES
 // =====================================================
 
 const PROFILES = {
@@ -299,223 +300,115 @@ const NICHE_DEFINITIONS = [
   }
 ];
 
-// Apelidos e expressões comuns usados nos nomes dos grupos.
-// Não é necessário que o nome do grupo seja igual ao nome do nicho.
-
 const GROUP_NICHE_ALIASES = {
   moda_feminina: [
-    "tudo feminino",
-    "tudo delas",
-    "mundo delas",
-    "achadinhos delas",
-    "achadinhos das meninas",
-    "achadinhos das mulheres",
-    "achadinhos feminino",
-    "universo feminino",
-    "universo das mulheres",
-    "cantinho feminino",
-    "ofertas para elas",
-    "estilo das mulheres",
-    "mulheres que amam ofertas",
-    "moda para elas",
-    "look das meninas",
-    "closet feminino",
-    "closet das meninas",
-    "roupas para elas",
-    "roupas femininas",
-    "moda das mulheres",
-    "divas e ofertas",
-    "mundo feminino",
-    "cantinho das mulheres",
-    "achadinhos das divas"
+    "tudo feminino", "tudo delas", "mundo delas",
+    "achadinhos delas", "achadinhos das meninas",
+    "achadinhos das mulheres", "achadinhos feminino",
+    "universo feminino", "universo das mulheres",
+    "cantinho feminino", "ofertas para elas",
+    "estilo das mulheres", "mulheres que amam ofertas",
+    "moda para elas", "look das meninas", "closet feminino",
+    "closet das meninas", "roupas para elas",
+    "roupas femininas", "moda das mulheres",
+    "divas e ofertas", "mundo feminino",
+    "cantinho das mulheres", "achadinhos das divas"
   ],
-
   moda_masculina: [
-    "tudo masculino",
-    "tudo deles",
-    "estilo masculino",
-    "estilo dos homens",
-    "moda dos homens",
-    "achadinhos masculinos",
-    "achadinhos dos homens",
-    "achadinhos deles",
-    "mundo masculino",
-    "ofertas para eles",
-    "moda para eles",
-    "universo masculino",
-    "closet masculino",
-    "roupas para eles",
-    "roupas masculinas",
-    "moda dos rapazes",
-    "mundo dos homens",
-    "achadinhos masculinos"
+    "tudo masculino", "tudo deles", "estilo masculino",
+    "estilo dos homens", "moda dos homens",
+    "achadinhos masculinos", "achadinhos dos homens",
+    "achadinhos deles", "mundo masculino",
+    "ofertas para eles", "moda para eles",
+    "universo masculino", "closet masculino",
+    "roupas para eles", "roupas masculinas",
+    "moda dos rapazes", "mundo dos homens"
   ],
-
   calcados_bolsas: [
-    "mundo dos calcados",
-    "ofertas de calcados",
-    "bolsas e sapatos",
-    "achadinhos de bolsas",
-    "mundo das bolsas",
-    "calcados e acessorios",
-    "bolsas e calcados",
-    "amantes de bolsas",
+    "mundo dos calcados", "ofertas de calcados",
+    "bolsas e sapatos", "achadinhos de bolsas",
+    "mundo das bolsas", "calcados e acessorios",
+    "bolsas e calcados", "amantes de bolsas",
     "clube dos calcados"
   ],
-
   eletronicos: [
-    "mundo tech",
-    "universo tech",
-    "tecnologia",
-    "achadinhos de tecnologia",
-    "ofertas tech",
-    "gadgets",
-    "mundo dos eletronicos",
-    "ofertas de tecnologia",
-    "clube da tecnologia"
+    "mundo tech", "universo tech", "tecnologia",
+    "achadinhos de tecnologia", "ofertas tech",
+    "gadgets", "mundo dos eletronicos",
+    "ofertas de tecnologia", "clube da tecnologia"
   ],
-
   informatica: [
-    "mundo da informatica",
-    "pecas de pc",
-    "setup gamer",
-    "setup pc",
-    "computacao",
-    "universo gamer",
-    "mundo dos computadores",
+    "mundo da informatica", "pecas de pc",
+    "setup gamer", "setup pc", "computacao",
+    "universo gamer", "mundo dos computadores",
     "acessorios para pc"
   ],
-
   casa_decoracao: [
-    "lar e decoracao",
-    "meu lar",
-    "cantinho da casa",
-    "casa organizada",
-    "utilidades para casa",
-    "achadinhos para casa",
-    "mundo da cozinha",
-    "casa e lar",
-    "ofertas para o lar",
-    "decorando meu lar"
+    "lar e decoracao", "meu lar", "cantinho da casa",
+    "casa organizada", "utilidades para casa",
+    "achadinhos para casa", "mundo da cozinha",
+    "casa e lar", "ofertas para o lar", "decorando meu lar"
   ],
-
   beleza_cosmeticos: [
-    "mundo da beleza",
-    "cantinho da beleza",
-    "beleza feminina",
-    "achadinhos de beleza",
-    "universo da maquiagem",
-    "maquiagem e cuidados",
-    "clube da beleza",
-    "cuidados pessoais",
-    "pele e beleza"
+    "mundo da beleza", "cantinho da beleza",
+    "beleza feminina", "achadinhos de beleza",
+    "universo da maquiagem", "maquiagem e cuidados",
+    "clube da beleza", "cuidados pessoais", "pele e beleza"
   ],
-
   perfumes: [
-    "mundo dos perfumes",
-    "achadinhos de perfumes",
-    "perfumaria e ofertas",
-    "clube dos perfumes",
-    "fragrancias e perfumes",
-    "amantes de perfumes",
+    "mundo dos perfumes", "achadinhos de perfumes",
+    "perfumaria e ofertas", "clube dos perfumes",
+    "fragrancias e perfumes", "amantes de perfumes",
     "ofertas de perfumaria"
   ],
-
   infantil_bebe: [
-    "mundo infantil",
-    "universo do bebe",
-    "maes e bebes",
-    "achadinhos para criancas",
-    "cantinho do bebe",
-    "mundo das criancas",
-    "ofertas para bebe",
-    "tudo para bebe",
-    "pais e bebes"
+    "mundo infantil", "universo do bebe", "maes e bebes",
+    "achadinhos para criancas", "cantinho do bebe",
+    "mundo das criancas", "ofertas para bebe",
+    "tudo para bebe", "pais e bebes"
   ],
-
   esportes_fitness: [
-    "vida fitness",
-    "mundo fitness",
-    "projeto fitness",
-    "treino e academia",
-    "universo fitness",
-    "achadinhos fitness",
-    "clube fitness",
-    "vida de academia",
-    "mundo dos esportes"
+    "vida fitness", "mundo fitness", "projeto fitness",
+    "treino e academia", "universo fitness",
+    "achadinhos fitness", "clube fitness",
+    "vida de academia", "mundo dos esportes"
   ],
-
   mercado_alimentos: [
-    "ofertas de mercado",
-    "achadinhos de mercado",
-    "economia no mercado",
-    "cesta de ofertas",
-    "mundo das ofertas de mercado",
-    "economia nas compras",
+    "ofertas de mercado", "achadinhos de mercado",
+    "economia no mercado", "cesta de ofertas",
+    "mundo das ofertas de mercado", "economia nas compras",
     "ofertas de supermercado"
   ],
-
   automotivo: [
-    "mundo automotivo",
-    "acessorios para carros",
-    "universo automotivo",
-    "ofertas para carros",
-    "ofertas para motos",
-    "clube dos motoristas",
+    "mundo automotivo", "acessorios para carros",
+    "universo automotivo", "ofertas para carros",
+    "ofertas para motos", "clube dos motoristas",
     "mundo das motos"
   ],
-
   eletricos: [
-    "tudo de eletrica",
-    "tudo sobre eletrica",
-    "materiais de eletrica",
-    "mundo da eletrica",
-    "eletricista",
-    "eletricistas",
-    "instalacoes eletricas",
+    "tudo de eletrica", "tudo sobre eletrica",
+    "materiais de eletrica", "mundo da eletrica",
+    "eletricista", "eletricistas", "instalacoes eletricas",
     "ferramentas de eletrica"
   ],
-
   pet: [
-    "universo pet",
-    "mundo pet",
-    "amantes de pets",
-    "amantes dos pets",
-    "amantes dos bichinhos",
-    "mundo dos bichinhos",
-    "amigos dos animais",
-    "amigos dos pets",
-    "pais de pet",
-    "pais de pets",
-    "maes de pet",
-    "maes de pets",
-    "mães de pets",
-    "tudo para pets",
-    "tudo para pet",
-    "achadinhos pet",
-    "cantinho pet",
-    "cantinho dos pets",
-    "caes e gatos",
-    "cachorros e gatos",
-    "cães e gatos",
-    "dog lovers",
-    "pet lovers",
-    "doguinhos",
-    "gatinho e cachorro",
-    "gatunos",
-    "meu bichinho",
-    "meus bichinhos",
-    "universo dos animais",
-    "animais de estimacao",
-    "ofertas para pets",
-    "produtos para pets",
-    "mundo animal"
+    "universo pet", "mundo pet", "amantes de pets",
+    "amantes dos pets", "amantes dos bichinhos",
+    "mundo dos bichinhos", "amigos dos animais",
+    "amigos dos pets", "pais de pet", "pais de pets",
+    "maes de pet", "maes de pets", "tudo para pets",
+    "tudo para pet", "achadinhos pet", "cantinho pet",
+    "cantinho dos pets", "caes e gatos",
+    "cachorros e gatos", "dog lovers", "pet lovers",
+    "doguinhos", "gatinho e cachorro", "gatunos",
+    "meu bichinho", "meus bichinhos",
+    "universo dos animais", "animais de estimacao",
+    "ofertas para pets", "produtos para pets", "mundo animal"
   ]
 };
 
 function scoreNiche(text, definition) {
   const normalized = normalizeText(text);
-
   if (!normalized) return 0;
 
   let score = 0;
@@ -533,16 +426,11 @@ function classifyGroupNiche(groupName) {
   const text = normalizeText(groupName);
 
   if (!text) {
-    return {
-      id: "unknown",
-      label: "Não identificado",
-      confidence: 0
-    };
+    return { id: "unknown", label: "Não identificado", confidence: 0 };
   }
 
   const scores = NICHE_DEFINITIONS.map(definition => {
     let score = scoreNiche(text, definition);
-
     const aliases = GROUP_NICHE_ALIASES[definition.id] || [];
 
     for (const alias of aliases) {
@@ -551,26 +439,16 @@ function classifyGroupNiche(groupName) {
       }
     }
 
-    return {
-      id: definition.id,
-      label: definition.label,
-      score
-    };
+    return { id: definition.id, label: definition.label, score };
   }).sort((a, b) => b.score - a.score);
 
   const best = scores[0];
   const second = scores[1];
 
   if (!best || best.score < 3) {
-    return {
-      id: "unknown",
-      label: "Não identificado",
-      confidence: 0
-    };
+    return { id: "unknown", label: "Não identificado", confidence: 0 };
   }
 
-  // Se o nome indicar dois nichos com a mesma força,
-  // não tratar o grupo como geral.
   if (second && best.score === second.score && second.score >= 3) {
     return {
       id: "ambiguous",
@@ -591,20 +469,19 @@ function classifyGroupNiche(groupName) {
 
 const CLOTHING_TERMS = [
   "roupa", "roupas", "vestido", "vestidos",
-  "blusa", "blusas", "saia", "saias",
-  "cropped", "lingerie", "sutia", "calcinha",
-  "body", "top", "calca", "short", "shorts",
-  "bermuda", "cueca", "camisa", "camiseta",
-  "polo", "moletom", "jaqueta", "casaco",
-  "conjunto", "macacao", "legging", "regata",
+  "blusa", "blusas", "saia", "saias", "cropped",
+  "lingerie", "sutia", "calcinha", "body", "top",
+  "calca", "short", "shorts", "bermuda", "cueca",
+  "camisa", "camiseta", "polo", "moletom", "jaqueta",
+  "casaco", "conjunto", "macacao", "legging", "regata",
   "sueter", "cardigan", "pijama"
 ];
 
 const FOOTWEAR_TERMS = [
-  "calcado", "calcados", "sapato", "sapatos",
-  "tenis", "sandalia", "sandalias", "chinelo",
-  "chinelos", "bota", "botas", "rasteirinha",
-  "scarpin", "sapatilha", "papete"
+  "calcado", "calcados", "sapato", "sapatos", "tenis",
+  "sandalia", "sandalias", "chinelo", "chinelos",
+  "bota", "botas", "rasteirinha", "scarpin",
+  "sapatilha", "papete"
 ];
 
 const FEMALE_TERMS = [
@@ -623,10 +500,7 @@ function containsAnyTerm(text, terms) {
 
 function classifyProductNiches(product) {
   const title = normalizeText(
-    product?.productName ||
-    product?.name ||
-    product?.title ||
-    ""
+    product?.productName || product?.name || product?.title || ""
   );
 
   const category = normalizeText(
@@ -637,8 +511,6 @@ function classifyProductNiches(product) {
   );
 
   const description = normalizeText(product?.description || "");
-
-  const mainText = `${title} ${category}`;
   const fullText = `${title} ${category} ${description}`;
 
   const results = [];
@@ -648,10 +520,7 @@ function classifyProductNiches(product) {
     const categoryScore = scoreNiche(category, definition);
     const descriptionScore = scoreNiche(description, definition);
 
-    const total =
-      titleScore * 3 +
-      categoryScore * 3 +
-      descriptionScore;
+    const total = titleScore * 3 + categoryScore * 3 + descriptionScore;
 
     const confident =
       titleScore >= 2 ||
@@ -669,42 +538,32 @@ function classifyProductNiches(product) {
 
   const hasClothing = containsAnyTerm(fullText, CLOTHING_TERMS);
   const hasFootwear = containsAnyTerm(fullText, FOOTWEAR_TERMS);
-
   const isFemale = containsAnyTerm(fullText, FEMALE_TERMS);
   const isMale = containsAnyTerm(fullText, MALE_TERMS);
-
   const hasPerfume = results.some(item => item.id === "perfumes");
 
-  // Só atribui gênero quando existe indicação explícita.
-  // Perfume feminino, por exemplo, continua sendo Perfumes.
   if (!hasPerfume && (hasClothing || hasFootwear)) {
-    if (isFemale && !isMale) {
-      if (!results.some(item => item.id === "moda_feminina")) {
-        results.push({
-          id: "moda_feminina",
-          label: "Moda Feminina",
-          score: 8
-        });
-      }
+    if (isFemale && !isMale &&
+        !results.some(item => item.id === "moda_feminina")) {
+      results.push({
+        id: "moda_feminina",
+        label: "Moda Feminina",
+        score: 8
+      });
     }
 
-    if (isMale && !isFemale) {
-      if (!results.some(item => item.id === "moda_masculina")) {
-        results.push({
-          id: "moda_masculina",
-          label: "Moda Masculina",
-          score: 8
-        });
-      }
+    if (isMale && !isFemale &&
+        !results.some(item => item.id === "moda_masculina")) {
+      results.push({
+        id: "moda_masculina",
+        label: "Moda Masculina",
+        score: 8
+      });
     }
   }
 
-  // Calçados também podem pertencer ao nicho de calçados,
-  // sem depender de gênero.
-  if (
-    hasFootwear &&
-    !results.some(item => item.id === "calcados_bolsas")
-  ) {
+  if (hasFootwear &&
+      !results.some(item => item.id === "calcados_bolsas")) {
     results.push({
       id: "calcados_bolsas",
       label: "Calçados e Bolsas",
@@ -713,7 +572,6 @@ function classifyProductNiches(product) {
   }
 
   results.sort((a, b) => b.score - a.score);
-
   return results;
 }
 
@@ -723,14 +581,11 @@ function getProductNicheLabels(product) {
 
 function destinationMatchesProduct(destination, product) {
   const groupName =
-    destination.groupName ||
-    destination.subject ||
-    destination.name;
+    destination.groupName || destination.subject || destination.name;
 
   const groupNiche = classifyGroupNiche(groupName);
   const productNiches = classifyProductNiches(product);
 
-  // Grupo sem referência a um nicho: pode receber ofertas variadas.
   if (groupNiche.id === "unknown") {
     return {
       matches: true,
@@ -740,7 +595,6 @@ function destinationMatchesProduct(destination, product) {
     };
   }
 
-  // Nome com mais de um nicho identificado: bloqueia por segurança.
   if (groupNiche.id === "ambiguous") {
     return {
       matches: false,
@@ -750,7 +604,6 @@ function destinationMatchesProduct(destination, product) {
     };
   }
 
-  // Produto sem classificação não entra em grupo especializado.
   if (!productNiches.length) {
     return {
       matches: false,
@@ -760,9 +613,7 @@ function destinationMatchesProduct(destination, product) {
     };
   }
 
-  const matches = productNiches.some(
-    item => item.id === groupNiche.id
-  );
+  const matches = productNiches.some(item => item.id === groupNiche.id);
 
   return {
     matches,
@@ -1224,6 +1075,7 @@ async function createSupabaseAuthState(profileId) {
   );
 
   let credsWriteQueue = Promise.resolve();
+  let keysWriteQueue = Promise.resolve();
 
   const keys = {
     get: async (type, ids) => {
@@ -1247,51 +1099,59 @@ async function createSupabaseAuthState(profileId) {
     },
 
     set: async data => {
-      const upserts = [];
-      const deletions = [];
+      const operation = async () => {
+        const upserts = [];
+        const deletions = [];
 
-      for (const [type, entries] of Object.entries(data)) {
-        for (const [id, value] of Object.entries(entries || {})) {
-          const chave = `${type}-${id}`;
+        for (const [type, entries] of Object.entries(data)) {
+          for (const [id, value] of Object.entries(entries || {})) {
+            const chave = `${type}-${id}`;
 
-          if (value === null || value === undefined) {
-            deletions.push(chave);
-          } else {
-            upserts.push({
-              perfil: profileId,
-              chave,
-              valor: serializeBaileys(value),
-              atualizado_em: new Date().toISOString()
-            });
+            if (value === null || value === undefined) {
+              deletions.push(chave);
+            } else {
+              upserts.push({
+                perfil: profileId,
+                chave,
+                valor: serializeBaileys(value),
+                atualizado_em: new Date().toISOString()
+              });
+            }
           }
         }
-      }
 
-      if (upserts.length) {
-        const { error } = await supabase
-          .from("robo_whatsapp_chaves")
-          .upsert(upserts, { onConflict: "perfil,chave" });
+        if (upserts.length) {
+          const { error } = await supabase
+            .from("robo_whatsapp_chaves")
+            .upsert(upserts, { onConflict: "perfil,chave" });
 
-        if (error) throw error;
+          if (error) throw error;
 
-        for (const item of upserts) {
-          keysMap.set(item.chave, item.valor);
+          for (const item of upserts) {
+            keysMap.set(item.chave, item.valor);
+          }
         }
-      }
 
-      if (deletions.length) {
-        const { error } = await supabase
-          .from("robo_whatsapp_chaves")
-          .delete()
-          .eq("perfil", profileId)
-          .in("chave", deletions);
+        if (deletions.length) {
+          const { error } = await supabase
+            .from("robo_whatsapp_chaves")
+            .delete()
+            .eq("perfil", profileId)
+            .in("chave", deletions);
 
-        if (error) throw error;
+          if (error) throw error;
 
-        for (const key of deletions) {
-          keysMap.delete(key);
+          for (const key of deletions) {
+            keysMap.delete(key);
+          }
         }
-      }
+      };
+
+      keysWriteQueue = keysWriteQueue
+        .catch(() => {})
+        .then(operation);
+
+      return keysWriteQueue;
     }
   };
 
@@ -1353,7 +1213,7 @@ async function clearWhatsAppAuth(profileId) {
 }
 
 // =====================================================
-// PRODUTOS E OFERTAS - SELEÇÃO CORRIGIDA
+// PRODUTOS E OFERTAS
 // =====================================================
 
 async function getAutomaticOffer(profileId, store, destinations) {
@@ -1412,9 +1272,7 @@ async function getAutomaticOffer(profileId, store, destinations) {
     for (const product of products) {
       const id = String(product.itemId || "").trim();
 
-      if (!id || sent.has(id) || checked.has(id)) {
-        continue;
-      }
+      if (!id || sent.has(id) || checked.has(id)) continue;
 
       checked.add(id);
 
@@ -1424,7 +1282,6 @@ async function getAutomaticOffer(profileId, store, destinations) {
 
       try {
         const parsed = new URL(link);
-
         if (parsed.protocol !== "https:") continue;
       } catch {
         continue;
@@ -1441,7 +1298,6 @@ async function getAutomaticOffer(profileId, store, destinations) {
     }
 
     if (eligible.length > 0) break;
-
     if (!result?.pageInfo?.hasNextPage) break;
 
     await wait(500);
@@ -1457,6 +1313,7 @@ async function getAutomaticOffer(profileId, store, destinations) {
     Math.floor(Math.random() * eligible.length)
   ];
 }
+
 function formatMoney(value) {
   const number = Number(value);
 
@@ -1511,11 +1368,7 @@ function createOfferMessage(product) {
     lines.push(`💰 Por apenas: ${currentPrice}`);
   }
 
-  if (
-    currentPrice &&
-    discountPercent !== null &&
-    currentPriceNumber > 0
-  ) {
+  if (currentPrice && discountPercent !== null && currentPriceNumber > 0) {
     const originalPriceNumber =
       currentPriceNumber / (1 - discountPercent / 100);
 
@@ -1533,7 +1386,7 @@ function createOfferMessage(product) {
 }
 
 // =====================================================
-// ENVIO DA FOTO DO PRODUTO
+// DOWNLOAD DA FOTO DO PRODUTO
 // =====================================================
 
 async function downloadProductImage(imageUrl) {
@@ -1594,6 +1447,10 @@ async function downloadProductImage(imageUrl) {
   };
 }
 
+// =====================================================
+// ENVIO DA FOTO DO PRODUTO
+// =====================================================
+
 async function sendProductOffer(socket, destination, product, message) {
   try {
     const image = await downloadProductImage(product.imageUrl);
@@ -1640,40 +1497,41 @@ function rejectPairingWaiters(session, error) {
   }
 }
 
-function waitForPairingReady(session, timeoutMs = 30000) {
-  if (session.status === "connected") {
-    return Promise.reject(
-      new Error("Este WhatsApp já está conectado.")
-    );
+// Aguarda o socket ficar disponível.
+// Não exige que o QR Code seja gerado para liberar o pareamento por número.
+async function waitForPairingSocket(session, timeoutMs = 15000) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (session.status === "connected") {
+      throw new Error("Este WhatsApp já está conectado.");
+    }
+
+    if (session.status === "error") {
+      throw new Error(
+        session.lastError || "Ocorreu um erro ao iniciar o WhatsApp."
+      );
+    }
+
+    if (
+      session.socket &&
+      typeof session.socket.requestPairingCode === "function"
+    ) {
+      return session.socket;
+    }
+
+    if (!session.socket && session.status === "disconnected") {
+      throw new Error(
+        "A conexão foi encerrada antes de liberar o pareamento."
+      );
+    }
+
+    await wait(300);
   }
 
-  if (session.socket && session.pairingReady) {
-    return Promise.resolve();
-  }
-
-  if (!session.socket) {
-    return Promise.reject(
-      new Error("O WhatsApp não iniciou corretamente. Tente conectar novamente.")
-    );
-  }
-
-  return new Promise((resolve, reject) => {
-    const waiter = { resolve, reject, timer: null };
-
-    waiter.timer = setTimeout(() => {
-      const index = session.pairingWaiters.indexOf(waiter);
-
-      if (index !== -1) {
-        session.pairingWaiters.splice(index, 1);
-      }
-
-      reject(new Error(
-        "O WhatsApp não disponibilizou o pareamento a tempo. Aguarde e tente novamente."
-      ));
-    }, timeoutMs);
-
-    session.pairingWaiters.push(waiter);
-  });
+  throw new Error(
+    "O WhatsApp demorou para iniciar. Tente novamente."
+  );
 }
 
 function scheduleReconnect(profileId) {
@@ -1790,6 +1648,10 @@ async function initializeWhatsApp(profileId) {
           if (!session.pairingReady) {
             session.status = "starting";
           }
+
+          // O socket já iniciou a conexão.
+          // O pareamento por telefone não depende do evento QR.
+          resolvePairingWaiters(session);
         }
 
         if (connection === "open") {
@@ -2321,7 +2183,9 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
   }
 });
 
-// PAREAMENTO POR NÚMERO
+// =====================================================
+// PAREAMENTO POR NÚMERO - CORRIGIDO
+// =====================================================
 
 app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
   const profileId = getProfile(req);
@@ -2356,33 +2220,46 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
 
       if (!session.socket || !session.authState) {
         throw new Error(
-          "Não foi possível iniciar o WhatsApp. Tente novamente."
+          "Não foi possível iniciar o WhatsApp. Tente conectar novamente."
         );
       }
 
       if (session.authState.state.creds.registered) {
         throw new Error(
-          "Este perfil já possui uma sessão registrada. Não solicite outro código antes de verificar a conexão existente."
+          "Este perfil já possui uma sessão registrada. Verifique a conexão existente antes de solicitar outro código."
         );
       }
 
-      await waitForPairingReady(session, 30000);
-
-      if (!session.socket || session.status === "disconnected") {
-        throw new Error(
-          "A conexão foi encerrada antes da solicitação do código."
-        );
-      }
+      // Aguardar o socket ficar pronto, sem depender da geração de QR.
+      const socket = await waitForPairingSocket(session, 15000);
 
       if (session.status === "connected") {
         throw new Error("Este WhatsApp já está conectado.");
       }
 
-      await wait(2000);
+      // Pequena pausa para permitir a inicialização do fluxo de conexão.
+      await wait(1500);
 
-      const code = await session.socket.requestPairingCode(phone);
+      if (
+        !session.socket ||
+        session.socket !== socket ||
+        session.status === "disconnected"
+      ) {
+        throw new Error(
+          "A conexão foi encerrada antes da geração do código. Tente novamente."
+        );
+      }
+
+      const code = await socket.requestPairingCode(phone);
+
+      if (!code) {
+        throw new Error(
+          "O WhatsApp não retornou um código de pareamento. Tente novamente."
+        );
+      }
 
       session.pairingCode = code;
+      session.lastError = null;
 
       console.log(
         `Código de pareamento solicitado para ${profileId}.`
@@ -2416,6 +2293,10 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
     });
   }
 });
+
+// =====================================================
+// DESCONECTAR WHATSAPP
+// =====================================================
 
 app.post("/api/whatsapp/disconnect", adminOnly, async (req, res) => {
   const profileId = getProfile(req);
@@ -2470,6 +2351,10 @@ app.post("/api/whatsapp/disconnect", adminOnly, async (req, res) => {
   });
 });
 
+// =====================================================
+// ENVIAR MENSAGEM DE TESTE
+// =====================================================
+
 app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
   const profileId = getProfile(req);
   const session = sessions[profileId];
@@ -2504,6 +2389,10 @@ app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
     });
   }
 });
+
+// =====================================================
+// CARREGAR GRUPOS DO WHATSAPP
+// =====================================================
 
 app.get("/api/whatsapp/groups", adminOnly, async (req, res) => {
   const profileId = getProfile(req);
