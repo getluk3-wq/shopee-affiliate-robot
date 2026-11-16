@@ -131,15 +131,25 @@ function normalizeText(value) {
     .trim();
 }
 
+function hasTerm(text, term) {
+  const normalizedText = normalizeText(text);
+  const normalizedTerm = normalizeText(term);
+
+  if (!normalizedText || !normalizedTerm) return false;
+
+  return (` ${normalizedText} `).includes(` ${normalizedTerm} `);
+}
+
 const NICHE_DEFINITIONS = [
   {
     id: "moda_feminina",
     label: "Moda Feminina",
     keywords: [
-      "moda feminina", "roupa feminina", "vestido", "blusa feminina",
-      "saia", "cropped", "conjunto feminino", "lingerie", "sutia",
-      "calcinha", "body feminino", "top feminino", "calca feminina",
-      "short feminino", "moda mulher", "feminino"
+      "moda feminina", "roupa feminina", "vestido feminino",
+      "vestidos", "blusa feminina", "saia", "cropped",
+      "conjunto feminino", "lingerie", "sutia", "calcinha",
+      "body feminino", "top feminino", "calca feminina",
+      "short feminino", "moda mulher", "roupas de mulher"
     ]
   },
   {
@@ -147,29 +157,33 @@ const NICHE_DEFINITIONS = [
     label: "Moda Masculina",
     keywords: [
       "moda masculina", "roupa masculina", "camisa masculina",
-      "camiseta masculina", "bermuda masculina", "calca masculina",
-      "cueca", "polo masculina", "moletom masculino",
-      "masculino"
+      "camiseta masculina", "bermuda masculina",
+      "calca masculina", "cueca", "polo masculina",
+      "moletom masculino", "roupas de homem", "moda homem"
     ]
   },
   {
     id: "calcados_bolsas",
     label: "Calçados e Bolsas",
     keywords: [
-      "calcados", "sapato", "tenis", "sandalia", "chinelo",
-      "bota", "rasteirinha", "scarpin", "bolsa", "mochila",
-      "carteira", "mala", "sapatilha"
+      "calcados", "calcado", "sapato", "sapatos", "tenis",
+      "sandalia", "sandalias", "chinelo", "chinelos",
+      "bota", "botas", "rasteirinha", "scarpin",
+      "bolsa", "mochila", "carteira", "mala",
+      "sapatilha", "papete"
     ]
   },
   {
     id: "eletronicos",
     label: "Eletrônicos",
     keywords: [
-      "eletronicos", "celular", "smartphone", "fone", "headphone",
-      "bluetooth", "caixa de som", "televisao", "televisor",
-      "smartwatch", "carregador", "cabo usb", "camera digital",
-      "tablet", "controle remoto", "videogame", "console",
-      "power bank", "tv"
+      "eletronicos", "celular", "smartphone", "fone",
+      "fone de ouvido", "headphone", "bluetooth",
+      "caixa de som", "televisao", "televisor",
+      "smartwatch", "carregador", "cabo usb",
+      "camera digital", "tablet", "controle remoto",
+      "videogame", "console", "power bank", "tv",
+      "acessorios para celular"
     ]
   },
   {
@@ -177,20 +191,23 @@ const NICHE_DEFINITIONS = [
     label: "Informática",
     keywords: [
       "informatica", "notebook", "laptop", "computador",
-      "teclado", "mouse", "monitor", "impressora", "roteador",
-      "webcam", "hd externo", "ssd", "memoria ram",
-      "placa de video", "gabinete"
+      "teclado", "mouse", "monitor", "impressora",
+      "roteador", "webcam", "hd externo", "ssd",
+      "memoria ram", "placa de video", "gabinete",
+      "pecas de computador", "acessorios de computador"
     ]
   },
   {
     id: "casa_decoracao",
     label: "Casa e Decoração",
     keywords: [
-      "casa e decoracao", "decoracao", "cozinha", "panela",
-      "utensilio", "organizador", "sofa", "mesa", "cadeira",
-      "cama", "banho", "cortina", "tapete", "luminaria",
-      "eletrodomestico", "ventilador", "liquidificador",
-      "air fryer", "fritadeira", "cafeteira", "torneira"
+      "casa e decoracao", "decoracao", "cozinha",
+      "panela", "utensilio", "organizador", "sofa",
+      "mesa", "cadeira", "cama", "banho", "cortina",
+      "tapete", "luminaria", "eletrodomestico",
+      "ventilador", "liquidificador", "air fryer",
+      "fritadeira", "cafeteira", "torneira",
+      "utilidades domesticas", "organizacao da casa"
     ]
   },
   {
@@ -198,73 +215,231 @@ const NICHE_DEFINITIONS = [
     label: "Beleza e Cosméticos",
     keywords: [
       "beleza", "cosmeticos", "maquiagem", "batom",
-      "rimel", "mascara de cilios", "base facial", "corretivo",
-      "skincare", "hidratante", "shampoo", "condicionador",
-      "esmalte", "unha", "creme facial", "protetor solar",
-      "cosmetico", "pincel de maquiagem"
+      "rimel", "mascara de cilios", "base facial",
+      "corretivo", "skincare", "hidratante", "shampoo",
+      "condicionador", "esmalte", "unha", "creme facial",
+      "protetor solar", "cosmetico",
+      "pincel de maquiagem", "produtos de beleza"
     ]
   },
   {
     id: "perfumes",
     label: "Perfumes",
     keywords: [
-      "perfume", "perfumaria", "colonia", "deo parfum",
-      "eau de parfum", "body splash", "fragrancia",
-      "desodorante"
+      "perfume", "perfumes", "perfumaria", "colonia",
+      "deo parfum", "eau de parfum", "body splash",
+      "fragrancia", "desodorante"
     ]
   },
   {
     id: "infantil_bebe",
     label: "Infantil e Bebê",
     keywords: [
-      "infantil", "bebe", "brinquedo", "fralda", "mamadeira",
-      "carrinho de bebe", "roupa infantil", "crianca",
-      "boneca", "lego", "chocalho", "berco", "puericultura"
+      "infantil", "bebe", "brinquedo", "fralda",
+      "mamadeira", "carrinho de bebe", "roupa infantil",
+      "crianca", "boneca", "lego", "chocalho",
+      "berco", "puericultura", "artigos para bebe"
     ]
   },
   {
     id: "esportes_fitness",
     label: "Esportes e Fitness",
     keywords: [
-      "esportes", "fitness", "academia", "halter", "anilha",
-      "bicicleta", "corrida", "treino", "yoga", "pilates",
-      "bola esportiva", "tenis esportivo", "colchonete",
-      "equipamento de ginastica"
+      "esportes", "fitness", "academia", "halter",
+      "anilha", "bicicleta", "corrida", "treino",
+      "yoga", "pilates", "bola esportiva",
+      "tenis esportivo", "colchonete",
+      "equipamento de ginastica", "musculacao"
     ]
   },
   {
     id: "mercado_alimentos",
     label: "Mercado e Alimentos",
     keywords: [
-      "mercado", "alimentos", "cafe", "arroz", "feijao",
-      "acucar", "oleo de cozinha", "biscoito", "chocolate",
-      "alimento", "bebida", "mantimento", "mercearia"
+      "mercado", "alimentos", "cafe", "arroz",
+      "feijao", "acucar", "oleo de cozinha",
+      "biscoito", "chocolate", "alimento",
+      "bebida", "mantimento", "mercearia"
     ]
   },
   {
     id: "automotivo",
     label: "Automotivo",
     keywords: [
-      "automotivo", "carro", "moto", "veiculo", "pneu",
-      "peca automotiva", "acessorios carro", "capacete",
-      "oleo motor", "ferramenta automotiva", "som automotivo"
+      "automotivo", "carro", "moto", "veiculo",
+      "pneu", "peca automotiva", "acessorios carro",
+      "capacete", "oleo motor", "ferramenta automotiva",
+      "som automotivo", "acessorios para moto"
+    ]
+  },
+  {
+    id: "eletricos",
+    label: "Materiais Elétricos",
+    keywords: [
+      "material eletrico", "materiais eletricos",
+      "eletrica", "fios eletricos", "cabos eletricos",
+      "disjuntor", "tomada", "interruptor",
+      "lampada", "luminaria eletrica", "quadro de energia",
+      "quadro eletrico", "conector eletrico",
+      "extensao eletrica", "fita isolante",
+      "conduite", "eletroduto", "chuveiro eletrico"
+    ]
+  },
+  {
+    id: "pet",
+    label: "Pets",
+    keywords: [
+      "pet", "pets", "cachorro", "cachorros",
+      "cao", "gato", "gatos", "racao",
+      "areia para gatos", "brinquedo para cachorro",
+      "brinquedo para gato", "coleira", "guia pet",
+      "cama pet", "comedouro", "bebedouro pet",
+      "acessorios para pets", "produtos para animais",
+      "animais de estimacao"
     ]
   }
 ];
 
+const GROUP_NICHE_ALIASES = {
+  moda_feminina: [
+    "tudo feminino",
+    "mundo delas",
+    "achadinhos das mulheres",
+    "achadinhos feminino",
+    "universo feminino",
+    "cantinho feminino",
+    "ofertas para elas",
+    "estilo das mulheres",
+    "mulheres que amam ofertas",
+    "moda para elas",
+    "look das meninas",
+    "closet feminino"
+  ],
+  moda_masculina: [
+    "tudo masculino",
+    "estilo masculino",
+    "estilo dos homens",
+    "moda dos homens",
+    "achadinhos masculinos",
+    "achadinhos dos homens",
+    "mundo masculino",
+    "ofertas para eles",
+    "moda para eles",
+    "universo masculino",
+    "closet masculino"
+  ],
+  calcados_bolsas: [
+    "mundo dos calcados",
+    "ofertas de calcados",
+    "bolsas e sapatos",
+    "achadinhos de bolsas",
+    "mundo das bolsas",
+    "calcados e acessorios"
+  ],
+  eletronicos: [
+    "mundo tech",
+    "universo tech",
+    "tecnologia",
+    "achadinhos de tecnologia",
+    "ofertas tech",
+    "gadgets",
+    "mundo dos eletronicos"
+  ],
+  informatica: [
+    "mundo da informatica",
+    "pecas de pc",
+    "setup gamer",
+    "setup pc",
+    "computacao",
+    "universo gamer"
+  ],
+  casa_decoracao: [
+    "lar e decoracao",
+    "meu lar",
+    "cantinho da casa",
+    "casa organizada",
+    "utilidades para casa",
+    "achadinhos para casa",
+    "mundo da cozinha"
+  ],
+  beleza_cosmeticos: [
+    "mundo da beleza",
+    "cantinho da beleza",
+    "beleza feminina",
+    "achadinhos de beleza",
+    "universo da maquiagem",
+    "maquiagem e cuidados"
+  ],
+  perfumes: [
+    "mundo dos perfumes",
+    "achadinhos de perfumes",
+    "perfumaria e ofertas",
+    "clube dos perfumes",
+    "fragrancias e perfumes"
+  ],
+  infantil_bebe: [
+    "mundo infantil",
+    "universo do bebe",
+    "maes e bebes",
+    "achadinhos para criancas",
+    "cantinho do bebe",
+    "mundo das criancas"
+  ],
+  esportes_fitness: [
+    "vida fitness",
+    "mundo fitness",
+    "projeto fitness",
+    "treino e academia",
+    "universo fitness",
+    "achadinhos fitness"
+  ],
+  mercado_alimentos: [
+    "ofertas de mercado",
+    "achadinhos de mercado",
+    "economia no mercado",
+    "cesta de ofertas",
+    "mundo das ofertas de mercado"
+  ],
+  automotivo: [
+    "mundo automotivo",
+    "acessorios para carros",
+    "universo automotivo",
+    "ofertas para carros",
+    "ofertas para motos"
+  ],
+  eletricos: [
+    "tudo de eletrica",
+    "tudo sobre eletrica",
+    "materiais de eletrica",
+    "mundo da eletrica",
+    "eletricista",
+    "eletricistas",
+    "instalacoes eletricas",
+    "ferramentas de eletrica"
+  ],
+  pet: [
+    "universo pet",
+    "mundo pet",
+    "amantes de pets",
+    "amigos dos animais",
+    "pais de pet",
+    "maes de pet",
+    "tudo para pets",
+    "achadinhos pet",
+    "cantinho pet"
+  ]
+};
+
 function scoreNiche(text, definition) {
   const normalized = normalizeText(text);
+
   if (!normalized) return 0;
 
   let score = 0;
 
   for (const keyword of definition.keywords) {
-    const normalizedKeyword = normalizeText(keyword);
-
-    if (!normalizedKeyword) continue;
-
-    if (normalized.includes(normalizedKeyword)) {
-      score += normalizedKeyword.includes(" ") ? 3 : 2;
+    if (hasTerm(normalized, keyword)) {
+      score += normalizeText(keyword).includes(" ") ? 3 : 2;
     }
   }
 
@@ -282,20 +457,30 @@ function classifyGroupNiche(groupName) {
     };
   }
 
-  const scores = NICHE_DEFINITIONS
-    .map(definition => ({
+  const scores = NICHE_DEFINITIONS.map(definition => {
+    let score = scoreNiche(text, definition);
+
+    const aliases = GROUP_NICHE_ALIASES[definition.id] || [];
+
+    for (const alias of aliases) {
+      if (hasTerm(text, alias)) {
+        score += normalizeText(alias).includes(" ") ? 8 : 5;
+      }
+    }
+
+    return {
       id: definition.id,
       label: definition.label,
-      score: scoreNiche(text, definition)
-    }))
-    .sort((a, b) => b.score - a.score);
+      score
+    };
+  }).sort((a, b) => b.score - a.score);
 
   const best = scores[0];
   const second = scores[1];
 
   if (
     !best ||
-    best.score < 2 ||
+    best.score < 3 ||
     (second && best.score === second.score)
   ) {
     return {
@@ -308,16 +493,49 @@ function classifyGroupNiche(groupName) {
   return {
     id: best.id,
     label: best.label,
-    confidence: Math.min(100, best.score * 20)
+    confidence: Math.min(100, best.score * 10)
   };
+}
+
+const CLOTHING_TERMS = [
+  "roupa", "roupas", "vestido", "vestidos",
+  "blusa", "blusas", "saia", "saias",
+  "cropped", "lingerie", "sutia", "calcinha",
+  "body", "top", "calca", "short", "shorts",
+  "bermuda", "cueca", "camisa", "camiseta",
+  "polo", "moletom", "jaqueta", "casaco",
+  "conjunto", "macacao", "legging", "regata",
+  "sueter", "cardigan", "pijama"
+];
+
+const FOOTWEAR_TERMS = [
+  "calcado", "calcados", "sapato", "sapatos",
+  "tenis", "sandalia", "sandalias", "chinelo",
+  "chinelos", "bota", "botas", "rasteirinha",
+  "scarpin", "sapatilha", "papete"
+];
+
+const FEMALE_TERMS = [
+  "feminino", "feminina", "femininos", "femininas",
+  "mulher", "mulheres", "feminil"
+];
+
+const MALE_TERMS = [
+  "masculino", "masculina", "masculinos", "masculinas",
+  "homem", "homens"
+];
+
+function containsAnyTerm(text, terms) {
+  return terms.some(term => hasTerm(text, term));
 }
 
 function classifyProductNiches(product) {
   const title = normalizeText(
-    product?.productName || product?.name || product?.title
+    product?.productName ||
+    product?.name ||
+    product?.title ||
+    ""
   );
-
-  const description = normalizeText(product?.description || "");
 
   const category = normalizeText(
     product?.category ||
@@ -326,49 +544,20 @@ function classifyProductNiches(product) {
     ""
   );
 
-  const shop = normalizeText(product?.shopName || "");
+  const description = normalizeText(product?.description || "");
 
-  const titleScores = NICHE_DEFINITIONS.map(definition => ({
-    id: definition.id,
-    label: definition.label,
-    score: scoreNiche(title, definition)
-  }));
-
-  const categoryScores = NICHE_DEFINITIONS.map(definition => ({
-    id: definition.id,
-    score: scoreNiche(category, definition)
-  }));
-
-  const descriptionScores = NICHE_DEFINITIONS.map(definition => ({
-    id: definition.id,
-    score: scoreNiche(description, definition)
-  }));
-
-  const shopScores = NICHE_DEFINITIONS.map(definition => ({
-    id: definition.id,
-    score: scoreNiche(shop, definition)
-  }));
-
+  const mainText = `${title} ${category}`;
   const results = [];
 
   for (const definition of NICHE_DEFINITIONS) {
-    const titleScore =
-      titleScores.find(item => item.id === definition.id)?.score || 0;
-
-    const categoryScore =
-      categoryScores.find(item => item.id === definition.id)?.score || 0;
-
-    const descriptionScore =
-      descriptionScores.find(item => item.id === definition.id)?.score || 0;
-
-    const shopScore =
-      shopScores.find(item => item.id === definition.id)?.score || 0;
+    const titleScore = scoreNiche(title, definition);
+    const categoryScore = scoreNiche(category, definition);
+    const descriptionScore = scoreNiche(description, definition);
 
     const total =
       titleScore * 3 +
       categoryScore * 3 +
-      descriptionScore +
-      shopScore;
+      descriptionScore;
 
     const confident =
       titleScore >= 2 ||
@@ -384,6 +573,47 @@ function classifyProductNiches(product) {
     }
   }
 
+  const hasClothing = containsAnyTerm(mainText, CLOTHING_TERMS);
+  const hasFootwear = containsAnyTerm(mainText, FOOTWEAR_TERMS);
+
+  const isFemale = containsAnyTerm(mainText, FEMALE_TERMS);
+  const isMale = containsAnyTerm(mainText, MALE_TERMS);
+
+  const hasPerfume = results.some(item => item.id === "perfumes");
+
+  if (!hasPerfume && (hasClothing || hasFootwear)) {
+    if (isFemale && !isMale) {
+      if (!results.some(item => item.id === "moda_feminina")) {
+        results.push({
+          id: "moda_feminina",
+          label: "Moda Feminina",
+          score: 8
+        });
+      }
+    }
+
+    if (isMale && !isFemale) {
+      if (!results.some(item => item.id === "moda_masculina")) {
+        results.push({
+          id: "moda_masculina",
+          label: "Moda Masculina",
+          score: 8
+        });
+      }
+    }
+  }
+
+  if (
+    hasFootwear &&
+    !results.some(item => item.id === "calcados_bolsas")
+  ) {
+    results.push({
+      id: "calcados_bolsas",
+      label: "Calçados e Bolsas",
+      score: 6
+    });
+  }
+
   results.sort((a, b) => b.score - a.score);
 
   return results;
@@ -393,7 +623,6 @@ function getProductNicheLabels(product) {
   return classifyProductNiches(product).map(item => item.label);
 }
 
-// GRUPO NÃO IDENTIFICADO = GRUPO GERAL
 function destinationMatchesProduct(destination, product) {
   const groupNiche = classifyGroupNiche(destination.name);
   const productNiches = classifyProductNiches(product);
@@ -410,7 +639,7 @@ function destinationMatchesProduct(destination, product) {
   if (!productNiches.length) {
     return {
       matches: false,
-      reason: `Nicho do produto "${product.productName || product.name}" não identificado.`,
+      reason: `Nicho do produto "${product.productName || product.name || product.title || "sem nome"}" não identificado.`,
       groupNiche,
       productNiches
     };
@@ -1054,7 +1283,6 @@ async function getAutomaticOffer(profileId, store, destinations) {
   const checked = new Set();
   const eligible = [];
 
-  // Examina até 5 páginas, com até 30 produtos por página.
   for (let page = 1; page <= 5; page++) {
     const data = await shopeeRequest(profileId, query, {
       page,
@@ -1079,7 +1307,6 @@ async function getAutomaticOffer(profileId, store, destinations) {
         product.offerLink || product.productLink || ""
       ).trim();
 
-      // Só aceita links HTTPS válidos.
       try {
         const parsed = new URL(link);
 
@@ -1088,7 +1315,6 @@ async function getAutomaticOffer(profileId, store, destinations) {
         continue;
       }
 
-      // Só aceita produto que tenha pelo menos um destino compatível.
       const matchingDestinations = destinations.filter(
         destination =>
           destinationMatchesProduct(destination, product).matches
@@ -1099,8 +1325,6 @@ async function getAutomaticOffer(profileId, store, destinations) {
       eligible.push(product);
     }
 
-    // Se já encontrou produtos compatíveis nesta página,
-    // não precisa consultar as próximas páginas.
     if (eligible.length > 0) break;
 
     if (!result?.pageInfo?.hasNextPage) break;
@@ -1114,7 +1338,6 @@ async function getAutomaticOffer(profileId, store, destinations) {
     );
   }
 
-  // Escolhe aleatoriamente entre os produtos elegíveis.
   return eligible[
     Math.floor(Math.random() * eligible.length)
   ];
@@ -1520,7 +1743,6 @@ async function initializeWhatsApp(profileId) {
             );
           }
 
-          // Não apaga automaticamente as credenciais.
           if (loggedOut) {
             session.lastError =
               "WhatsApp retornou loggedOut. Dados preservados no Supabase. Verifique a sessão antes de parear novamente.";
@@ -1615,7 +1837,6 @@ async function runAutomation(profileId) {
       }
     }
 
-    // Busca um produto que combine com pelo menos um grupo.
     const product = await getAutomaticOffer(
       profileId,
       store,
