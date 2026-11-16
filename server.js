@@ -41,8 +41,6 @@ const supabase = createClient(
   }
 );
 
-// Atualiza somente uma coluna do perfil.
-// Evita que uma gravação apague dados de outras colunas.
 async function updateProfileColumn(profileId, column, value) {
   const allowed = [
     "dados",
@@ -324,9 +322,11 @@ function getSaoPauloDateParts(date = new Date()) {
   }).formatToParts(date);
 
   const result = {};
+
   for (const part of parts) {
     if (part.type !== "literal") result[part.type] = part.value;
   }
+
   return result;
 }
 
@@ -372,6 +372,7 @@ function getCurrentWindow(automation, now = new Date()) {
     isInsideWindow = currentTime >= startTime && currentTime < endTime;
   } else {
     isInsideWindow = currentTime >= startTime || currentTime < endTime;
+
     if (currentTime < endTime) {
       sessionDateKey = getPreviousDateKey(todayKey);
     }
@@ -405,6 +406,7 @@ function getEncryptionKey() {
 function encryptSecret(secret) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", getEncryptionKey(), iv);
+
   const encrypted = Buffer.concat([
     cipher.update(secret, "utf8"),
     cipher.final()
@@ -489,15 +491,23 @@ async function shopeeRequest(profileId, query, variables = {}) {
         const error = new Error(
           `Resposta inesperada da Shopee. HTTP ${response.status}.`
         );
-        error.retryable = response.status === 429 || response.status >= 500;
+
+        error.retryable =
+          response.status === 429 || response.status >= 500;
+
         throw error;
       }
 
       if (!response.ok) {
         const error = new Error(
-          result.message || result.error || `Erro HTTP ${response.status} na Shopee.`
+          result.message ||
+          result.error ||
+          `Erro HTTP ${response.status} na Shopee.`
         );
-        error.retryable = response.status === 429 || response.status >= 500;
+
+        error.retryable =
+          response.status === 429 || response.status >= 500;
+
         throw error;
       }
 
@@ -507,8 +517,10 @@ async function shopeeRequest(profileId, query, variables = {}) {
           .join("; ");
 
         const error = new Error(message);
+
         error.retryable =
           /10000|system\s*error|temporar|internal server/i.test(message);
+
         throw error;
       }
 
@@ -521,6 +533,7 @@ async function shopeeRequest(profileId, query, variables = {}) {
         error.name === "TypeError";
 
       if (!retryable || attempt === 3) throw error;
+
       await wait(attempt * 2000);
     }
   }
@@ -564,7 +577,6 @@ async function createSupabaseAuthState(profileId) {
     (savedKeys || []).map(row => [row.chave, row.valor])
   );
 
-  // Evita que gravações simultâneas sobrescrevam credenciais mais recentes.
   let credsWriteQueue = Promise.resolve();
 
   const keys = {
@@ -638,7 +650,6 @@ async function createSupabaseAuthState(profileId) {
   };
 
   const saveCreds = async () => {
-    // Captura o estado atualizado no momento em que o evento acontece.
     const snapshot = serializeBaileys(creds);
 
     credsWriteQueue = credsWriteQueue
@@ -657,9 +668,11 @@ async function createSupabaseAuthState(profileId) {
             console.log(
               `Credenciais WhatsApp salvas no Supabase: ${profileId}`
             );
+
             return;
           } catch (error) {
             lastError = error;
+
             console.error(
               `Tentativa ${attempt}/3 ao salvar sessão (${profileId}):`,
               error.message
@@ -755,6 +768,7 @@ async function getAutomaticOffer(profileId, store) {
 
 function formatMoney(value) {
   const number = Number(value);
+
   if (!Number.isFinite(number) || number <= 0) return null;
 
   return number.toLocaleString("pt-BR", {
@@ -769,6 +783,7 @@ function getDiscountPercent(value) {
   if (!Number.isFinite(raw) || raw <= 0 || raw >= 100) return null;
 
   const percent = raw < 1 ? raw * 100 : raw;
+
   return percent > 0 && percent < 100 ? percent : null;
 }
 
@@ -781,7 +796,11 @@ function createOfferMessage(product) {
 
   try {
     const parsed = new URL(link);
-    if (parsed.protocol !== "https:") throw new Error("Link não seguro.");
+
+    if (parsed.protocol !== "https:") {
+      throw new Error("Link não seguro.");
+    }
+
     safeLink = parsed.href;
   } catch {
     throw new Error("Link de oferta inválido.");
@@ -801,9 +820,14 @@ function createOfferMessage(product) {
     lines.push(`💰 Por apenas: ${currentPrice}`);
   }
 
-  if (currentPrice && discountPercent !== null && currentPriceNumber > 0) {
+  if (
+    currentPrice &&
+    discountPercent !== null &&
+    currentPriceNumber > 0
+  ) {
     const originalPriceNumber =
       currentPriceNumber / (1 - discountPercent / 100);
+
     const originalPrice = formatMoney(originalPriceNumber);
 
     if (originalPrice && originalPriceNumber > currentPriceNumber) {
@@ -813,6 +837,7 @@ function createOfferMessage(product) {
   }
 
   lines.push("", "👉 Aproveite aqui:", safeLink);
+
   return lines.join("\n");
 }
 
@@ -847,7 +872,9 @@ async function downloadProductImage(imageUrl) {
   });
 
   if (!response.ok) {
-    throw new Error(`Não foi possível baixar a foto. HTTP ${response.status}.`);
+    throw new Error(
+      `Não foi possível baixar a foto. HTTP ${response.status}.`
+    );
   }
 
   const contentType = response.headers.get("content-type") || "";
@@ -856,7 +883,9 @@ async function downloadProductImage(imageUrl) {
     throw new Error("O endereço informado não retornou uma imagem.");
   }
 
-  const contentLength = Number(response.headers.get("content-length") || 0);
+  const contentLength = Number(
+    response.headers.get("content-length") || 0
+  );
 
   if (contentLength > MAX_IMAGE_SIZE) {
     throw new Error("A foto do produto ultrapassa o limite de 8 MB.");
@@ -922,10 +951,14 @@ function rejectPairingWaiters(session, error) {
 
 function waitForPairingReady(session, timeoutMs = 30000) {
   if (session.status === "connected") {
-    return Promise.reject(new Error("Este WhatsApp já está conectado."));
+    return Promise.reject(
+      new Error("Este WhatsApp já está conectado.")
+    );
   }
 
-  if (session.socket && session.pairingReady) return Promise.resolve();
+  if (session.socket && session.pairingReady) {
+    return Promise.resolve();
+  }
 
   if (!session.socket) {
     return Promise.reject(
@@ -938,7 +971,10 @@ function waitForPairingReady(session, timeoutMs = 30000) {
 
     waiter.timer = setTimeout(() => {
       const index = session.pairingWaiters.indexOf(waiter);
-      if (index !== -1) session.pairingWaiters.splice(index, 1);
+
+      if (index !== -1) {
+        session.pairingWaiters.splice(index, 1);
+      }
 
       reject(new Error(
         "O WhatsApp não disponibilizou o pareamento a tempo. Aguarde e tente novamente."
@@ -967,12 +1003,17 @@ function scheduleReconnect(profileId) {
 
   session.reconnectTimer = setTimeout(async () => {
     session.reconnectTimer = null;
+
     if (session.manualDisconnect) return;
 
     try {
       await initializeWhatsApp(profileId);
     } catch (error) {
-      console.error(`Falha ao reconectar ${profileId}:`, error.message);
+      console.error(
+        `Falha ao reconectar ${profileId}:`,
+        error.message
+      );
+
       scheduleReconnect(profileId);
     }
   }, delay);
@@ -981,13 +1022,18 @@ function scheduleReconnect(profileId) {
 async function initializeWhatsApp(profileId) {
   const session = sessions[profileId];
 
-  if (!isValidProfile(profileId)) throw new Error("Perfil inválido.");
+  if (!isValidProfile(profileId)) {
+    throw new Error("Perfil inválido.");
+  }
+
   if (session.initPromise) return session.initPromise;
 
   if (
     session.socket &&
     ["connected", "qr", "starting"].includes(session.status)
-  ) return session;
+  ) {
+    return session;
+  }
 
   if (session.reconnectTimer) {
     clearTimeout(session.reconnectTimer);
@@ -1004,6 +1050,7 @@ async function initializeWhatsApp(profileId) {
   session.initPromise = (async () => {
     try {
       const auth = await createSupabaseAuthState(profileId);
+
       session.authState = auth;
 
       const socket = makeWASocket({
@@ -1019,12 +1066,12 @@ async function initializeWhatsApp(profileId) {
 
       session.socket = socket;
 
-      // Salva cada atualização e aguarda a gravação no Supabase.
       socket.ev.on("creds.update", async () => {
         try {
           await auth.saveCreds();
         } catch (error) {
           session.lastError = error.message;
+
           console.error(
             `Erro ao salvar credenciais WhatsApp (${profileId}):`,
             error.message
@@ -1040,23 +1087,38 @@ async function initializeWhatsApp(profileId) {
             session.qr = await QRCode.toDataURL(qr);
             session.pairingReady = true;
             session.status = "qr";
+
             resolvePairingWaiters(session);
           } catch (error) {
             session.lastError = error.message;
+
             console.error("Erro ao gerar QR:", error.message);
           }
         }
 
         if (connection === "connecting") {
-          if (!session.pairingReady) session.status = "starting";
+          if (!session.pairingReady) {
+            session.status = "starting";
+          }
         }
 
         if (connection === "open") {
-          // Confirma a gravação das credenciais quando a conexão abre.
+          // A conexão aberta confirma que a autenticação foi concluída.
+          auth.state.creds.registered = true;
+
+          let credentialsSaved = false;
+
           try {
             await auth.saveCreds();
+
+            credentialsSaved = true;
+
+            console.log(
+              `Sessão autenticada e salva no Supabase: ${profileId}`
+            );
           } catch (error) {
             session.lastError = error.message;
+
             console.error(
               `Erro ao confirmar sessão no Supabase (${profileId}):`,
               error.message
@@ -1068,9 +1130,13 @@ async function initializeWhatsApp(profileId) {
           session.pairingCode = null;
           session.pairingReady = false;
           session.reconnectAttempts = 0;
-          session.lastError = null;
+
+          if (credentialsSaved) {
+            session.lastError = null;
+          }
 
           resolvePairingWaiters(session);
+
           console.log(`WhatsApp conectado: ${profileId}`);
         }
 
@@ -1081,11 +1147,15 @@ async function initializeWhatsApp(profileId) {
 
           rejectPairingWaiters(
             session,
-            new Error("A conexão do WhatsApp foi encerrada. Tente novamente.")
+            new Error(
+              "A conexão do WhatsApp foi encerrada. Tente novamente."
+            )
           );
 
           const statusCode = lastDisconnect?.error?.output?.statusCode;
-          const loggedOut = statusCode === DisconnectReason.loggedOut;
+
+          const loggedOut =
+            statusCode === DisconnectReason.loggedOut;
 
           session.status = "disconnected";
 
@@ -1125,6 +1195,7 @@ async function initializeWhatsApp(profileId) {
       session.pairingReady = false;
 
       rejectPairingWaiters(session, error);
+
       throw error;
     } finally {
       session.initPromise = null;
@@ -1140,6 +1211,7 @@ async function initializeWhatsApp(profileId) {
 
 async function runAutomation(profileId) {
   if (automationRunning[profileId]) return;
+
   automationRunning[profileId] = true;
 
   try {
@@ -1153,7 +1225,9 @@ async function runAutomation(profileId) {
     if (!window) {
       automation.lastWindowKey = null;
       automation.nextSendAt = null;
+
       await saveStore(profileId, store);
+
       return;
     }
 
@@ -1161,6 +1235,7 @@ async function runAutomation(profileId) {
       automation.lastWindowKey = window.key;
       automation.nextSendAt = new Date().toISOString();
       automation.lastError = null;
+
       await saveStore(profileId, store);
     }
 
@@ -1201,6 +1276,7 @@ async function runAutomation(profileId) {
 
     let sentCount = 0;
     let imageSentCount = 0;
+
     const errors = [];
 
     for (const destination of selectedDestinations) {
@@ -1213,7 +1289,10 @@ async function runAutomation(profileId) {
         );
 
         sentCount++;
-        if (result.withImage) imageSentCount++;
+
+        if (result.withImage) {
+          imageSentCount++;
+        }
 
         if (result.imageError) {
           console.warn(
@@ -1239,17 +1318,22 @@ async function runAutomation(profileId) {
         automation.sentProductIds.slice(-5000);
 
       automation.lastSentAt = new Date().toISOString();
+
       automation.lastError = errors.length
         ? `Enviado parcialmente. ${errors.join(" | ")}`
         : null;
 
       const intervalSeconds = Math.max(
         10,
-        Math.min(86400, Number(automation.intervalSeconds) || 1800)
+        Math.min(
+          86400,
+          Number(automation.intervalSeconds) || 1800
+        )
       );
 
       automation.intervalSeconds = intervalSeconds;
       automation.intervalMinutes = intervalSeconds / 60;
+
       automation.nextSendAt = new Date(
         Date.now() + intervalSeconds * 1000
       ).toISOString();
@@ -1260,7 +1344,8 @@ async function runAutomation(profileId) {
       );
     } else {
       throw new Error(
-        errors.join(" | ") || "Não foi possível enviar para os grupos."
+        errors.join(" | ") ||
+        "Não foi possível enviar para os grupos."
       );
     }
 
@@ -1269,7 +1354,9 @@ async function runAutomation(profileId) {
     console.error(`Automação ${profileId}:`, error.message);
 
     const store = loadStore(profileId);
+
     store.automation.lastError = error.message;
+
     store.automation.nextSendAt = new Date(
       Date.now() + 5 * 60 * 1000
     ).toISOString();
@@ -1339,7 +1426,11 @@ app.get("/api/data", adminOnly, (req, res) => {
 
 app.get("/api/automation", adminOnly, (req, res) => {
   const store = loadStore(getProfile(req));
-  res.json({ ok: true, automation: store.automation });
+
+  res.json({
+    ok: true,
+    automation: store.automation
+  });
 });
 
 app.post("/api/automation", adminOnly, async (req, res) => {
@@ -1362,11 +1453,15 @@ app.post("/api/automation", adminOnly, async (req, res) => {
     : store.automation.endTime || "18:00";
 
   if (!isValidTime(startTime)) {
-    return res.status(400).json({ error: "Informe um horário de início válido." });
+    return res.status(400).json({
+      error: "Informe um horário de início válido."
+    });
   }
 
   if (!isValidTime(endTime)) {
-    return res.status(400).json({ error: "Informe um horário de encerramento válido." });
+    return res.status(400).json({
+      error: "Informe um horário de encerramento válido."
+    });
   }
 
   if (startTime === endTime) {
@@ -1382,7 +1477,8 @@ app.post("/api/automation", adminOnly, async (req, res) => {
   } else if (body.intervalMinutes !== undefined) {
     intervalSeconds = Number(body.intervalMinutes) * 60;
   } else {
-    intervalSeconds = Number(store.automation.intervalSeconds) || 1800;
+    intervalSeconds =
+      Number(store.automation.intervalSeconds) || 1800;
   }
 
   if (
@@ -1399,7 +1495,9 @@ app.post("/api/automation", adminOnly, async (req, res) => {
     ? [...new Set(body.destinationIds.map(String))]
     : store.automation.destinationIds;
 
-  const knownIds = new Set(store.destinations.map(item => item.id));
+  const knownIds = new Set(
+    store.destinations.map(item => item.id)
+  );
 
   if (destinationIds.some(id => !knownIds.has(id))) {
     return res.status(400).json({
@@ -1498,7 +1596,10 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
       qr: sessions[profileId].qr
     });
   } catch (error) {
-    res.status(500).json({ ok: false, error: error.message });
+    res.status(500).json({
+      ok: false,
+      error: error.message
+    });
   }
 });
 
@@ -1507,6 +1608,7 @@ app.post("/api/whatsapp/connect", adminOnly, async (req, res) => {
 app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
   const profileId = getProfile(req);
   const session = sessions[profileId];
+
   const phone = String(req.body.phone || "").replace(/\D/g, "");
 
   if (phone.length < 10 || phone.length > 15) {
@@ -1535,7 +1637,9 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
       await initializeWhatsApp(profileId);
 
       if (!session.socket || !session.authState) {
-        throw new Error("Não foi possível iniciar o WhatsApp. Tente novamente.");
+        throw new Error(
+          "Não foi possível iniciar o WhatsApp. Tente novamente."
+        );
       }
 
       if (session.authState.state.creds.registered) {
@@ -1559,9 +1663,13 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
       await wait(2000);
 
       const code = await session.socket.requestPairingCode(phone);
+
       session.pairingCode = code;
 
-      console.log(`Código de pareamento solicitado para ${profileId}.`);
+      console.log(
+        `Código de pareamento solicitado para ${profileId}.`
+      );
+
       return code;
     } finally {
       session.pairingPromise = null;
@@ -1579,7 +1687,10 @@ app.post("/api/whatsapp/pairing", adminOnly, async (req, res) => {
   } catch (error) {
     session.lastError = error.message;
 
-    console.error(`Erro no pareamento numérico (${profileId}):`, error.message);
+    console.error(
+      `Erro no pareamento numérico (${profileId}):`,
+      error.message
+    );
 
     res.status(500).json({
       ok: false,
@@ -1601,7 +1712,9 @@ app.post("/api/whatsapp/disconnect", adminOnly, async (req, res) => {
 
   rejectPairingWaiters(
     session,
-    new Error("Pareamento cancelado porque o WhatsApp foi desconectado.")
+    new Error(
+      "Pareamento cancelado porque o WhatsApp foi desconectado."
+    )
   );
 
   try {
@@ -1633,7 +1746,10 @@ app.post("/api/whatsapp/disconnect", adminOnly, async (req, res) => {
   session.status = "disconnected";
   session.reconnectAttempts = 0;
 
-  res.json({ ok: true, status: "disconnected" });
+  res.json({
+    ok: true,
+    status: "disconnected"
+  });
 });
 
 app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
@@ -1650,7 +1766,9 @@ app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
   }
 
   if (!session.socket || session.status !== "connected") {
-    return res.status(400).json({ error: "WhatsApp não está conectado." });
+    return res.status(400).json({
+      error: "WhatsApp não está conectado."
+    });
   }
 
   try {
@@ -1658,10 +1776,16 @@ app.post("/api/whatsapp/send", adminOnly, async (req, res) => {
       ? `${destination}@s.whatsapp.net`
       : destination;
 
-    await session.socket.sendMessage(jid, { text: message });
+    await session.socket.sendMessage(jid, {
+      text: message
+    });
+
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({ ok: false, error: error.message });
+    res.status(500).json({
+      ok: false,
+      error: error.message
+    });
   }
 });
 
@@ -1698,7 +1822,11 @@ app.get("/api/whatsapp/groups", adminOnly, async (req, res) => {
 
 app.get("/api/destinations", adminOnly, (req, res) => {
   const store = loadStore(getProfile(req));
-  res.json({ ok: true, destinations: store.destinations });
+
+  res.json({
+    ok: true,
+    destinations: store.destinations
+  });
 });
 
 app.post("/api/products", adminOnly, async (req, res) => {
@@ -1716,14 +1844,20 @@ app.post("/api/products", adminOnly, async (req, res) => {
   };
 
   if (!product.name) {
-    return res.status(400).json({ error: "Informe o nome do produto." });
+    return res.status(400).json({
+      error: "Informe o nome do produto."
+    });
   }
 
   store.products.unshift(product);
 
   try {
     await saveStore(profileId, store);
-    res.json({ ok: true, product });
+
+    res.json({
+      ok: true,
+      product
+    });
   } catch (error) {
     res.status(500).json({
       ok: false,
@@ -1755,7 +1889,11 @@ app.post("/api/destinations", adminOnly, async (req, res) => {
 
   try {
     await saveStore(profileId, store);
-    res.json({ ok: true, destination });
+
+    res.json({
+      ok: true,
+      destination
+    });
   } catch (error) {
     res.status(500).json({
       ok: false,
@@ -1788,7 +1926,11 @@ app.post("/api/queue", adminOnly, async (req, res) => {
 
   try {
     await saveStore(profileId, store);
-    res.json({ ok: true, item });
+
+    res.json({
+      ok: true,
+      item
+    });
   } catch (error) {
     res.status(500).json({
       ok: false,
@@ -1813,6 +1955,7 @@ app.get("/api/shopee/credentials", adminOnly, (req, res) => {
 
 app.post("/api/shopee/credentials", adminOnly, async (req, res) => {
   const profileId = getProfile(req);
+
   const appId = String(req.body.appId || "").trim();
   const secret = String(req.body.secret || "").trim();
 
@@ -1835,6 +1978,7 @@ app.post("/api/shopee/credentials", adminOnly, async (req, res) => {
     };
 
     await persistShopeeCredentials(profileId, saved);
+
     shopeeCredentials[profileId] = saved;
 
     res.json({
@@ -1843,7 +1987,10 @@ app.post("/api/shopee/credentials", adminOnly, async (req, res) => {
       message: "Credenciais salvas com segurança para este perfil."
     });
   } catch (error) {
-    res.status(500).json({ ok: false, error: error.message });
+    res.status(500).json({
+      ok: false,
+      error: error.message
+    });
   }
 });
 
@@ -1874,6 +2021,7 @@ app.post("/api/shopee/test", adminOnly, async (req, res) => {
 
   try {
     const data = await shopeeRequest(profileId, query);
+
     const products = data?.productOfferV2?.nodes || [];
 
     res.json({
@@ -1964,6 +2112,7 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
 
   const productsMap = new Map();
   const errors = [];
+
   let pagesRead = 0;
   let successfulSearches = 0;
 
@@ -1981,19 +2130,25 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
           const result = data?.productOfferV2;
 
           if (!result) {
-            throw new Error("A Shopee não retornou a lista de ofertas.");
+            throw new Error(
+              "A Shopee não retornou a lista de ofertas."
+            );
           }
 
           successfulSearches++;
           pagesRead++;
 
-          const products = Array.isArray(result.nodes) ? result.nodes : [];
+          const products = Array.isArray(result.nodes)
+            ? result.nodes
+            : [];
 
           for (const product of products) {
             const id = String(product.itemId || "").trim();
+
             const link = String(
               product.offerLink || product.productLink || ""
             ).trim();
+
             const name = String(product.productName || "").trim();
 
             const uniqueKey = id
@@ -2013,6 +2168,7 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
           }
 
           if (!result.pageInfo?.hasNextPage) break;
+
           await wait(500);
         } catch (error) {
           errors.push({
@@ -2020,6 +2176,7 @@ app.get("/api/shopee/products", adminOnly, async (req, res) => {
             page,
             error: error.message
           });
+
           break;
         }
       }
@@ -2086,7 +2243,9 @@ app.use((error, req, res, next) => {
 
 async function initializeApp() {
   console.log("Carregando dados do Supabase...");
+
   await loadStoresFromSupabase();
+
   console.log("Dados do painel carregados.");
 
   for (const profileId of Object.keys(PROFILES)) {
@@ -2123,12 +2282,19 @@ async function initializeApp() {
   }, 1000);
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`MEDEIROS DIGITAL iniciado na porta ${PORT}`);
+    console.log(
+      `MEDEIROS DIGITAL iniciado na porta ${PORT}`
+    );
+
     console.log("Persistência de dados: Supabase");
   });
 }
 
 initializeApp().catch(error => {
-  console.error("Não foi possível iniciar o sistema:", error);
+  console.error(
+    "Não foi possível iniciar o sistema:",
+    error
+  );
+
   process.exit(1);
 });
