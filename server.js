@@ -75,7 +75,9 @@ function defaultProfileData() {
       startTime: '',
       endTime: '',
       scheduleTimes: [],
-      lastRunAt: null
+      lastRunAt: null,
+      lastSentAt: null,
+      lastError: null
     },
     destinations: [],
     products: [],
@@ -181,11 +183,18 @@ function normalizeGroupId(value) {
 
 function getMapValueByGroupId(map, groupId) {
   if (!map || typeof map !== 'object' || Array.isArray(map)) return '';
+
   const id = String(groupId || '').trim();
-  if (Object.prototype.hasOwnProperty.call(map, id)) return map[id];
+
+  if (Object.prototype.hasOwnProperty.call(map, id)) {
+    return map[id];
+  }
 
   const normalized = normalizeGroupId(id);
-  const key = Object.keys(map).find(item => normalizeGroupId(item) === normalized);
+  const key = Object.keys(map).find(
+    item => normalizeGroupId(item) === normalized
+  );
+
   return key ? map[key] : '';
 }
 
@@ -201,22 +210,45 @@ function profileIdFrom(req) {
 }
 
 function getData(profile) {
-  if (!storeCache[profile]) storeCache[profile] = defaultProfileData();
+  if (!storeCache[profile]) {
+    storeCache[profile] = defaultProfileData();
+  }
+
   return storeCache[profile];
 }
 
 function safeJson(value, fallback = null) {
   try {
-    return typeof value === 'string' ? JSON.parse(value) : (value ?? fallback);
+    return typeof value === 'string'
+      ? JSON.parse(value)
+      : (value ?? fallback);
   } catch {
     return fallback;
   }
 }
 
+// Mantém compatibilidade com os dados antigos e novos.
+// O intervalo em segundos tem prioridade quando está salvo.
 function mergeProfileData(value) {
   const base = defaultProfileData();
   const incoming = value && typeof value === 'object' ? value : {};
   const incomingAutomation = incoming.automation || {};
+
+  const rawIntervalSeconds =
+    incomingAutomation.intervalSeconds !== undefined &&
+    incomingAutomation.intervalSeconds !== null
+      ? Number(incomingAutomation.intervalSeconds)
+      : incomingAutomation.intervalMinutes !== undefined
+        ? Number(incomingAutomation.intervalMinutes) * 60
+        : base.automation.intervalSeconds;
+
+  const intervalSeconds = Number.isFinite(rawIntervalSeconds)
+    ? Math.max(10, Math.min(86400, Math.round(rawIntervalSeconds)))
+    : base.automation.intervalSeconds;
+
+  const active = incomingAutomation.active !== undefined
+    ? Boolean(incomingAutomation.active)
+    : Boolean(incomingAutomation.enabled);
 
   return {
     ...base,
@@ -224,34 +256,41 @@ function mergeProfileData(value) {
     automation: {
       ...base.automation,
       ...incomingAutomation,
-      enabled: incomingAutomation.enabled !== undefined
-        ? Boolean(incomingAutomation.enabled)
-        : Boolean(incomingAutomation.active),
-      active: incomingAutomation.active !== undefined
-        ? Boolean(incomingAutomation.active)
-        : Boolean(incomingAutomation.enabled),
+      enabled: active,
+      active,
+      intervalSeconds,
+      intervalMinutes: Math.max(1, Math.ceil(intervalSeconds / 60)),
       destinationIds: Array.isArray(incomingAutomation.destinationIds)
         ? incomingAutomation.destinationIds.map(String)
         : [],
       groupIds: Array.isArray(incomingAutomation.groupIds)
         ? incomingAutomation.groupIds.map(String)
         : [],
-      groupNiches: incomingAutomation.groupNiches && typeof incomingAutomation.groupNiches === 'object'
-        ? incomingAutomation.groupNiches
-        : {},
-      groupNames: incomingAutomation.groupNames && typeof incomingAutomation.groupNames === 'object'
-        ? incomingAutomation.groupNames
-        : {},
+      groupNiches: incomingAutomation.groupNiches &&
+        typeof incomingAutomation.groupNiches === 'object'
+          ? incomingAutomation.groupNiches
+          : {},
+      groupNames: incomingAutomation.groupNames &&
+        typeof incomingAutomation.groupNames === 'object'
+          ? incomingAutomation.groupNames
+          : {},
       scheduleTimes: Array.isArray(incomingAutomation.scheduleTimes)
         ? incomingAutomation.scheduleTimes
         : []
     },
-    destinations: Array.isArray(incoming.destinations) ? incoming.destinations : [],
-    products: Array.isArray(incoming.products) ? incoming.products : [],
-    queue: Array.isArray(incoming.queue) ? incoming.queue : [],
-    sentProducts: incoming.sentProducts && typeof incoming.sentProducts === 'object'
-      ? incoming.sentProducts
-      : {},
+    destinations: Array.isArray(incoming.destinations)
+      ? incoming.destinations
+      : [],
+    products: Array.isArray(incoming.products)
+      ? incoming.products
+      : [],
+    queue: Array.isArray(incoming.queue)
+      ? incoming.queue
+      : [],
+    sentProducts: incoming.sentProducts &&
+      typeof incoming.sentProducts === 'object'
+        ? incoming.sentProducts
+        : {},
     whatsappAuth: {
       creds: incoming.whatsappAuth?.creds || null,
       keys: incoming.whatsappAuth?.keys || {}
@@ -261,7 +300,13 @@ function mergeProfileData(value) {
 
 // Persistência compatível com variações comuns das colunas existentes.
 async function findProfileRow(profile) {
-  if (!supabase) return { row: null, profileColumn: null, dataColumn: null };
+  if (!supabase) {
+    return {
+      row: null,
+      profileColumn: null,
+      dataColumn: null
+    };
+  }
 
   const profileColumns = ['perfil', 'profile', 'profile_id', 'id'];
 
@@ -274,15 +319,33 @@ async function findProfileRow(profile) {
         .maybeSingle();
 
       if (!error && data) {
-        const dataColumn = ['dados', 'data', 'config', 'settings', 'conteudo', 'payload']
-          .find(key => Object.prototype.hasOwnProperty.call(data, key));
+        const dataColumn = [
+          'dados',
+          'data',
+          'config',
+          'settings',
+          'conteudo',
+          'payload'
+        ].find(key =>
+          Object.prototype.hasOwnProperty.call(data, key)
+        );
 
-        if (dataColumn) return { row: data, profileColumn: column, dataColumn };
+        if (dataColumn) {
+          return {
+            row: data,
+            profileColumn: column,
+            dataColumn
+          };
+        }
       }
     } catch (_) {}
   }
 
-  return { row: null, profileColumn: null, dataColumn: null };
+  return {
+    row: null,
+    profileColumn: null,
+    dataColumn: null
+  };
 }
 
 async function loadProfile(profile) {
@@ -297,13 +360,20 @@ async function loadProfile(profile) {
     const found = await findProfileRow(profile);
 
     if (found.row && found.dataColumn) {
-      const parsed = safeJson(found.row[found.dataColumn], found.row[found.dataColumn]);
+      const parsed = safeJson(
+        found.row[found.dataColumn],
+        found.row[found.dataColumn]
+      );
+
       storeCache[profile] = mergeProfileData(parsed);
       return storeCache[profile];
     }
   }
 
-  if (localData) storeCache[profile] = mergeProfileData(localData);
+  if (localData) {
+    storeCache[profile] = mergeProfileData(localData);
+  }
+
   return getData(profile);
 }
 
@@ -317,7 +387,10 @@ async function saveProfile(profile) {
       JSON.stringify(data, null, 2)
     );
   } catch (error) {
-    logger.warn({ error: error.message }, 'Falha ao salvar cópia local');
+    logger.warn(
+      { error: error.message },
+      'Falha ao salvar cópia local'
+    );
   }
 
   if (!supabase) return;
@@ -325,7 +398,10 @@ async function saveProfile(profile) {
   const found = await findProfileRow(profile);
 
   if (found.row && found.dataColumn) {
-    const payload = { [found.dataColumn]: data };
+    const payload = {
+      [found.dataColumn]: data
+    };
+
     if (Object.prototype.hasOwnProperty.call(found.row, 'updated_at')) {
       payload.updated_at = data.updatedAt;
     }
@@ -335,7 +411,13 @@ async function saveProfile(profile) {
       .update(payload)
       .eq(found.profileColumn, profile);
 
-    if (error) logger.error({ error: error.message }, 'Falha ao atualizar robo_perfis');
+    if (error) {
+      logger.error(
+        { error: error.message },
+        'Falha ao atualizar robo_perfis'
+      );
+    }
+
     return;
   }
 
@@ -349,22 +431,39 @@ async function saveProfile(profile) {
 
   for (const payload of candidates) {
     try {
-      const { error } = await supabase.from('robo_perfis').insert(payload);
+      const { error } = await supabase
+        .from('robo_perfis')
+        .insert(payload);
+
       if (!error) return;
     } catch (_) {}
   }
 
-  logger.warn('Não foi possível gravar em robo_perfis. Confira as colunas da tabela; cópia local mantida.');
+  logger.warn(
+    'Não foi possível gravar em robo_perfis. Confira as colunas da tabela; cópia local mantida.'
+  );
 }
 
 function classifyGroupNiche(name) {
   const normalized = normalizeText(name);
+
   for (const niche of NICHE_DEFINITIONS) {
-    if (niche.aliases.some(alias => normalized.includes(normalizeText(alias)))) {
-      return { id: niche.id, label: niche.label };
+    if (
+      niche.aliases.some(alias =>
+        normalized.includes(normalizeText(alias))
+      )
+    ) {
+      return {
+        id: niche.id,
+        label: niche.label
+      };
     }
   }
-  return { id: 'unknown', label: 'Geral / não identificado' };
+
+  return {
+    id: 'unknown',
+    label: 'Geral / não identificado'
+  };
 }
 
 function classifyProductNiches(product) {
@@ -379,19 +478,30 @@ function classifyProductNiches(product) {
   ].filter(Boolean).join(' '));
 
   return NICHE_DEFINITIONS.filter(niche =>
-    niche.aliases.some(alias => text.includes(normalizeText(alias)))
+    niche.aliases.some(alias =>
+      text.includes(normalizeText(alias))
+    )
   );
 }
 
 function destinationMatchesProduct(destination, product) {
-  const selectedNicheId = String(destination?.nicheId || 'auto').trim().toLowerCase();
+  const selectedNicheId = String(
+    destination?.nicheId || 'auto'
+  ).trim().toLowerCase();
+
   const productNiches = classifyProductNiches(product || {});
 
-  if (['all', 'geral', 'todos', 'todas', 'qualquer'].includes(selectedNicheId)) {
+  if (
+    ['all', 'geral', 'todos', 'todas', 'qualquer']
+      .includes(selectedNicheId)
+  ) {
     return {
       matches: true,
       reason: 'Grupo configurado para receber todos os nichos.',
-      groupNiche: { id: 'all', label: 'Todos os nichos' },
+      groupNiche: {
+        id: 'all',
+        label: 'Todos os nichos'
+      },
       productNiches
     };
   }
@@ -401,16 +511,26 @@ function destinationMatchesProduct(destination, product) {
   if (!selectedNicheId || selectedNicheId === 'auto') {
     groupNiche = classifyGroupNiche(destination?.name || '');
   } else {
-    const selected = NICHE_DEFINITIONS.find(item => item.id === selectedNicheId);
+    const selected = NICHE_DEFINITIONS.find(
+      item => item.id === selectedNicheId
+    );
+
     if (!selected) {
       return {
         matches: false,
         reason: 'O nicho selecionado para este grupo não é válido.',
-        groupNiche: { id: 'invalid', label: 'Nicho inválido' },
+        groupNiche: {
+          id: 'invalid',
+          label: 'Nicho inválido'
+        },
         productNiches
       };
     }
-    groupNiche = { id: selected.id, label: selected.label };
+
+    groupNiche = {
+      id: selected.id,
+      label: selected.label
+    };
   }
 
   if (groupNiche.id === 'unknown') {
@@ -431,7 +551,10 @@ function destinationMatchesProduct(destination, product) {
     };
   }
 
-  const matches = productNiches.some(item => item.id === groupNiche.id);
+  const matches = productNiches.some(
+    item => item.id === groupNiche.id
+  );
+
   return {
     matches,
     reason: matches
@@ -442,17 +565,32 @@ function destinationMatchesProduct(destination, product) {
   };
 }
 
+// Usa os grupos selecionados diretamente no painel.
+// Mantém os destinos antigos como alternativa de compatibilidade.
 function getAutomationTargets(data) {
   const automation = data?.automation || {};
 
   if (automation.groupSelectionMode === true) {
     const ids = Array.isArray(automation.groupIds)
-      ? [...new Set(automation.groupIds.map(id => String(id || '').trim()).filter(Boolean))]
+      ? [
+          ...new Set(
+            automation.groupIds
+              .map(id => String(id || '').trim())
+              .filter(Boolean)
+          )
+        ]
       : [];
 
     return ids.map(groupId => {
-      const nicheValue = getMapValueByGroupId(automation.groupNiches, groupId);
-      const nameValue = getMapValueByGroupId(automation.groupNames, groupId);
+      const nicheValue = getMapValueByGroupId(
+        automation.groupNiches,
+        groupId
+      );
+
+      const nameValue = getMapValueByGroupId(
+        automation.groupNames,
+        groupId
+      );
 
       return {
         id: groupId,
@@ -469,7 +607,10 @@ function getAutomationTargets(data) {
   const destinationIds = Array.isArray(automation.destinationIds)
     ? automation.destinationIds.map(String)
     : [];
-  const destinations = Array.isArray(data?.destinations) ? data.destinations : [];
+
+  const destinations = Array.isArray(data?.destinations)
+    ? data.destinations
+    : [];
 
   return destinations.filter(destination =>
     destination.active !== false &&
@@ -482,21 +623,33 @@ function getAutomationTargets(data) {
 }
 
 function encryptionKey() {
-  const raw = process.env.SHOPEE_CREDENTIALS_KEY || process.env.APP_ENCRYPTION_KEY || '';
+  const raw = process.env.SHOPEE_CREDENTIALS_KEY ||
+    process.env.APP_ENCRYPTION_KEY ||
+    '';
+
   if (!raw) return null;
+
   return crypto.createHash('sha256').update(raw).digest();
 }
 
 function encryptObject(value) {
   const key = encryptionKey();
-  if (!key) throw new Error('Configure SHOPEE_CREDENTIALS_KEY nas variáveis do serviço.');
+
+  if (!key) {
+    throw new Error(
+      'Configure SHOPEE_CREDENTIALS_KEY nas variáveis do serviço.'
+    );
+  }
 
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+
   const encrypted = Buffer.concat([
     cipher.update(JSON.stringify(value), 'utf8'),
     cipher.final()
-  ]);  return {
+  ]);
+
+  return {
     iv: iv.toString('base64'),
     tag: cipher.getAuthTag().toString('base64'),
     data: encrypted.toString('base64')
@@ -508,6 +661,7 @@ function decryptObject(payload) {
 
   try {
     const key = encryptionKey();
+
     if (!key) return null;
 
     const decipher = crypto.createDecipheriv(
@@ -515,16 +669,26 @@ function decryptObject(payload) {
       key,
       Buffer.from(payload.iv, 'base64')
     );
-    decipher.setAuthTag(Buffer.from(payload.tag, 'base64'));
+
+    decipher.setAuthTag(
+      Buffer.from(payload.tag, 'base64')
+    );
 
     const clear = Buffer.concat([
-      decipher.update(Buffer.from(payload.data, 'base64')),
+      decipher.update(
+        Buffer.from(payload.data, 'base64')
+      ),
       decipher.final()
     ]).toString('utf8');
 
     return JSON.parse(clear);
+
   } catch (error) {
-    logger.error({ error: error.message }, 'Não foi possível descriptografar as credenciais Shopee');
+    logger.error(
+      { error: error.message },
+      'Não foi possível descriptografar as credenciais Shopee'
+    );
+
     return null;
   }
 }
@@ -535,11 +699,11 @@ function serializeAuth(value) {
 
 function deserializeAuth(value) {
   if (value == null || value === '') return null;
-  if (typeof value !== 'string') return value;
-  return JSON.parse(value, BufferJSON.reviver);
-}
 
-async function readAuthTableValue(profile, key) {
+  if (typeof value !== 'string') return value;
+
+  return JSON.parse(value, BufferJSON.reviver);
+}async function readAuthTableValue(profile, key) {
   if (!supabase) return null;
 
   const profileColumns = ['perfil', 'profile', 'profile_id'];
@@ -557,10 +721,13 @@ async function readAuthTableValue(profile, key) {
           .maybeSingle();
 
         if (error || !data) continue;
+
         const valueColumn = valueColumns.find(column =>
           Object.prototype.hasOwnProperty.call(data, column)
         );
+
         if (valueColumn) return data[valueColumn];
+
       } catch (_) {}
     }
   }
@@ -588,19 +755,26 @@ async function writeAuthTableValue(profile, key, value) {
 
           if (
             !updateError &&
-            ((Array.isArray(updated) && updated.length) || (updated && !Array.isArray(updated)))
-          ) return true;
+            (
+              (Array.isArray(updated) && updated.length) ||
+              (updated && !Array.isArray(updated))
+            )
+          ) {
+            return true;
+          }
 
           const payload = {
             [profileColumn]: profile,
             [keyColumn]: key,
             [valueColumn]: value
           };
+
           const { error: insertError } = await supabase
             .from('robo_whatsapp_chaves')
             .insert(payload);
 
           if (!insertError) return true;
+
         } catch (_) {}
       }
     }
@@ -618,7 +792,9 @@ async function deleteAuthTableValues(profile) {
         .from('robo_whatsapp_chaves')
         .delete()
         .eq(profileColumn, profile);
+
       if (!error) return;
+
     } catch (_) {}
   }
 }
@@ -634,7 +810,9 @@ async function deleteAuthTableValue(profile, key) {
           .delete()
           .eq(profileColumn, profile)
           .eq(keyColumn, key);
+
         if (!error) return;
+
       } catch (_) {}
     }
   }
@@ -643,52 +821,111 @@ async function deleteAuthTableValue(profile, key) {
 // Estado de autenticação com cache local e persistência no Supabase.
 async function createSupabaseAuthState(profile) {
   const data = getData(profile);
-  const auth = data.whatsappAuth || { creds: null, keys: {} };
-  const storedCreds = await readAuthTableValue(profile, 'creds');
+  const auth = data.whatsappAuth || {
+    creds: null,
+    keys: {}
+  };
+
+  const storedCreds = await readAuthTableValue(
+    profile,
+    'creds'
+  );
 
   const creds = storedCreds
     ? deserializeAuth(storedCreds)
-    : (auth.creds ? deserializeAuth(auth.creds) : initAuthCreds());
+    : (
+        auth.creds
+          ? deserializeAuth(auth.creds)
+          : initAuthCreds()
+      );
 
   const keys = auth.keys || {};
-  authRegistered.set(profile, Boolean(creds.registered));
+
+  authRegistered.set(
+    profile,
+    Boolean(creds.registered)
+  );
 
   const persistCreds = async () => {
     try {
       const serialized = serializeAuth(creds);
-      data.whatsappAuth = { creds: serialized, keys };
-      await writeAuthTableValue(profile, 'creds', serialized);
+
+      data.whatsappAuth = {
+        creds: serialized,
+        keys
+      };
+
+      await writeAuthTableValue(
+        profile,
+        'creds',
+        serialized
+      );
+
       await saveProfile(profile);
-      authRegistered.set(profile, Boolean(creds.registered));
+
+      authRegistered.set(
+        profile,
+        Boolean(creds.registered)
+      );
+
     } catch (error) {
-      logger.error({ profile, error: error.message }, 'Falha ao salvar credenciais do WhatsApp');
+      logger.error(
+        { profile, error: error.message },
+        'Falha ao salvar credenciais do WhatsApp'
+      );
     }
   };
 
   const keyStore = {
     get: async (type, ids) => {
       const result = {};
+
       for (const id of ids) {
         const storageKey = `${type}-${id}`;
+
         let stored = keys[storageKey];
-        if (stored == null) stored = await readAuthTableValue(profile, storageKey);
-        if (stored !== undefined && stored !== null) result[id] = deserializeAuth(stored);
+
+        if (stored == null) {
+          stored = await readAuthTableValue(
+            profile,
+            storageKey
+          );
+        }
+
+        if (stored !== undefined && stored !== null) {
+          result[id] = deserializeAuth(stored);
+        }
       }
+
       return result;
     },
 
     set: async dataToSet => {
       const pendingWrites = [];
+
       for (const [type, entries] of Object.entries(dataToSet || {})) {
         for (const [id, value] of Object.entries(entries || {})) {
           const storageKey = `${type}-${id}`;
+
           if (value == null) {
             delete keys[storageKey];
-            pendingWrites.push(deleteAuthTableValue(profile, storageKey));
+
+            pendingWrites.push(
+              deleteAuthTableValue(profile, storageKey)
+            );
+
           } else {
             const serialized = serializeAuth(value);
+
             keys[storageKey] = serialized;
-            pendingWrites.push(writeAuthTableValue(profile, storageKey, serialized));
+
+            pendingWrites.push(
+              writeAuthTableValue(
+                profile,
+                storageKey,
+                serialized
+              )
+            );
           }
         }
       }
@@ -697,7 +934,9 @@ async function createSupabaseAuthState(profile) {
         creds: data.whatsappAuth?.creds || serializeAuth(creds),
         keys
       };
+
       await Promise.allSettled(pendingWrites);
+
       await saveProfile(profile);
     }
   };
@@ -722,30 +961,57 @@ function setStatus(profile, status, extra = {}) {
 }
 
 function getStatus(profile) {
-  return connectionStatus.get(profile) || { status: 'disconnected', updatedAt: null };
+  return connectionStatus.get(profile) || {
+    status: 'disconnected',
+    updatedAt: null
+  };
 }
 
 // Inicializa apenas um socket por perfil e evita conexões duplicadas.
 async function startWhatsApp(profile) {
-  if (sockets.has(profile)) return { ok: true, status: getStatus(profile).status };
-  if (socketStarts.has(profile)) return socketStarts.get(profile);
+  if (sockets.has(profile)) {
+    return {
+      ok: true,
+      status: getStatus(profile).status
+    };
+  }
+
+  if (socketStarts.has(profile)) {
+    return socketStarts.get(profile);
+  }
 
   const startPromise = (async () => {
     setStatus(profile, 'starting');
+
     await loadProfile(profile);
+
     const auth = await createSupabaseAuthState(profile);
 
     let version;
+
     if (typeof fetchLatestBaileysVersion === 'function') {
       try {
         const latest = await fetchLatestBaileysVersion();
+
         if (latest?.version) {
           version = latest.version;
-          logger.info({ profile, version, isLatest: latest.isLatest }, 'Versão do WhatsApp carregada');
+
+          logger.info(
+            {
+              profile,
+              version,
+              isLatest: latest.isLatest
+            },
+            'Versão do WhatsApp carregada'
+          );
         }
+
       } catch (error) {
         logger.warn(
-          { profile, error: error.message },
+          {
+            profile,
+            error: error.message
+          },
           'Não foi possível consultar a versão atual do WhatsApp; usando padrão do Baileys'
         );
       }
@@ -756,7 +1022,9 @@ async function startWhatsApp(profile) {
       auth: auth.state,
       logger: pino({ level: 'silent' }),
       printQRInTerminal: false,
-      browser: Browsers?.macOS ? Browsers.macOS('Chrome') : ['MEDEIROS DIGITAL', 'Chrome', '1.0.0'],
+      browser: Browsers?.macOS
+        ? Browsers.macOS('Chrome')
+        : ['MEDEIROS DIGITAL', 'Chrome', '1.0.0'],
       connectTimeoutMs: 60000,
       defaultQueryTimeoutMs: 60000,
       keepAliveIntervalMs: 25000,
@@ -769,79 +1037,148 @@ async function startWhatsApp(profile) {
 
     sock.ev.on('creds.update', () => {
       auth.saveCreds().catch(error => {
-        logger.error({ profile, error: error.message }, 'Erro ao persistir atualização de autenticação');
+        logger.error(
+          {
+            profile,
+            error: error.message
+          },
+          'Erro ao persistir atualização de autenticação'
+        );
       });
     });
 
     sock.ev.on('connection.update', async update => {
       if (sockets.get(profile) !== sock) return;
-      const { connection, lastDisconnect, qr } = update;
+
+      const {
+        connection,
+        lastDisconnect,
+        qr
+      } = update;
 
       if (qr) {
         try {
           const qrData = await QRCode.toDataURL(qr);
+
           if (sockets.get(profile) === sock) {
             qrCache.set(profile, qrData);
             setStatus(profile, 'qr');
           }
+
         } catch (error) {
-          logger.error({ profile, error: error.message }, 'Erro ao gerar QR Code');
+          logger.error(
+            {
+              profile,
+              error: error.message
+            },
+            'Erro ao gerar QR Code'
+          );
         }
       }
 
-      if (connection === 'connecting') setStatus(profile, 'connecting');
+      if (connection === 'connecting') {
+        setStatus(profile, 'connecting');
+      }
 
       if (connection === 'open') {
         qrCache.delete(profile);
         pairingCache.delete(profile);
+
         authRegistered.set(profile, true);
-        setStatus(profile, 'connected', { phone: sock.user?.id || null });
-        logger.info({ profile }, 'WhatsApp conectado');
+
+        setStatus(profile, 'connected', {
+          phone: sock.user?.id || null
+        });
+
+        logger.info(
+          { profile },
+          'WhatsApp conectado'
+        );
       }
 
       if (connection === 'close') {
-        if (sockets.get(profile) === sock) sockets.delete(profile);
+        if (sockets.get(profile) === sock) {
+          sockets.delete(profile);
+        }
+
         qrCache.delete(profile);
         pairingCache.delete(profile);
 
         const code = lastDisconnect?.error?.output?.statusCode;
+
         const loggedOut = code === DisconnectReason.loggedOut;
 
-        setStatus(profile, loggedOut ? 'logged_out' : 'disconnected', {
-          reason: code || null,
-          message: lastDisconnect?.error?.message || null
-        });
+        setStatus(
+          profile,
+          loggedOut ? 'logged_out' : 'disconnected',
+          {
+            reason: code || null,
+            message: lastDisconnect?.error?.message || null
+          }
+        );
 
         logger.warn(
-          { profile, code: code || null, loggedOut, error: lastDisconnect?.error?.message || null },
+          {
+            profile,
+            code: code || null,
+            loggedOut,
+            error: lastDisconnect?.error?.message || null
+          },
           'Conexão do WhatsApp encerrada'
         );
 
-        if (!loggedOut && process.env.WHATSAPP_AUTO_RECONNECT !== 'false') {
-          const configuredDelay = Number(process.env.WHATSAPP_RECONNECT_MS || 5000);
-          const delay = Math.max(2000, Math.min(30000, configuredDelay));
+        if (
+          !loggedOut &&
+          process.env.WHATSAPP_AUTO_RECONNECT !== 'false'
+        ) {
+          const configuredDelay = Number(
+            process.env.WHATSAPP_RECONNECT_MS || 5000
+          );
+
+          const delay = Math.max(
+            2000,
+            Math.min(30000, configuredDelay)
+          );
+
           const oldTimer = reconnectTimers.get(profile);
-          if (oldTimer) clearTimeout(oldTimer);
+
+          if (oldTimer) {
+            clearTimeout(oldTimer);
+          }
 
           const timer = setTimeout(async () => {
             reconnectTimers.delete(profile);
+
             try {
               await startWhatsApp(profile);
+
             } catch (error) {
-              logger.error({ profile, error: error.message }, 'Falha ao reconectar WhatsApp');
+              logger.error(
+                {
+                  profile,
+                  error: error.message
+                },
+                'Falha ao reconectar WhatsApp'
+              );
             }
           }, delay);
+
           reconnectTimers.set(profile, timer);
         }
       }
     });
 
-    return { ok: true, status: getStatus(profile).status };
+    return {
+      ok: true,
+      status: getStatus(profile).status
+    };
   })();
 
   socketStarts.set(profile, startPromise);
+
   try {
     return await startPromise;
+
   } finally {
     socketStarts.delete(profile);
   }
@@ -849,9 +1186,15 @@ async function startWhatsApp(profile) {
 
 async function clearWhatsAppAuth(profile) {
   const data = getData(profile);
-  data.whatsappAuth = { creds: null, keys: {} };
+
+  data.whatsappAuth = {
+    creds: null,
+    keys: {}
+  };
+
   await deleteAuthTableValues(profile);
   await saveProfile(profile);
+
   qrCache.delete(profile);
   pairingCache.delete(profile);
   authRegistered.delete(profile);
@@ -863,30 +1206,86 @@ function publicDestination(destination) {
     niche: destination.nicheId === 'auto'
       ? classifyGroupNiche(destination.name)
       : (
-          NICHE_DEFINITIONS.find(n => n.id === destination.nicheId) ||
-          (destination.nicheId === 'all'
-            ? { id: 'all', label: 'Todos os nichos' }
-            : { id: destination.nicheId, label: destination.nicheId })
+          NICHE_DEFINITIONS.find(
+            n => n.id === destination.nicheId
+          ) ||
+          (
+            destination.nicheId === 'all'
+              ? {
+                  id: 'all',
+                  label: 'Todos os nichos'
+                }
+              : {
+                  id: destination.nicheId,
+                  label: destination.nicheId
+                }
+          )
         )
   };
 }
 
 function normalizeProduct(product) {
   const item = { ...product };
-  item.id = String(item.id || item.productId || item.itemId || crypto.randomUUID());
-  item.productName = String(item.productName || item.name || item.title || 'Oferta Shopee');
-  item.productLink = String(item.productLink || item.offerLink || item.productUrl || item.url || '');
-  item.imageUrl = String(item.imageUrl || item.image || item.image_url || '');
-  item.price = item.price ?? item.priceMin ?? item.price_min ?? null;
 
-  const discountRate = Number(item.priceDiscountRate || item.discountRate || 0);
+  item.id = String(
+    item.id ||
+    item.productId ||
+    item.itemId ||
+    crypto.randomUUID()
+  );
+
+  item.productName = String(
+    item.productName ||
+    item.name ||
+    item.title ||
+    'Oferta Shopee'
+  );
+
+  item.productLink = String(
+    item.productLink ||
+    item.offerLink ||
+    item.productUrl ||
+    item.url ||
+    ''
+  );
+
+  item.imageUrl = String(
+    item.imageUrl ||
+    item.image ||
+    item.image_url ||
+    ''
+  );
+
+  item.price = item.price ??
+    item.priceMin ??
+    item.price_min ??
+    null;
+
+  const discountRate = Number(
+    item.priceDiscountRate ||
+    item.discountRate ||
+    0
+  );
+
   const currentPrice = Number(item.price);
 
-  if (!item.oldPrice && discountRate > 0 && discountRate < 100 && currentPrice > 0) {
-    item.oldPrice = (currentPrice / (1 - discountRate / 100)).toFixed(2);
+  if (
+    !item.oldPrice &&
+    discountRate > 0 &&
+    discountRate < 100 &&
+    currentPrice > 0
+  ) {
+    item.oldPrice = (
+      currentPrice / (1 - discountRate / 100)
+    ).toFixed(2);
   }
-  if (!item.discount && discountRate > 0) item.discount = `${discountRate}% de desconto`;
+
+  if (!item.discount && discountRate > 0) {
+    item.discount = `${discountRate}% de desconto`;
+  }
+
   item.createdAt = item.createdAt || new Date().toISOString();
+
   return item;
 }
 
@@ -894,56 +1293,118 @@ function buildOfferMessage(product) {
   const price = product.price != null
     ? `R$ ${String(product.price).replace('.', ',')}`
     : '';
+
   const oldPrice = product.oldPrice || product.priceMax || '';
-  const discount = product.discount ? `🔥 ${product.discount}\n` : '';
+
+  const discount = product.discount
+    ? `🔥 ${product.discount}\n`
+    : '';
 
   return `🔥 *OFERTA IMPERDÍVEL* 🔥\n\n🛍️ *${product.productName}*\n${oldPrice ? `De: R$ ${String(oldPrice).replace('.', ',')}\n` : ''}${price ? `Por: *${price}*\n` : ''}${discount}\n🔗 ${product.productLink || 'Consulte o link da oferta'}`;
 }
 
 async function sendToDestination(profile, destination, product) {
   const sock = sockets.get(profile);
-  if (!sock || getStatus(profile).status !== 'connected') {
+
+  if (
+    !sock ||
+    getStatus(profile).status !== 'connected'
+  ) {
     throw new Error('WhatsApp não está conectado.');
   }
 
   const jid = destination.groupId || destination.phone;
-  if (!jid) throw new Error(`Destino ${destination.name} sem ID de grupo ou telefone.`);
+
+  if (!jid) {
+    throw new Error(
+      `Destino ${destination.name} sem ID de grupo ou telefone.`
+    );
+  }
 
   const text = buildOfferMessage(product);
-  if (product.imageUrl && /^https?:\/\//i.test(product.imageUrl)) {
-    await sock.sendMessage(jid, { image: { url: product.imageUrl }, caption: text });
+
+  if (
+    product.imageUrl &&
+    /^https?:\/\//i.test(product.imageUrl)
+  ) {
+    await sock.sendMessage(jid, {
+      image: { url: product.imageUrl },
+      caption: text
+    });
+
   } else {
-    await sock.sendMessage(jid, { text });
+    await sock.sendMessage(jid, {
+      text
+    });
   }
 }
 
 function getShopeeCredentials(profile) {
   const data = getData(profile);
+
   const stored = decryptObject(data.shopeeCredentials);
-  const envId = process.env.SHOPEE_APP_ID || process.env.SHOPEE_PARTNER_ID || '';
-  const envSecret = process.env.SHOPEE_APP_SECRET || process.env.SHOPEE_PARTNER_KEY || '';
-  const credentials = stored || { appId: envId, appSecret: envSecret };
+
+  const envId =
+    process.env.SHOPEE_APP_ID ||
+    process.env.SHOPEE_PARTNER_ID ||
+    '';
+
+  const envSecret =
+    process.env.SHOPEE_APP_SECRET ||
+    process.env.SHOPEE_PARTNER_KEY ||
+    '';
+
+  const credentials = stored || {
+    appId: envId,
+    appSecret: envSecret
+  };
 
   return {
-    appId: String(credentials.appId || credentials.partnerId || credentials.partner_id || envId),
-    appSecret: String(credentials.appSecret || credentials.partnerKey || credentials.partner_key || envSecret)
+    appId: String(
+      credentials.appId ||
+      credentials.partnerId ||
+      credentials.partner_id ||
+      envId
+    ),
+    appSecret: String(
+      credentials.appSecret ||
+      credentials.partnerKey ||
+      credentials.partner_key ||
+      envSecret
+    )
   };
 }
 
 async function shopeeGraphQL(profile, query, variables = {}) {
   const credentials = getShopeeCredentials(profile);
+
   if (!credentials.appId || !credentials.appSecret) {
-    throw new Error('Configure o App ID e o Secret da Shopee no painel.');
+    throw new Error(
+      'Configure o App ID e o Secret da Shopee no painel.'
+    );
   }
 
   const timestamp = Math.floor(Date.now() / 1000);
-  const payload = JSON.stringify({ query, variables });
-  const base = `${credentials.appId}${timestamp}${payload}${credentials.appSecret}`;
-  const signature = crypto.createHash('sha256').update(base, 'utf8').digest('hex');
-  const authorization = `SHA256 Credential=${credentials.appId}, Timestamp=${timestamp}, Signature=${signature}`;
+
+  const payload = JSON.stringify({
+    query,
+    variables
+  });
+
+  const base =
+    `${credentials.appId}${timestamp}${payload}${credentials.appSecret}`;
+
+  const signature = crypto
+    .createHash('sha256')
+    .update(base, 'utf8')
+    .digest('hex');
+
+  const authorization =
+    `SHA256 Credential=${credentials.appId}, Timestamp=${timestamp}, Signature=${signature}`;
 
   const response = await fetch(
-    process.env.SHOPEE_API_URL || 'https://open-api.affiliate.shopee.com.br/graphql',
+    process.env.SHOPEE_API_URL ||
+      'https://open-api.affiliate.shopee.com.br/graphql',
     {
       method: 'POST',
       headers: {
@@ -956,14 +1417,23 @@ async function shopeeGraphQL(profile, query, variables = {}) {
   );
 
   const result = await response.json().catch(() => ({}));
+
   if (!response.ok || result.errors?.length) {
-    throw new Error(result.errors?.[0]?.message || `Shopee respondeu HTTP ${response.status}`);
+    throw new Error(
+      result.errors?.[0]?.message ||
+      `Shopee respondeu HTTP ${response.status}`
+    );
   }
+
   return result.data || result;
 }
 
 async function fetchShopeeOffers(profile, limit = 10) {
-  const safeLimit = Math.max(1, Math.min(50, Number(limit) || 10));
+  const safeLimit = Math.max(
+    1,
+    Math.min(50, Number(limit) || 10)
+  );
+
   const query = `query {
     productOfferV2(
       listType: 1,
@@ -995,48 +1465,89 @@ async function fetchShopeeOffers(profile, limit = 10) {
         limit
         hasNextPage
       }
-    }  }`;
+    }
+  }`;
 
   const data = await shopeeGraphQL(profile, query);
-  const nodes = data?.productOfferV2?.nodes || data?.productOfferV2 || [];
-  return (Array.isArray(nodes) ? nodes : []).map(normalizeProduct);
-}
 
-async function processQueue(profile) {
+  const nodes =
+    data?.productOfferV2?.nodes ||
+    data?.productOfferV2 ||
+    [];
+
+  return (
+    Array.isArray(nodes) ? nodes : []
+  ).map(normalizeProduct);
+}async function processQueue(profile) {
   const data = getData(profile);
-  const item = data.queue.find(entry => entry.status === 'pending');
+
+  const item = data.queue.find(
+    entry => entry.status === 'pending'
+  );
+
   if (!item) return;
 
   item.status = 'processing';
   item.startedAt = new Date().toISOString();
+
   await saveProfile(profile);
 
   try {
-    const product = normalizeProduct(item.product || item);
+    const product = normalizeProduct(
+      item.product || item
+    );
+
     const destinations = getAutomationTargets(data);
+
     let sent = 0;
+
     const results = [];
 
     for (const destination of destinations) {
-      const match = destinationMatchesProduct(destination, product);
+      const match = destinationMatchesProduct(
+        destination,
+        product
+      );
+
       if (!match.matches) {
-        results.push({ destinationId: destination.id, sent: false, reason: match.reason });
+        results.push({
+          destinationId: destination.id,
+          sent: false,
+          reason: match.reason
+        });
+
         continue;
       }
 
       try {
-        await sendToDestination(profile, destination, product);
+        await sendToDestination(
+          profile,
+          destination,
+          product
+        );
+
         sent++;
-        results.push({ destinationId: destination.id, sent: true });
+
+        results.push({
+          destinationId: destination.id,
+          sent: true
+        });
+
         await sleep(1200);
+
       } catch (error) {
-        results.push({ destinationId: destination.id, sent: false, reason: error.message });
+        results.push({
+          destinationId: destination.id,
+          sent: false,
+          reason: error.message
+        });
       }
     }
 
     item.status = sent ? 'sent' : 'skipped';
     item.sentAt = new Date().toISOString();
     item.results = results;
+
   } catch (error) {
     item.status = 'error';
     item.error = error.message;
@@ -1046,17 +1557,37 @@ async function processQueue(profile) {
 }
 
 function isAutomationActive(automation) {
-  return Boolean(automation?.enabled || automation?.active);
+  return Boolean(
+    automation?.enabled ||
+    automation?.active
+  );
 }
 
+// Intervalo mínimo de 10 segundos.
 function getAutomationIntervalMs(automation) {
   const seconds = Number(automation?.intervalSeconds);
-  if (Number.isFinite(seconds) && seconds > 0) {
-    return Math.max(60, Math.min(86400, seconds)) * 1000;
+
+  if (
+    automation?.intervalSeconds !== undefined &&
+    automation?.intervalSeconds !== null &&
+    Number.isFinite(seconds) &&
+    seconds > 0
+  ) {
+    return Math.max(
+      10,
+      Math.min(86400, Math.round(seconds))
+    ) * 1000;
   }
 
-  const minutes = Number(automation?.intervalMinutes || 30);
-  return Math.max(1, Math.min(1440, minutes)) * 60 * 1000;
+  const rawMinutes = Number(
+    automation?.intervalMinutes || 30
+  );
+
+  const minutes = Number.isFinite(rawMinutes)
+    ? Math.max(1, Math.min(1440, rawMinutes))
+    : 30;
+
+  return minutes * 60 * 1000;
 }
 
 function currentTimeInAutomationZone() {
@@ -1067,94 +1598,217 @@ function currentTimeInAutomationZone() {
       minute: '2-digit',
       hourCycle: 'h23'
     }).format(new Date());
+
   } catch (_) {
     return new Date().toTimeString().slice(0, 5);
   }
 }
 
 function isInsideAutomationWindow(automation) {
-  const start = String(automation?.startTime || '').trim();
-  const end = String(automation?.endTime || '').trim();
+  const start = String(
+    automation?.startTime || ''
+  ).trim();
+
+  const end = String(
+    automation?.endTime || ''
+  ).trim();
+
   if (!start || !end) return true;
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(end)) {
+
+  if (
+    !/^([01]\d|2[0-3]):[0-5]\d$/.test(start) ||
+    !/^([01]\d|2[0-3]):[0-5]\d$/.test(end)
+  ) {
     return true;
   }
+
   if (start === end) return true;
 
   const now = currentTimeInAutomationZone();
-  if (start < end) return now >= start && now <= end;
+
+  if (start < end) {
+    return now >= start && now <= end;
+  }
+
+  // Também permite horários que passam da meia-noite.
   return now >= start || now <= end;
 }
 
 async function runAutomation(profile) {
   if (automationLocks.has(profile)) {
-    return { ok: false, message: 'Automação já está em execução.' };
+    return {
+      ok: false,
+      message: 'Automação já está em execução.'
+    };
   }
 
   automationLocks.add(profile);
+
   const data = getData(profile);
 
   try {
     if (!isAutomationActive(data.automation)) {
-      return { ok: false, message: 'Automação pausada.' };
+      return {
+        ok: false,
+        message: 'Automação pausada.'
+      };
     }
 
     if (!isInsideAutomationWindow(data.automation)) {
-      return { ok: false, message: 'Fora do horário configurado para a automação.' };
+      return {
+        ok: false,
+        message: 'Fora do horário configurado para a automação.'
+      };
     }
 
-    if (!sockets.has(profile) || getStatus(profile).status !== 'connected') {
-      return { ok: false, message: 'Conecte o WhatsApp antes de iniciar a automação.' };
+    if (
+      !sockets.has(profile) ||
+      getStatus(profile).status !== 'connected'
+    ) {
+      return {
+        ok: false,
+        message: 'Conecte o WhatsApp antes de iniciar a automação.'
+      };
     }
 
     const destinations = getAutomationTargets(data);
+
     if (!destinations.length) {
-      return { ok: false, message: 'Nenhum grupo ou destino foi selecionado para a automação.' };
+      return {
+        ok: false,
+        message: 'Nenhum grupo ou destino foi selecionado para a automação.'
+      };
     }
+
+    // Salva o início da execução para o agendador.
+    data.automation.lastRunAt = new Date().toISOString();
+    data.automation.lastError = null;
+
+    await saveProfile(profile);
 
     await processQueue(profile);
 
-    const offers = await fetchShopeeOffers(profile, data.automation.maxProducts || 10);
+    const offers = await fetchShopeeOffers(
+      profile,
+      data.automation.maxProducts || 10
+    );
+
     let sent = 0;
+    let errors = 0;
 
     for (const product of offers) {
       if (!product.productLink) continue;
-      const productKey = String(product.id || product.productLink);
+
+      const productKey = String(
+        product.id || product.productLink
+      );
 
       for (const destination of destinations) {
-        const match = destinationMatchesProduct(destination, product);
+        const match = destinationMatchesProduct(
+          destination,
+          product
+        );
+
         if (!match.matches) continue;
 
         const sentKey = `${destination.id}:${productKey}`;
+
+        // Evita enviar a mesma oferta novamente ao mesmo grupo.
         if (data.sentProducts[sentKey]) continue;
 
         try {
-          await sendToDestination(profile, destination, product);
+          await sendToDestination(
+            profile,
+            destination,
+            product
+          );
+
           data.sentProducts[sentKey] = new Date().toISOString();
+
           sent++;
+
           await sleep(1500);
+
         } catch (error) {
+          errors++;
+
           logger.warn(
-            { profile, destination: destination.name, error: error.message },
+            {
+              profile,
+              destination: destination.name,
+              error: error.message
+            },
             'Falha ao enviar oferta'
           );
         }
       }
     }
 
-    data.automation.lastRunAt = new Date().toISOString();
+    const finishedAt = new Date().toISOString();
+
+    data.automation.lastRunAt = finishedAt;
+    data.automation.lastFoundCount = offers.length;
+    data.automation.lastSentCount = sent;
+
+    if (sent > 0) {
+      data.automation.lastSentAt = finishedAt;
+    }
+
+    data.automation.lastError = errors > 0
+      ? `${errors} envio(s) não foram concluídos. Confira os logs do servidor.`
+      : null;
+
     data.products = offers;
 
+    // Mantém somente os 1.500 registros mais recentes.
     const sentEntries = Object.entries(data.sentProducts)
-      .sort((a, b) => String(b[1]).localeCompare(String(a[1])))
+      .sort((a, b) =>
+        String(b[1]).localeCompare(String(a[1]))
+      )
       .slice(0, 1500);
+
     data.sentProducts = Object.fromEntries(sentEntries);
 
     await saveProfile(profile);
-    return { ok: true, found: offers.length, sent };
+
+    return {
+      ok: true,
+      found: offers.length,
+      sent,
+      errors,
+      lastRunAt: data.automation.lastRunAt,
+      lastSentAt: data.automation.lastSentAt || null
+    };
+
   } catch (error) {
-    logger.error({ profile, error: error.message }, 'Erro na automação');
-    return { ok: false, error: error.message };
+    logger.error(
+      {
+        profile,
+        error: error.message
+      },
+      'Erro na automação'
+    );
+
+    data.automation.lastError = error.message;
+
+    try {
+      await saveProfile(profile);
+
+    } catch (saveError) {
+      logger.error(
+        {
+          profile,
+          error: saveError.message
+        },
+        'Falha ao salvar erro da automação'
+      );
+    }
+
+    return {
+      ok: false,
+      error: error.message
+    };
+
   } finally {
     automationLocks.delete(profile);
   }
@@ -1178,41 +1832,72 @@ function routeError(res, error, status = 400) {
 
 function cleanTime(value) {
   const time = String(value || '').trim();
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? time : '';
+
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(time)
+    ? time
+    : '';
 }
 
 function cleanStringMap(value, maxLength = 200) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value)
+  ) {
+    return {};
+  }
+
   const result = {};
+
   for (const [key, raw] of Object.entries(value)) {
     const id = String(key || '').trim();
+
     if (!id || id.length > 200) continue;
-    result[id] = String(raw ?? '').trim().slice(0, maxLength);
+
+    result[id] = String(raw ?? '')
+      .trim()
+      .slice(0, maxLength);
   }
+
   return result;
 }
 
 function cleanGroupIds(value) {
   if (!Array.isArray(value)) return [];
-  return [...new Set(
-    value
-      .map(item => String(item || '').trim())
-      .filter(item => item && item.length <= 200)
-  )].slice(0, 500);
+
+  return [
+    ...new Set(
+      value
+        .map(item => String(item || '').trim())
+        .filter(item => item && item.length <= 200)
+    )
+  ].slice(0, 500);
 }
 
 function cleanAutomationNiches(value) {
   const map = cleanStringMap(value, 50);
-  const valid = new Set(['all', 'auto', ...NICHE_DEFINITIONS.map(item => item.id)]);
+
+  const valid = new Set([
+    'all',
+    'auto',
+    ...NICHE_DEFINITIONS.map(item => item.id)
+  ]);
+
   for (const [groupId, nicheId] of Object.entries(map)) {
-    if (!valid.has(String(nicheId).toLowerCase())) delete map[groupId];
-    else map[groupId] = String(nicheId).toLowerCase();
+    if (!valid.has(String(nicheId).toLowerCase())) {
+      delete map[groupId];
+
+    } else {
+      map[groupId] = String(nicheId).toLowerCase();
+    }
   }
+
   return map;
 }
 
 app.get('/health', (req, res) => {
   const profile = profileIdFrom(req);
+
   res.json({
     ok: true,
     whatsapp: getStatus(profile).status,
@@ -1222,7 +1907,10 @@ app.get('/health', (req, res) => {
 
 app.get('/', (req, res) => {
   const htmlPath = path.join(__dirname, 'index.html');
-  if (fs.existsSync(htmlPath)) return res.sendFile(htmlPath);
+
+  if (fs.existsSync(htmlPath)) {
+    return res.sendFile(htmlPath);
+  }
 
   res.type('html').send(
     '<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>MEDEIROS DIGITAL</title><body style="font-family:Arial;background:#101010;color:#fff;padding:32px"><h1>MEDEIROS DIGITAL</h1><p>Servidor do Robô de Ofertas está ativo.</p><p>Abra o painel index.html publicado junto com este servidor.</p></body></html>'
@@ -1234,7 +1922,9 @@ app.get('/api/profiles', (req, res) => {
     ok: true,
     profiles: PROFILE_IDS.map(id => ({
       id,
-      name: id === 'rafael' ? 'Rafael' : 'Usuário 2'
+      name: id === 'rafael'
+        ? 'Rafael'
+        : 'Usuário 2'
     }))
   });
 });
@@ -1242,7 +1932,9 @@ app.get('/api/profiles', (req, res) => {
 app.get('/api/status', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const data = await loadProfile(profile);
+
     const credentials = getShopeeCredentials(profile);
 
     res.json({
@@ -1251,8 +1943,12 @@ app.get('/api/status', async (req, res) => {
       whatsapp: getStatus(profile),
       automation: data.automation,
       destinations: data.destinations.length,
-      shopeeConfigured: Boolean(credentials.appId && credentials.appSecret)
+      shopeeConfigured: Boolean(
+        credentials.appId &&
+        credentials.appSecret
+      )
     });
+
   } catch (error) {
     routeError(res, error, 500);
   }
@@ -1261,6 +1957,7 @@ app.get('/api/status', async (req, res) => {
 app.get('/api/data', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const data = await loadProfile(profile);
 
     res.json({
@@ -1274,6 +1971,7 @@ app.get('/api/data', async (req, res) => {
       whatsapp: getStatus(profile),
       niches: NICHE_DEFINITIONS
     });
+
   } catch (error) {
     routeError(res, error, 500);
   }
@@ -1282,85 +1980,155 @@ app.get('/api/data', async (req, res) => {
 app.get('/api/automation', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const data = await loadProfile(profile);
-    res.json({ ok: true, automation: data.automation });
+
+    res.json({
+      ok: true,
+      automation: data.automation
+    });
+
   } catch (error) {
     routeError(res, error);
   }
 });
 
+// Salva a configuração da automação.
+// Aceita active/intervalSeconds e também enabled/intervalMinutes.
 app.post('/api/automation', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const data = await loadProfile(profile);
+
     const body = req.body || {};
-    const current = data.automation || defaultProfileData().automation;
+
+    const current = data.automation ||
+      defaultProfileData().automation;
 
     const next = { ...current };
 
-    // Compatibilidade com o painel novo (active/intervalSeconds)
-    // e com versões antigas (enabled/intervalMinutes).
-    if (body.enabled !== undefined || body.active !== undefined) {
-      const active = body.enabled !== undefined
-        ? Boolean(body.enabled)
-        : Boolean(body.active);
+    if (
+      body.active !== undefined ||
+      body.enabled !== undefined
+    ) {
+      const value = body.active !== undefined
+        ? body.active
+        : body.enabled;
+
+      const active = (
+        value === true ||
+        value === 1 ||
+        value === '1' ||
+        String(value).toLowerCase() === 'true'
+      );
+
       next.enabled = active;
       next.active = active;
     }
 
+    // Aceita o intervalo mínimo de 10 segundos.
     if (body.intervalSeconds !== undefined) {
       const seconds = Number(body.intervalSeconds);
+
       if (!Number.isFinite(seconds) || seconds < 1) {
-        return res.status(400).json({ ok: false, error: 'Intervalo da automação inválido.' });
+        return res.status(400).json({
+          ok: false,
+          error: 'Intervalo da automação inválido.'
+        });
       }
-      next.intervalSeconds = Math.max(60, Math.min(86400, Math.round(seconds)));
-      next.intervalMinutes = Math.max(1, Math.round(next.intervalSeconds / 60));
+
+      next.intervalSeconds = Math.max(
+        10,
+        Math.min(86400, Math.round(seconds))
+      );
+
+      next.intervalMinutes = Math.max(
+        1,
+        Math.ceil(next.intervalSeconds / 60)
+      );
+
     } else if (body.intervalMinutes !== undefined) {
       const minutes = Number(body.intervalMinutes);
+
       if (!Number.isFinite(minutes) || minutes < 1) {
-        return res.status(400).json({ ok: false, error: 'Intervalo da automação inválido.' });
+        return res.status(400).json({
+          ok: false,
+          error: 'Intervalo da automação inválido.'
+        });
       }
-      next.intervalMinutes = Math.max(1, Math.min(1440, Math.round(minutes)));
+
+      next.intervalMinutes = Math.max(
+        1,
+        Math.min(1440, Math.round(minutes))
+      );
+
       next.intervalSeconds = next.intervalMinutes * 60;
     }
 
     if (body.maxProducts !== undefined) {
-      next.maxProducts = Math.max(1, Math.min(50, Number(body.maxProducts) || 10));
+      const maxProducts = Number(body.maxProducts);
+
+      next.maxProducts = Number.isFinite(maxProducts)
+        ? Math.max(1, Math.min(50, Math.round(maxProducts)))
+        : 10;
     }
 
-    if (body.startTime !== undefined) next.startTime = cleanTime(body.startTime);
-    if (body.endTime !== undefined) next.endTime = cleanTime(body.endTime);
+    if (body.startTime !== undefined) {
+      next.startTime = cleanTime(body.startTime);
+    }
+
+    if (body.endTime !== undefined) {
+      next.endTime = cleanTime(body.endTime);
+    }
 
     if (body.scheduleTimes !== undefined) {
       next.scheduleTimes = Array.isArray(body.scheduleTimes)
-        ? body.scheduleTimes.map(cleanTime).filter(Boolean).slice(0, 50)
+        ? body.scheduleTimes
+            .map(cleanTime)
+            .filter(Boolean)
+            .slice(0, 50)
         : [];
     }
 
     if (Array.isArray(body.destinationIds)) {
-      next.destinationIds = [...new Set(body.destinationIds.map(String))];
+      next.destinationIds = [
+        ...new Set(body.destinationIds.map(String))
+      ];
     }
 
     if (body.groupSelectionMode !== undefined) {
-      next.groupSelectionMode = Boolean(body.groupSelectionMode);
+      next.groupSelectionMode = Boolean(
+        body.groupSelectionMode
+      );
     }
 
     if (Array.isArray(body.groupIds)) {
       next.groupIds = cleanGroupIds(body.groupIds);
-      next.groupSelectionMode = body.groupSelectionMode === undefined
-        ? true
-        : Boolean(body.groupSelectionMode);
+
+      if (body.groupSelectionMode === undefined) {
+        next.groupSelectionMode = true;
+      }
     }
 
     if (body.groupNiches !== undefined) {
-      next.groupNiches = cleanAutomationNiches(body.groupNiches);
+      next.groupNiches = cleanAutomationNiches(
+        body.groupNiches
+      );
     }
 
     if (body.groupNames !== undefined) {
-      next.groupNames = cleanStringMap(body.groupNames, 160);
+      next.groupNames = cleanStringMap(
+        body.groupNames,
+        160
+      );
     }
 
-    if (next.groupSelectionMode && isAutomationActive(next)) {
+    // Confere se os grupos selecionados possuem nichos definidos.
+    if (
+      next.groupSelectionMode &&
+      isAutomationActive(next)
+    ) {
       if (!next.groupIds.length) {
         return res.status(400).json({
           ok: false,
@@ -1369,7 +2137,13 @@ app.post('/api/automation', async (req, res) => {
       }
 
       const missingNiche = next.groupIds.find(groupId => {
-        const niche = String(getMapValueByGroupId(next.groupNiches, groupId) || '').toLowerCase();
+        const niche = String(
+          getMapValueByGroupId(
+            next.groupNiches,
+            groupId
+          ) || ''
+        ).toLowerCase();
+
         return !niche || niche === 'auto';
       });
 
@@ -1382,9 +2156,14 @@ app.post('/api/automation', async (req, res) => {
     }
 
     data.automation = next;
+
     await saveProfile(profile);
 
-    res.json({ ok: true, automation: data.automation });
+    res.json({
+      ok: true,
+      automation: data.automation
+    });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1394,6 +2173,7 @@ app.post('/api/automation', async (req, res) => {
 
 app.get('/api/whatsapp', (req, res) => {
   const profile = profileIdFrom(req);
+
   res.json({
     ok: true,
     status: getStatus(profile),
@@ -1405,8 +2185,14 @@ app.get('/api/whatsapp', (req, res) => {
 app.post('/api/whatsapp/connect', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const result = await startWhatsApp(profile);
-    res.json({ ...result, status: getStatus(profile).status });
+
+    res.json({
+      ...result,
+      status: getStatus(profile).status
+    });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1415,7 +2201,10 @@ app.post('/api/whatsapp/connect', async (req, res) => {
 app.post('/api/whatsapp/pairing', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
-    const phone = String(req.body?.phone || '').replace(/\D/g, '');
+
+    const phone = String(
+      req.body?.phone || ''
+    ).replace(/\D/g, '');
 
     if (!phone || phone.length < 10) {
       return res.status(400).json({
@@ -1425,6 +2214,7 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
     }
 
     let sock = sockets.get(profile);
+
     if (!sock) {
       await startWhatsApp(profile);
       sock = sockets.get(profile);
@@ -1451,7 +2241,14 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
       });
     }
 
-    const pairingDelay = Math.max(3000, Math.min(10000, Number(process.env.WHATSAPP_PAIRING_DELAY_MS || 5000)));
+    const pairingDelay = Math.max(
+      3000,
+      Math.min(
+        10000,
+        Number(process.env.WHATSAPP_PAIRING_DELAY_MS || 5000)
+      )
+    );
+
     await sleep(pairingDelay);
 
     if (sockets.get(profile) !== sock) {
@@ -1462,7 +2259,11 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
     }
 
     const currentStatus = getStatus(profile).status;
-    if (['logged_out', 'disconnected', 'error'].includes(currentStatus)) {
+
+    if (
+      ['logged_out', 'disconnected', 'error']
+        .includes(currentStatus)
+    ) {
       return res.status(409).json({
         ok: false,
         error: 'A conexão foi encerrada. Clique em Conectar WhatsApp e tente novamente.'
@@ -1470,8 +2271,15 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
     }
 
     const code = await sock.requestPairingCode(phone);
+
     pairingCache.set(profile, code);
-    res.json({ ok: true, code, message: 'Código gerado. Digite-o no WhatsApp do celular.' });
+
+    res.json({
+      ok: true,
+      code,
+      message: 'Código gerado. Digite-o no WhatsApp do celular.'
+    });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1482,31 +2290,44 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
 
   try {
     const timer = reconnectTimers.get(profile);
+
     if (timer) {
       clearTimeout(timer);
       reconnectTimers.delete(profile);
     }
 
     const sock = sockets.get(profile);
+
     sockets.delete(profile);
 
     if (sock) {
       try {
         await sock.logout();
+
       } catch (error) {
-        logger.warn({ profile, error: error.message }, 'O socket já estava encerrado durante a desconexão');      }
+        logger.warn(
+          {
+            profile,
+            error: error.message
+          },
+          'O socket já estava encerrado durante a desconexão'
+        );
+      }
+
       try {
         sock.end(undefined);
       } catch (_) {}
     }
 
     await clearWhatsAppAuth(profile);
+
     setStatus(profile, 'disconnected');
 
     res.json({
       ok: true,
       message: 'WhatsApp desconectado. A sessão salva foi removida por solicitação.'
     });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1515,21 +2336,42 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
 app.post('/api/whatsapp/send', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const sock = sockets.get(profile);
 
-    if (!sock || getStatus(profile).status !== 'connected') {
-      return res.status(409).json({ ok: false, error: 'WhatsApp não conectado.' });
+    if (
+      !sock ||
+      getStatus(profile).status !== 'connected'
+    ) {
+      return res.status(409).json({
+        ok: false,
+        error: 'WhatsApp não conectado.'
+      });
     }
 
-    const to = String(req.body?.to || req.body?.groupId || '').trim();
-    const message = String(req.body?.message || '').trim();
+    const to = String(
+      req.body?.to ||
+      req.body?.groupId ||
+      ''
+    ).trim();
+
+    const message = String(
+      req.body?.message || ''
+    ).trim();
 
     if (!to || !message) {
-      return res.status(400).json({ ok: false, error: 'Informe destino e mensagem.' });
+      return res.status(400).json({
+        ok: false,
+        error: 'Informe destino e mensagem.'
+      });
     }
 
-    await sock.sendMessage(to, { text: message });
+    await sock.sendMessage(to, {
+      text: message
+    });
+
     res.json({ ok: true });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1538,13 +2380,21 @@ app.post('/api/whatsapp/send', async (req, res) => {
 app.get('/api/whatsapp/groups', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const sock = sockets.get(profile);
 
-    if (!sock || getStatus(profile).status !== 'connected') {
-      return res.status(409).json({ ok: false, error: 'WhatsApp não conectado.' });
+    if (
+      !sock ||
+      getStatus(profile).status !== 'connected'
+    ) {
+      return res.status(409).json({
+        ok: false,
+        error: 'WhatsApp não conectado.'
+      });
     }
 
     const groups = await sock.groupFetchAllParticipating();
+
     res.json({
       ok: true,
       groups: Object.entries(groups || {}).map(([id, group]) => ({
@@ -1554,6 +2404,7 @@ app.get('/api/whatsapp/groups', async (req, res) => {
         participants: group.participants?.length || 0
       }))
     });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1562,12 +2413,19 @@ app.get('/api/whatsapp/groups', async (req, res) => {
 // CLASSIFICAÇÃO DE NICHOS
 
 app.get('/api/niches', (req, res) => {
-  res.json({ ok: true, niches: NICHE_DEFINITIONS });
+  res.json({
+    ok: true,
+    niches: NICHE_DEFINITIONS
+  });
 });
 
 app.post('/api/niches/classify', (req, res) => {
   const product = req.body?.product || req.body || {};
-  res.json({ ok: true, niches: classifyProductNiches(product) });
+
+  res.json({
+    ok: true,
+    niches: classifyProductNiches(product)
+  });
 });
 
 // GRUPOS E DESTINOS MANUAIS (mantidos para compatibilidade)
@@ -1575,12 +2433,15 @@ app.post('/api/niches/classify', (req, res) => {
 app.get('/api/destinations', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const data = await loadProfile(profile);
+
     res.json({
       ok: true,
       destinations: data.destinations.map(publicDestination),
       niches: NICHE_DEFINITIONS
     });
+
   } catch (error) {
     routeError(res, error, 500);
   }
@@ -1589,10 +2450,22 @@ app.get('/api/destinations', async (req, res) => {
 app.post('/api/destinations', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const data = await loadProfile(profile);
+
     const body = req.body || {};
-    const groupId = String(body.groupId || body.id || '').trim();
-    const name = String(body.name || body.subject || '').trim();
+
+    const groupId = String(
+      body.groupId ||
+      body.id ||
+      ''
+    ).trim();
+
+    const name = String(
+      body.name ||
+      body.subject ||
+      ''
+    ).trim();
 
     if (!name || !groupId) {
       return res.status(400).json({
@@ -1601,7 +2474,10 @@ app.post('/api/destinations', async (req, res) => {
       });
     }
 
-    const existing = data.destinations.find(item => item.groupId === groupId);
+    const existing = data.destinations.find(
+      item => item.groupId === groupId
+    );
+
     if (existing) {
       return res.status(409).json({
         ok: false,
@@ -1615,7 +2491,9 @@ app.post('/api/destinations', async (req, res) => {
       name,
       phone: String(body.phone || '').trim(),
       groupId,
-      nicheId: String(body.nicheId || 'auto').trim().toLowerCase(),
+      nicheId: String(
+        body.nicheId || 'auto'
+      ).trim().toLowerCase(),
       active: body.active !== false,
       createdAt: new Date().toISOString()
     };
@@ -1623,12 +2501,18 @@ app.post('/api/destinations', async (req, res) => {
     if (
       destination.nicheId !== 'auto' &&
       destination.nicheId !== 'all' &&
-      !NICHE_DEFINITIONS.some(n => n.id === destination.nicheId)
+      !NICHE_DEFINITIONS.some(
+        n => n.id === destination.nicheId
+      )
     ) {
-      return res.status(400).json({ ok: false, error: 'Nicho inválido.' });
+      return res.status(400).json({
+        ok: false,
+        error: 'Nicho inválido.'
+      });
     }
 
     data.destinations.push(destination);
+
     await saveProfile(profile);
 
     res.json({
@@ -1636,6 +2520,7 @@ app.post('/api/destinations', async (req, res) => {
       destination: publicDestination(destination),
       destinations: data.destinations.map(publicDestination)
     });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1643,24 +2528,53 @@ app.post('/api/destinations', async (req, res) => {
 
 async function updateDestination(profile, id, body) {
   const data = await loadProfile(profile);
-  const destination = data.destinations.find(item => item.id === id || item.groupId === id);
 
-  if (!destination) return { error: 'Grupo não encontrado.', status: 404 };
+  const destination = data.destinations.find(
+    item => item.id === id || item.groupId === id
+  );
 
-  if (body.name !== undefined) destination.name = String(body.name).trim();
-  if (body.nicheId !== undefined) destination.nicheId = String(body.nicheId).trim().toLowerCase();
-  if (body.active !== undefined) destination.active = Boolean(body.active);
-  if (body.groupId !== undefined) destination.groupId = String(body.groupId).trim();
+  if (!destination) {
+    return {
+      error: 'Grupo não encontrado.',
+      status: 404
+    };
+  }
+
+  if (body.name !== undefined) {
+    destination.name = String(body.name).trim();
+  }
+
+  if (body.nicheId !== undefined) {
+    destination.nicheId = String(
+      body.nicheId
+    ).trim().toLowerCase();
+  }
+
+  if (body.active !== undefined) {
+    destination.active = Boolean(body.active);
+  }
+
+  if (body.groupId !== undefined) {
+    destination.groupId = String(
+      body.groupId
+    ).trim();
+  }
 
   if (
     destination.nicheId !== 'auto' &&
     destination.nicheId !== 'all' &&
-    !NICHE_DEFINITIONS.some(n => n.id === destination.nicheId)
+    !NICHE_DEFINITIONS.some(
+      n => n.id === destination.nicheId
+    )
   ) {
-    return { error: 'Nicho inválido.', status: 400 };
+    return {
+      error: 'Nicho inválido.',
+      status: 400
+    };
   }
 
   await saveProfile(profile);
+
   return {
     destination: publicDestination(destination),
     destinations: data.destinations.map(publicDestination)
@@ -1669,9 +2583,24 @@ async function updateDestination(profile, id, body) {
 
 app.patch('/api/destinations/:id', async (req, res) => {
   try {
-    const result = await updateDestination(profileIdFrom(req), req.params.id, req.body || {});
-    if (result.error) return res.status(result.status).json({ ok: false, error: result.error });
-    res.json({ ok: true, ...result });
+    const result = await updateDestination(
+      profileIdFrom(req),
+      req.params.id,
+      req.body || {}
+    );
+
+    if (result.error) {
+      return res.status(result.status).json({
+        ok: false,
+        error: result.error
+      });
+    }
+
+    res.json({
+      ok: true,
+      ...result
+    });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1679,10 +2608,31 @@ app.patch('/api/destinations/:id', async (req, res) => {
 
 app.post('/api/destinations/update', async (req, res) => {
   try {
-    const id = String(req.body?.id || req.body?.destinationId || req.body?.groupId || '');
-    const result = await updateDestination(profileIdFrom(req), id, req.body || {});
-    if (result.error) return res.status(result.status).json({ ok: false, error: result.error });
-    res.json({ ok: true, ...result });
+    const id = String(
+      req.body?.id ||
+      req.body?.destinationId ||
+      req.body?.groupId ||
+      ''
+    );
+
+    const result = await updateDestination(
+      profileIdFrom(req),
+      id,
+      req.body || {}
+    );
+
+    if (result.error) {
+      return res.status(result.status).json({
+        ok: false,
+        error: result.error
+      });
+    }
+
+    res.json({
+      ok: true,
+      ...result
+    });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1691,19 +2641,31 @@ app.post('/api/destinations/update', async (req, res) => {
 app.delete('/api/destinations/:id', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const data = await loadProfile(profile);
+
     const before = data.destinations.length;
 
     data.destinations = data.destinations.filter(
-      item => item.id !== req.params.id && item.groupId !== req.params.id
+      item =>
+        item.id !== req.params.id &&
+        item.groupId !== req.params.id
     );
 
     if (before === data.destinations.length) {
-      return res.status(404).json({ ok: false, error: 'Grupo não encontrado.' });
+      return res.status(404).json({
+        ok: false,
+        error: 'Grupo não encontrado.'
+      });
     }
 
     await saveProfile(profile);
-    res.json({ ok: true, destinations: data.destinations.map(publicDestination) });
+
+    res.json({
+      ok: true,
+      destinations: data.destinations.map(publicDestination)
+    });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1714,12 +2676,24 @@ app.delete('/api/destinations/:id', async (req, res) => {
 app.post('/api/products', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const data = await loadProfile(profile);
-    const product = normalizeProduct(req.body?.product || req.body || {});
+
+    const product = normalizeProduct(
+      req.body?.product || req.body || {}
+    );
+
     data.products.unshift(product);
+
     data.products = data.products.slice(0, 200);
+
     await saveProfile(profile);
-    res.json({ ok: true, product });
+
+    res.json({
+      ok: true,
+      product
+    });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1728,8 +2702,13 @@ app.post('/api/products', async (req, res) => {
 app.post('/api/queue', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const data = await loadProfile(profile);
-    const product = normalizeProduct(req.body?.product || req.body || {});
+
+    const product = normalizeProduct(
+      req.body?.product || req.body || {}
+    );
+
     const entry = {
       id: crypto.randomUUID(),
       product,
@@ -1738,8 +2717,15 @@ app.post('/api/queue', async (req, res) => {
     };
 
     data.queue.push(entry);
+
     await saveProfile(profile);
-    res.json({ ok: true, item: entry, message: 'Oferta adicionada à fila.' });
+
+    res.json({
+      ok: true,
+      item: entry,
+      message: 'Oferta adicionada à fila.'
+    });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1748,8 +2734,14 @@ app.post('/api/queue', async (req, res) => {
 app.get('/api/queue', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const data = await loadProfile(profile);
-    res.json({ ok: true, queue: data.queue.slice(-100).reverse() });
+
+    res.json({
+      ok: true,
+      queue: data.queue.slice(-100).reverse()
+    });
+
   } catch (error) {
     routeError(res, error, 500);
   }
@@ -1758,8 +2750,14 @@ app.get('/api/queue', async (req, res) => {
 app.post('/api/queue/process', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     await processQueue(profile);
-    res.json({ ok: true, queue: getData(profile).queue.slice(-100).reverse() });
+
+    res.json({
+      ok: true,
+      queue: getData(profile).queue.slice(-100).reverse()
+    });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1770,9 +2768,15 @@ app.post('/api/queue/process', async (req, res) => {
 app.get('/api/shopee/credentials', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     await loadProfile(profile);
+
     const credentials = getShopeeCredentials(profile);
-    const configured = Boolean(credentials.appId && credentials.appSecret);
+
+    const configured = Boolean(
+      credentials.appId &&
+      credentials.appSecret
+    );
 
     res.json({
       ok: true,
@@ -1785,6 +2789,7 @@ app.get('/api/shopee/credentials', async (req, res) => {
         partnerKey: credentials.appSecret ? '••••••' : ''
       }
     });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1793,32 +2798,63 @@ app.get('/api/shopee/credentials', async (req, res) => {
 app.post('/api/shopee/credentials', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const data = await loadProfile(profile);
+
     const body = req.body || {};
+
     const previous = getShopeeCredentials(profile);
 
     const credentials = {
       appId: String(
-        body.appId || body.partnerId || body.partner_id || previous.appId || ''
+        body.appId ||
+        body.partnerId ||
+        body.partner_id ||
+        previous.appId ||
+        ''
       ).trim(),
+
       appSecret: String(
-        body.secret || body.appSecret || body.partnerKey || body.partner_key || previous.appSecret || ''
+        body.secret ||
+        body.appSecret ||
+        body.partnerKey ||
+        body.partner_key ||
+        previous.appSecret ||
+        ''
       ).trim()
     };
 
     if (!credentials.appId || !credentials.appSecret) {
-      return res.status(400).json({ ok: false, error: 'Informe o App ID e o Secret da Shopee.' });
+      return res.status(400).json({
+        ok: false,
+        error: 'Informe o App ID e o Secret da Shopee.'
+      });
     }
+
     if (!/^\d+$/.test(credentials.appId)) {
-      return res.status(400).json({ ok: false, error: 'O App ID deve conter somente números.' });
+      return res.status(400).json({
+        ok: false,
+        error: 'O App ID deve conter somente números.'
+      });
     }
+
     if (credentials.appSecret.length < 8) {
-      return res.status(400).json({ ok: false, error: 'A Secret da Shopee é inválida ou muito curta.' });
+      return res.status(400).json({
+        ok: false,
+        error: 'A Secret da Shopee é inválida ou muito curta.'
+      });
     }
 
     data.shopeeCredentials = encryptObject(credentials);
+
     await saveProfile(profile);
-    res.json({ ok: true, configured: true, message: 'Credenciais da Shopee salvas com segurança!' });
+
+    res.json({
+      ok: true,
+      configured: true,
+      message: 'Credenciais da Shopee salvas com segurança!'
+    });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1827,8 +2863,17 @@ app.post('/api/shopee/credentials', async (req, res) => {
 app.get('/api/shopee/products', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
-    const products = await fetchShopeeOffers(profile, req.query.limit || 10);
-    res.json({ ok: true, products });
+
+    const products = await fetchShopeeOffers(
+      profile,
+      req.query.limit || 10
+    );
+
+    res.json({
+      ok: true,
+      products
+    });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1837,8 +2882,18 @@ app.get('/api/shopee/products', async (req, res) => {
 app.post('/api/shopee/test', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
-    const products = await fetchShopeeOffers(profile, 3);
-    res.json({ ok: true, count: products.length, products });
+
+    const products = await fetchShopeeOffers(
+      profile,
+      3
+    );
+
+    res.json({
+      ok: true,
+      count: products.length,
+      products
+    });
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1849,8 +2904,11 @@ app.post('/api/shopee/test', async (req, res) => {
 app.post('/api/automation/run', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
     const result = await runAutomation(profile);
+
     res.status(result.ok ? 200 : 409).json(result);
+
   } catch (error) {
     routeError(res, error);
   }
@@ -1859,60 +2917,132 @@ app.post('/api/automation/run', async (req, res) => {
 // ROTAS NÃO ENCONTRADAS E TRATAMENTO GERAL
 
 app.use((req, res) => {
-  res.status(404).json({ ok: false, error: 'Rota não encontrada.' });
+  res.status(404).json({
+    ok: false,
+    error: 'Rota não encontrada.'
+  });
 });
 
 app.use((error, req, res, next) => {
-  if (res.headersSent) return next(error);
+  if (res.headersSent) {
+    return next(error);
+  }
+
   routeError(res, error, 500);
 });
 
 // INICIALIZAÇÃO DO SERVIDOR
 
+let profilesLoaded = false;
+let automationSchedulerRunning = false;
+
 async function initializeApp() {
-  for (const profile of PROFILE_IDS) await loadProfile(profile);
+  for (const profile of PROFILE_IDS) {
+    await loadProfile(profile);
+  }
+
+  profilesLoaded = true;
 
   logger.info(
-    { port: PORT, supabase: Boolean(supabase), profiles: PROFILE_IDS },
+    {
+      port: PORT,
+      supabase: Boolean(supabase),
+      profiles: PROFILE_IDS
+    },
     'MEDEIROS DIGITAL iniciado'
   );
 }
 
+// Verifica a automação a cada segundo.
+// Isso permite respeitar intervalos configurados em segundos.
 const automationTimer = setInterval(async () => {
-  for (const profile of PROFILE_IDS) {
-    const data = getData(profile);
-    if (!isAutomationActive(data.automation)) continue;
-    if (!isInsideAutomationWindow(data.automation)) continue;
-
-    const interval = getAutomationIntervalMs(data.automation);
-    const lastRun = data.automation.lastRunAt
-      ? new Date(data.automation.lastRunAt).getTime()
-      : 0;
-
-    if (Date.now() - lastRun >= interval) {
-      await runAutomation(profile);
-    }
+  if (!profilesLoaded || automationSchedulerRunning) {
+    return;
   }
-}, 60 * 1000);
 
-if (typeof automationTimer.unref === 'function') automationTimer.unref();
+  automationSchedulerRunning = true;
+
+  try {
+    for (const profile of PROFILE_IDS) {
+      const data = getData(profile);
+
+      const automation = data.automation || {};
+
+      if (!isAutomationActive(automation)) continue;
+
+      if (!isInsideAutomationWindow(automation)) continue;
+
+      if (automationLocks.has(profile)) continue;
+
+      if (
+        !sockets.has(profile) ||
+        getStatus(profile).status !== 'connected'
+      ) {
+        continue;
+      }
+
+      const interval = getAutomationIntervalMs(
+        automation
+      );
+
+      const lastRun = automation.lastRunAt
+        ? new Date(automation.lastRunAt).getTime()
+        : 0;
+
+      const elapsed = Date.now() - lastRun;
+
+      if (
+        !Number.isFinite(lastRun) ||
+        elapsed >= interval
+      ) {
+        await runAutomation(profile);
+      }
+    }
+
+  } catch (error) {
+    logger.error(
+      { error: error.message },
+      'Erro no agendador automático'
+    );
+
+  } finally {
+    automationSchedulerRunning = false;
+  }
+
+}, 1000);
+
+if (typeof automationTimer.unref === 'function') {
+  automationTimer.unref();
+}
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   initializeApp().catch(error => {
-    logger.error({ error: error.message, stack: error.stack }, 'Falha ao inicializar aplicação');
+    logger.error(
+      {
+        error: error.message,
+        stack: error.stack
+      },
+      'Falha ao inicializar aplicação'
+    );
   });
 });
 
 process.on('unhandledRejection', error => {
   logger.error(
-    { error: error?.message || String(error), stack: error?.stack || null },
+    {
+      error: error?.message || String(error),
+      stack: error?.stack || null
+    },
     'Promise rejeitada'
   );
 });
 
 process.on('uncaughtException', error => {
   logger.error(
-    { error: error?.message || String(error), stack: error?.stack || null },
+    {
+      error: error?.message || String(error),
+      stack: error?.stack || null
+    },
     'Exceção não tratada'
   );
 });
@@ -1920,7 +3050,11 @@ process.on('uncaughtException', error => {
 process.on('SIGTERM', () => {
   logger.info('Recebido SIGTERM; encerrando servidor');
 
-  for (const timer of reconnectTimers.values()) clearTimeout(timer);
+  clearInterval(automationTimer);
+
+  for (const timer of reconnectTimers.values()) {
+    clearTimeout(timer);
+  }
 
   server.close(() => process.exit(0));
 });
