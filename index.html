@@ -348,8 +348,94 @@ const $ = id => document.getElementById(id);
 
 function showMessage(id, message, type = "") {
   const el = $(id);
-  el.textContent = message;
+  el.textContent = String(message ?? "");
   el.className = "status " + type;
+}
+
+/*
+ * Converte estados que podem chegar como texto ou objeto.
+ * Evita que o painel mostre "[object Object]".
+ */
+function getSimpleStatus(value, fallback = "indisponível") {
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+
+  if (value && typeof value === "object") {
+    const nested =
+      value.status ??
+      value.state ??
+      value.message ??
+      value.connection;
+
+    if (typeof nested === "string" || typeof nested === "number") {
+      return String(nested);
+    }
+  }
+
+  return fallback;
+}
+
+/*
+ * Normaliza a resposta da rota /api/whatsapp.
+ * Aceita tanto:
+ * { status: "connected" }
+ * quanto:
+ * { status: { status: "connected" } }
+ */
+function normalizeWhatsAppResponse(data) {
+  const statusObject =
+    data?.status && typeof data.status === "object"
+      ? data.status
+      : {};
+
+  const rawStatus =
+    statusObject.status ??
+    (typeof data?.status === "string" ? data.status : null) ??
+    data?.state ??
+    data?.connection ??
+    "unknown";
+
+  return {
+    status: String(rawStatus).trim().toLowerCase(),
+    error:
+      data?.error ||
+      statusObject.error ||
+      statusObject.message ||
+      "",
+    reason:
+      statusObject.reason ??
+      data?.reason ??
+      null,
+    qr:
+      typeof data?.qr === "string"
+        ? data.qr
+        : typeof statusObject.qr === "string"
+          ? statusObject.qr
+          : null,
+    pairingCode:
+      data?.pairingCode ||
+      statusObject.pairingCode ||
+      null
+  };
+}
+
+function getWhatsAppStatusLabel(state) {
+  const labels = {
+    connected: "Conectado",
+    open: "Conectado",
+    qr: "QR Code disponível",
+    starting: "Iniciando conexão",
+    connecting: "Conectando",
+    disconnected: "Desconectado",
+    logged_out: "Sessão encerrada",
+    error: "Erro na conexão",
+    close: "Conexão encerrada",
+    closed: "Conexão encerrada",
+    unknown: "Estado não informado"
+  };
+
+  return labels[state] || state;
 }
 
 async function readResponse(response, endpoint) {
@@ -371,8 +457,12 @@ async function readResponse(response, endpoint) {
     throw new Error("JSON inválido recebido da rota " + endpoint);
   }
 
-  if (!response.ok) {
-    throw new Error(data.error || "Erro HTTP " + response.status);
+  if (!response.ok || data?.ok === false) {
+    throw new Error(
+      data.error ||
+      data.message ||
+      "Erro HTTP " + response.status
+    );
   }
 
   return data;
@@ -477,9 +567,9 @@ async function refresh() {
 
     $("status").textContent =
       "Perfil: " + getProfileName() +
-      " | Shopee: " + (d.shopee || "indisponível") +
-      " | WhatsApp: " + (d.whatsapp || "não iniciado") +
-      " | Automação: " + (d.automation || "pausada");
+      " | Shopee: " + getSimpleStatus(d.shopee, "indisponível") +
+      " | WhatsApp: " + getSimpleStatus(d.whatsapp, "não iniciado") +
+      " | Automação: " + getSimpleStatus(d.automation, "pausada");
   } catch (error) {
     showMessage("status", error.message, "error");
   }
@@ -493,15 +583,32 @@ async function connectQR() {
   connecting = true;
   $("qrButton").disabled = true;
   $("qrArea").classList.add("hidden");
+  $("qrImage").removeAttribute("src");
+  $("pairArea").classList.add("hidden");
 
   showMessage("waMessage", "Solicitando conexão para " + getProfileName() + "...");
 
   try {
     await api("/api/whatsapp/connect", "POST", {});
-    await refreshWhatsApp();
+
     startWAPolling();
+    await refreshWhatsApp();
+
+    showMessage(
+      "waMessage",
+      "Solicitação enviada. Aguardando o servidor gerar o QR Code..."
+    );
   } catch (error) {
-    showMessage("waMessage", error.message, "error");
+    showMessage(
+      "waMessage",
+      "Falha ao iniciar conexão: " + error.message,
+      "error"
+    );
+
+    /*
+     * Consulta o estado real do servidor mesmo quando a solicitação falha.
+     */
+    await refreshWhatsApp();
   } finally {
     connecting = false;
     $("qrButton").disabled = false;
@@ -523,15 +630,33 @@ async function connectPairing() {
     const d = await api("/api/whatsapp/pairing", "POST", { phone });
 
     if (d.pairingCode) {
-      $("pairCode").textContent = d.pairingCode;
+      $("pairCode").textContent = String(d.pairingCode);
       $("pairArea").classList.remove("hidden");
+    } else {
+      $("pairArea").classList.add("hidden");
     }
 
-    showMessage("waMessage", "Código solicitado. Siga as instruções do WhatsApp.");
-    await refreshWhatsApp();
     startWAPolling();
+    await refreshWhatsApp();
+
+    if (d.pairingCode) {
+      $("pairCode").textContent = String(d.pairingCode);
+      $("pairArea").classList.remove("hidden");
+
+      showMessage(
+        "waMessage",
+        "Código solicitado. Siga as instruções do WhatsApp.",
+        "success"
+      );
+    } else {
+      showMessage(
+        "waMessage",
+        "O servidor recebeu a solicitação, mas ainda não retornou o código de pareamento."
+      );
+    }
   } catch (error) {
     showMessage("waMessage", error.message, "error");
+    await refreshWhatsApp();
   } finally {
     $("pairButton").disabled = false;
   }
@@ -541,35 +666,116 @@ async function refreshWhatsApp() {
   if (!pass) return;
 
   try {
-    const d = await api("/api/whatsapp");
+    const data = await api("/api/whatsapp");
+    const state = normalizeWhatsAppResponse(data);
 
-    $("waStatus").textContent =
-      "WhatsApp de " + getProfileName() + ": " + d.status;
+    const label = getWhatsAppStatusLabel(state.status);
 
-    if (d.qr) {
-      $("qrImage").src = d.qr;
+    let statusText =
+      "WhatsApp de " + getProfileName() + ": " + label;
+
+    if (state.reason !== null && state.reason !== undefined) {
+      statusText += " (código " + state.reason + ")";
+    }
+
+    $("waStatus").textContent = statusText;
+
+    /*
+     * Exibe o QR somente quando o servidor retornar uma string válida.
+     */
+    if (state.qr) {
+      $("qrImage").src = state.qr;
       $("qrArea").classList.remove("hidden");
     } else {
       $("qrImage").removeAttribute("src");
       $("qrArea").classList.add("hidden");
     }
 
-    if (d.pairingCode) {
-      $("pairCode").textContent = d.pairingCode;
+    /*
+     * Atualiza o código de pareamento sem transformar objetos em texto.
+     */
+    if (state.pairingCode) {
+      $("pairCode").textContent = String(state.pairingCode);
       $("pairArea").classList.remove("hidden");
     }
 
-    if (d.status === "connected") {
-      showMessage("waMessage", "WhatsApp conectado.", "success");
+    if (state.status === "connected" || state.status === "open") {
+      showMessage(
+        "waMessage",
+        "WhatsApp conectado ao perfil " + getProfileName() + ".",
+        "success"
+      );
+
       stopWAPolling();
-    } else if (d.status === "error") {
-      showMessage("waMessage", d.error || "Falha na conexão. Consulte os logs do Render.", "error");
-      stopWAPolling();
-    } else if (d.status === "qr") {
-      showMessage("waMessage", "QR Code disponível. Escaneie pelo celular.", "success");
-    } else {
-      showMessage("waMessage", "Aguardando conexão: " + d.status);
+      return;
     }
+
+    if (state.status === "error") {
+      showMessage(
+        "waMessage",
+        state.error || "Falha na conexão. Consulte os logs do Render.",
+        "error"
+      );
+
+      stopWAPolling();
+      return;
+    }
+
+    if (state.status === "logged_out") {
+      showMessage(
+        "waMessage",
+        "A sessão anterior foi encerrada pelo WhatsApp. Será necessário gerar uma nova conexão. Se o QR Code não aparecer ao tentar novamente, precisaremos ajustar a renovação da sessão no servidor.",
+        "error"
+      );
+
+      stopWAPolling();
+      return;
+    }
+
+    if (state.status === "qr") {
+      showMessage(
+        "waMessage",
+        "QR Code disponível. Escaneie pelo celular.",
+        "success"
+      );
+
+      return;
+    }
+
+    if (
+      state.status === "starting" ||
+      state.status === "connecting"
+    ) {
+      showMessage(
+        "waMessage",
+        "Conectando ao WhatsApp. Aguardando resposta do servidor..."
+      );
+
+      return;
+    }
+
+    if (
+      state.status === "disconnected" ||
+      state.status === "close" ||
+      state.status === "closed"
+    ) {
+      showMessage(
+        "waMessage",
+        state.error
+          ? "Conexão encerrada: " + state.error
+          : "WhatsApp desconectado. Clique em Gerar QR Code para tentar conectar novamente."
+      );
+
+      return;
+    }
+
+    showMessage(
+      "waMessage",
+      state.error
+        ? "Estado: " + label + ". " + state.error
+        : "Aguardando conexão. Estado informado pelo servidor: " + label
+    );
+
   } catch (error) {
     showMessage("waMessage", error.message, "error");
   }
@@ -577,6 +783,7 @@ async function refreshWhatsApp() {
 
 function startWAPolling() {
   stopWAPolling();
+
   waTimer = setInterval(async () => {
     await refreshWhatsApp();
     await refresh();
@@ -595,9 +802,15 @@ async function disconnectWhatsApp() {
 
   try {
     await api("/api/whatsapp/disconnect", "POST", {});
+
     $("qrArea").classList.add("hidden");
     $("pairArea").classList.add("hidden");
+
+    $("qrImage").removeAttribute("src");
+    $("pairCode").textContent = "";
+
     stopWAPolling();
+
     showMessage("waMessage", "WhatsApp desconectado.");
     await refreshWhatsApp();
     await refresh();
