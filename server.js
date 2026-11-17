@@ -11,6 +11,7 @@ const { createClient } = require('@supabase/supabase-js');
 const baileys = require('@whiskeysockets/baileys');
 
 const makeWASocket = baileys.default;
+
 const {
   DisconnectReason,
   BufferJSON,
@@ -20,44 +21,297 @@ const {
   fetchLatestBaileysVersion
 } = baileys;
 
+
+// ======================================================
+// CONFIGURAÇÕES PRINCIPAIS
+// ======================================================
+
 const app = express();
+
 const PORT = Number(process.env.PORT || 3000);
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+
+const DATA_DIR =
+  process.env.DATA_DIR ||
+  path.join(__dirname, 'data');
+
 const PROFILE_IDS = ['rafael', 'usuario2'];
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
-const AUTOMATION_TIME_ZONE = process.env.AUTOMATION_TIME_ZONE || 'America/Sao_Paulo';
 
-const supabase = SUPABASE_URL && SUPABASE_KEY
-  ? createClient(SUPABASE_URL, SUPABASE_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false }
-    })
-  : null;
+const SUPABASE_URL =
+  process.env.SUPABASE_URL || '';
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
+const SUPABASE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  '';
+
+const AUTOMATION_TIME_ZONE =
+  process.env.AUTOMATION_TIME_ZONE ||
+  'America/Sao_Paulo';
+
+const WHATSAPP_AUTO_RECONNECT =
+  process.env.WHATSAPP_AUTO_RECONNECT !== 'false';
+
+const logger = pino({
+  level: process.env.LOG_LEVEL || 'info'
+});
+
+const supabase =
+  SUPABASE_URL && SUPABASE_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false
+        }
+      })
+    : null;
+
+fs.mkdirSync(DATA_DIR, {
+  recursive: true
+});
 
 app.disable('x-powered-by');
+
 app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false
 }));
-app.use(express.json({ limit: '5mb' }));
-app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+
+app.use(express.json({
+  limit: '5mb'
+}));
+
+app.use(express.urlencoded({
+  extended: true,
+  limit: '5mb'
+}));
+
 app.use((req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   next();
 });
 
-const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+
+// ======================================================
+// MEMÓRIA DO SERVIDOR
+// ======================================================
 
 const sockets = new Map();
 const socketStarts = new Map();
 const reconnectTimers = new Map();
+const reconnectAttempts = new Map();
+
 const connectionStatus = new Map();
 const qrCache = new Map();
 const pairingCache = new Map();
 const authRegistered = new Map();
+
 const automationLocks = new Set();
+
+const storeCache = Object.fromEntries(
+  PROFILE_IDS.map(profile => [
+    profile,
+    null
+  ])
+);
+
+
+// ======================================================
+// NICHOS E CATEGORIAS
+// ======================================================
+
+const NICHE_DEFINITIONS = [
+  {
+    id: 'eletricos',
+    label: 'Eletrônicos e tecnologia',
+    aliases: [
+      'eletronico',
+      'eletronicos',
+      'tecnologia',
+      'celular',
+      'fone',
+      'informatica',
+      'computador',
+      'gadget',
+      'tv',
+      'smartwatch'
+    ]
+  },
+  {
+    id: 'perfumaria',
+    label: 'Perfumes',
+    aliases: [
+      'perfume',
+      'perfumaria',
+      'colonia',
+      'deo parfum',
+      'body splash',
+      'fragrancia'
+    ]
+  },
+  {
+    id: 'beleza',
+    label: 'Beleza e maquiagem',
+    aliases: [
+      'beleza',
+      'maquiagem',
+      'make',
+      'batom',
+      'base',
+      'skincare',
+      'cabelo',
+      'unha',
+      'cosmetico'
+    ]
+  },
+  {
+    id: 'moda_feminina',
+    label: 'Moda feminina',
+    aliases: [
+      'moda feminina',
+      'feminino',
+      'feminina',
+      'vestido',
+      'blusa feminina',
+      'saia',
+      'lingerie',
+      'cropped'
+    ]
+  },
+  {
+    id: 'moda_masculina',
+    label: 'Moda masculina',
+    aliases: [
+      'moda masculina',
+      'masculino',
+      'masculina',
+      'camiseta masculina',
+      'cueca',
+      'bermuda masculina'
+    ]
+  },
+  {
+    id: 'moda_infantil',
+    label: 'Moda infantil',
+    aliases: [
+      'infantil',
+      'crianca',
+      'bebe',
+      'menino',
+      'menina',
+      'roupa infantil'
+    ]
+  },
+  {
+    id: 'calcados',
+    label: 'Calçados',
+    aliases: [
+      'calcado',
+      'calcados',
+      'sapato',
+      'tenis',
+      'sandalia',
+      'chinelo',
+      'bota'
+    ]
+  },
+  {
+    id: 'casa',
+    label: 'Casa e utilidades',
+    aliases: [
+      'casa',
+      'utilidades',
+      'organizacao',
+      'organizador',
+      'limpeza',
+      'banheiro',
+      'lavanderia'
+    ]
+  },
+  {
+    id: 'cozinha',
+    label: 'Cozinha',
+    aliases: [
+      'cozinha',
+      'panela',
+      'frigideira',
+      'air fryer',
+      'airfryer',
+      'talher',
+      'garrafa',
+      'pote'
+    ]
+  },
+  {
+    id: 'decoracao',
+    label: 'Decoração',
+    aliases: [
+      'decoracao',
+      'decorativo',
+      'quadro',
+      'vaso',
+      'tapete',
+      'cortina',
+      'luminaria'
+    ]
+  },
+  {
+    id: 'fitness',
+    label: 'Fitness e esportes',
+    aliases: [
+      'fitness',
+      'academia',
+      'esporte',
+      'treino',
+      'halter',
+      'suplemento',
+      'legging fitness'
+    ]
+  },
+  {
+    id: 'pet',
+    label: 'Pet shop',
+    aliases: [
+      'pet',
+      'cachorro',
+      'gato',
+      'cao',
+      'racao',
+      'coleira',
+      'brinquedo pet'
+    ]
+  },
+  {
+    id: 'brinquedos',
+    label: 'Brinquedos',
+    aliases: [
+      'brinquedo',
+      'brinquedos',
+      'boneca',
+      'carrinho',
+      'jogo infantil',
+      'lego'
+    ]
+  },
+  {
+    id: 'acessorios',
+    label: 'Acessórios e bolsas',
+    aliases: [
+      'acessorio',
+      'acessorios',
+      'bolsa',
+      'carteira',
+      'relogio',
+      'oculos',
+      'bijuteria',
+      'joia'
+    ]
+  }
+];
+
+
+// ======================================================
+// DADOS PADRÃO DOS PERFIS
+// ======================================================
 
 function defaultProfileData() {
   return {
@@ -67,135 +321,78 @@ function defaultProfileData() {
       intervalMinutes: 30,
       intervalSeconds: 1800,
       maxProducts: 10,
+
       destinationIds: [],
+
       groupSelectionMode: false,
       groupIds: [],
       groupNiches: {},
       groupNames: {},
+
       startTime: '',
       endTime: '',
       scheduleTimes: [],
+
       lastRunAt: null,
       lastSentAt: null,
       lastError: null
     },
+
     destinations: [],
     products: [],
     queue: [],
     sentProducts: {},
-    whatsappAuth: { creds: null, keys: {} },
+
+    whatsappAuth: {
+      creds: null,
+      keys: {}
+    },
+
     shopeeCredentials: null,
+
     updatedAt: new Date().toISOString()
   };
 }
 
-const storeCache = Object.fromEntries(
-  PROFILE_IDS.map(id => [id, defaultProfileData()])
-);
 
-const NICHE_DEFINITIONS = [
-  {
-    id: 'eletricos',
-    label: 'Eletrônicos e tecnologia',
-    aliases: ['eletronico', 'eletronicos', 'tecnologia', 'celular', 'fone', 'informatica', 'computador', 'gadget', 'tv', 'smartwatch']
-  },
-  {
-    id: 'perfumaria',
-    label: 'Perfumes',
-    aliases: ['perfume', 'perfumaria', 'colonia', 'deo parfum', 'body splash', 'fragrancia']
-  },
-  {
-    id: 'beleza',
-    label: 'Beleza e maquiagem',
-    aliases: ['beleza', 'maquiagem', 'make', 'batom', 'base', 'skincare', 'cabelo', 'unha', 'cosmetico']
-  },
-  {
-    id: 'moda_feminina',
-    label: 'Moda feminina',
-    aliases: ['moda feminina', 'feminino', 'feminina', 'vestido', 'blusa feminina', 'saia', 'lingerie', 'cropped']
-  },
-  {
-    id: 'moda_masculina',
-    label: 'Moda masculina',
-    aliases: ['moda masculina', 'masculino', 'masculina', 'camiseta masculina', 'cueca', 'bermuda masculina']
-  },
-  {
-    id: 'moda_infantil',
-    label: 'Moda infantil',
-    aliases: ['infantil', 'crianca', 'bebe', 'bebê', 'menino', 'menina', 'roupa infantil']
-  },
-  {
-    id: 'calcados',
-    label: 'Calçados',
-    aliases: ['calcado', 'calcados', 'sapato', 'tenis', 'tênis', 'sandalia', 'chinelo', 'bota']
-  },
-  {
-    id: 'casa',
-    label: 'Casa e utilidades',
-    aliases: ['casa', 'utilidades', 'organizacao', 'organizador', 'limpeza', 'banheiro', 'lavanderia']
-  },
-  {
-    id: 'cozinha',
-    label: 'Cozinha',
-    aliases: ['cozinha', 'panela', 'frigideira', 'air fryer', 'airfryer', 'talher', 'garrafa', 'pote']
-  },
-  {
-    id: 'decoracao',
-    label: 'Decoração',
-    aliases: ['decoracao', 'decorativo', 'quadro', 'vaso', 'tapete', 'cortina', 'luminaria']
-  },
-  {
-    id: 'fitness',
-    label: 'Fitness e esportes',
-    aliases: ['fitness', 'academia', 'esporte', 'treino', 'halter', 'suplemento', 'legging fitness']
-  },
-  {
-    id: 'pet',
-    label: 'Pet shop',
-    aliases: ['pet', 'cachorro', 'gato', 'cao', 'ração', 'racao', 'coleira', 'brinquedo pet']
-  },
-  {
-    id: 'brinquedos',
-    label: 'Brinquedos',
-    aliases: ['brinquedo', 'brinquedos', 'boneca', 'carrinho', 'jogo infantil', 'lego']
-  },
-  {
-    id: 'acessorios',
-    label: 'Acessórios e bolsas',
-    aliases: ['acessorio', 'acessorios', 'bolsa', 'carteira', 'relogio', 'oculos', 'bijuteria', 'joia']
-  }
-];
+// ======================================================
+// FUNÇÕES UTILITÁRIAS
+// ======================================================
 
 function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function normalizeText(value) {
   return String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
+    .toLowerCase()
+    .trim();
 }
 
 function normalizeGroupId(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '')
+    .trim()
+    .toLowerCase();
 }
 
-// Normaliza IDs de grupos e números para o formato aceito pelo Baileys.
 function normalizeWhatsAppJid(value) {
-  let raw = String(value || '').trim();
+  let raw = String(value || '')
+    .trim()
+    .replace(/\s+/g, '');
 
   if (!raw) return '';
 
-  raw = raw.replace(/\s+/g, '');
-
   if (raw.includes('@')) {
-    const separator = raw.lastIndexOf('@');
+    const at = raw.lastIndexOf('@');
 
     return (
-      raw.slice(0, separator) +
+      raw.slice(0, at) +
       '@' +
-      raw.slice(separator + 1).toLowerCase()
+      raw.slice(at + 1).toLowerCase()
     );
   }
 
@@ -203,9 +400,19 @@ function normalizeWhatsAppJid(value) {
     return `${raw}@g.us`;
   }
 
-  const digits = raw.replace(/\D/g, '');
+  let digits = raw.replace(/\D/g, '');
 
-  if (digits.length >= 10) {
+  if (
+    digits.length === 10 ||
+    digits.length === 11
+  ) {
+    digits = `55${digits}`;
+  }
+
+  if (
+    digits.length >= 12 &&
+    digits.length <= 15
+  ) {
     return `${digits}@s.whatsapp.net`;
   }
 
@@ -213,34 +420,40 @@ function normalizeWhatsAppJid(value) {
 }
 
 function getMapValueByGroupId(map, groupId) {
-  if (!map || typeof map !== 'object' || Array.isArray(map)) return '';
-
-  const id = String(groupId || '').trim();
-
-  if (Object.prototype.hasOwnProperty.call(map, id)) {
-    return map[id];
+  if (!map || typeof map !== 'object') {
+    return undefined;
   }
 
-  const normalized = normalizeGroupId(id);
-  const key = Object.keys(map).find(
-    item => normalizeGroupId(item) === normalized
-  );
+  const target = normalizeGroupId(groupId);
 
-  return key ? map[key] : '';
+  for (const [key, value] of Object.entries(map)) {
+    if (normalizeGroupId(key) === target) {
+      return value;
+    }
+  }
+
+  return undefined;
 }
 
 function profileIdFrom(req) {
-  const candidate = String(
+  const requested =
     req.headers['x-profile'] ||
-    req.query.profile ||
+    req.query?.profile ||
     req.body?.profile ||
-    'rafael'
-  ).trim().toLowerCase();
+    'rafael';
 
-  return PROFILE_IDS.includes(candidate) ? candidate : 'rafael';
+  const profile = String(requested).trim();
+
+  return PROFILE_IDS.includes(profile)
+    ? profile
+    : 'rafael';
 }
 
 function getData(profile) {
+  if (!PROFILE_IDS.includes(profile)) {
+    throw new Error('Perfil inválido.');
+  }
+
   if (!storeCache[profile]) {
     storeCache[profile] = defaultProfileData();
   }
@@ -249,231 +462,391 @@ function getData(profile) {
 }
 
 function safeJson(value, fallback = null) {
-  try {
-    return typeof value === 'string'
-      ? JSON.parse(value)
-      : (value ?? fallback);
-  } catch {
+  if (value === undefined || value === null) {
     return fallback;
   }
+
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  return value;
 }
 
-// Mantém compatibilidade com os dados antigos e novos.
-// O intervalo em segundos tem prioridade quando está salvo.
+
+// ======================================================
+// NORMALIZAÇÃO DOS DADOS
+// ======================================================
+
 function mergeProfileData(value) {
-  const base = defaultProfileData();
-  const incoming = value && typeof value === 'object' ? value : {};
-  const incomingAutomation = incoming.automation || {};
+  const defaults = defaultProfileData();
 
-  const rawIntervalSeconds =
-    incomingAutomation.intervalSeconds !== undefined &&
-    incomingAutomation.intervalSeconds !== null
-      ? Number(incomingAutomation.intervalSeconds)
-      : incomingAutomation.intervalMinutes !== undefined
-        ? Number(incomingAutomation.intervalMinutes) * 60
-        : base.automation.intervalSeconds;
+  const parsed = safeJson(value, {});
 
-  const intervalSeconds = Number.isFinite(rawIntervalSeconds)
-    ? Math.max(10, Math.min(86400, Math.round(rawIntervalSeconds)))
-    : base.automation.intervalSeconds;
+  if (!parsed || typeof parsed !== 'object') {
+    return defaults;
+  }
 
-  const active = incomingAutomation.active !== undefined
-    ? Boolean(incomingAutomation.active)
-    : Boolean(incomingAutomation.enabled);
+  const oldAutomation =
+    parsed.automation || {};
+
+  const intervalSeconds = Number(
+    oldAutomation.intervalSeconds
+  );
+
+  const intervalMinutes = Number(
+    oldAutomation.intervalMinutes
+  );
+
+  let finalSeconds = 1800;
+
+  if (
+    Number.isFinite(intervalSeconds) &&
+    intervalSeconds > 0
+  ) {
+    finalSeconds = intervalSeconds;
+
+  } else if (
+    Number.isFinite(intervalMinutes) &&
+    intervalMinutes > 0
+  ) {
+    finalSeconds = intervalMinutes * 60;
+  }
+
+  finalSeconds = Math.max(
+    10,
+    Math.min(86400, Math.round(finalSeconds))
+  );
+
+  const active = Boolean(
+    oldAutomation.active ??
+    oldAutomation.enabled ??
+    false
+  );
+
+  const whatsappAuth =
+    parsed.whatsappAuth || {};
 
   return {
-    ...base,
-    ...incoming,
+    ...defaults,
+    ...parsed,
+
     automation: {
-      ...base.automation,
-      ...incomingAutomation,
+      ...defaults.automation,
+      ...oldAutomation,
+
       enabled: active,
       active,
-      intervalSeconds,
-      intervalMinutes: Math.max(1, Math.ceil(intervalSeconds / 60)),
-      destinationIds: Array.isArray(incomingAutomation.destinationIds)
-        ? incomingAutomation.destinationIds.map(String)
+
+      intervalSeconds: finalSeconds,
+
+      intervalMinutes: Math.max(
+        1,
+        Math.ceil(finalSeconds / 60)
+      ),
+
+      maxProducts: Math.max(
+        1,
+        Math.min(
+          50,
+          Number(oldAutomation.maxProducts) || 10
+        )
+      ),
+
+      destinationIds: Array.isArray(
+        oldAutomation.destinationIds
+      )
+        ? oldAutomation.destinationIds
         : [],
-      groupIds: Array.isArray(incomingAutomation.groupIds)
-        ? incomingAutomation.groupIds.map(String)
+
+      groupIds: Array.isArray(
+        oldAutomation.groupIds
+      )
+        ? oldAutomation.groupIds
         : [],
-      groupNiches: incomingAutomation.groupNiches &&
-        typeof incomingAutomation.groupNiches === 'object'
-          ? incomingAutomation.groupNiches
+
+      groupNiches:
+        oldAutomation.groupNiches &&
+        typeof oldAutomation.groupNiches === 'object'
+          ? oldAutomation.groupNiches
           : {},
-      groupNames: incomingAutomation.groupNames &&
-        typeof incomingAutomation.groupNames === 'object'
-          ? incomingAutomation.groupNames
+
+      groupNames:
+        oldAutomation.groupNames &&
+        typeof oldAutomation.groupNames === 'object'
+          ? oldAutomation.groupNames
           : {},
-      scheduleTimes: Array.isArray(incomingAutomation.scheduleTimes)
-        ? incomingAutomation.scheduleTimes
+
+      scheduleTimes: Array.isArray(
+        oldAutomation.scheduleTimes
+      )
+        ? oldAutomation.scheduleTimes
         : []
     },
-    destinations: Array.isArray(incoming.destinations)
-      ? incoming.destinations
+
+    destinations: Array.isArray(parsed.destinations)
+      ? parsed.destinations
       : [],
-    products: Array.isArray(incoming.products)
-      ? incoming.products
+
+    products: Array.isArray(parsed.products)
+      ? parsed.products
       : [],
-    queue: Array.isArray(incoming.queue)
-      ? incoming.queue
+
+    queue: Array.isArray(parsed.queue)
+      ? parsed.queue
       : [],
-    sentProducts: incoming.sentProducts &&
-      typeof incoming.sentProducts === 'object'
-        ? incoming.sentProducts
+
+    sentProducts:
+      parsed.sentProducts &&
+      typeof parsed.sentProducts === 'object'
+        ? parsed.sentProducts
         : {},
+
     whatsappAuth: {
-      creds: incoming.whatsappAuth?.creds || null,
-      keys: incoming.whatsappAuth?.keys || {}
-    }
+      creds: whatsappAuth.creds || null,
+      keys:
+        whatsappAuth.keys &&
+        typeof whatsappAuth.keys === 'object'
+          ? whatsappAuth.keys
+          : {}
+    },
+
+    updatedAt: new Date().toISOString()
   };
 }
 
-// Persistência compatível com variações comuns das colunas existentes.
+
+// ======================================================
+// SUPABASE: LOCALIZAÇÃO DOS REGISTROS
+// ======================================================
+
 async function findProfileRow(profile) {
-  if (!supabase) {
-    return {
-      row: null,
-      profileColumn: null,
-      dataColumn: null
-    };
-  }
+  if (!supabase) return null;
 
-  const profileColumns = ['perfil', 'profile', 'profile_id', 'id'];
+  const profileColumns = [
+    'perfil',
+    'profile',
+    'profile_id',
+    'id'
+  ];
 
-  for (const column of profileColumns) {
-    try {
-      const { data, error } = await supabase
-        .from('robo_perfis')
-        .select('*')
-        .eq(column, profile)
-        .maybeSingle();
+  const dataColumns = [
+    'dados',
+    'data',
+    'config',
+    'settings',
+    'conteudo',
+    'payload'
+  ];
 
-      if (!error && data) {
-        const dataColumn = [
-          'dados',
-          'data',
-          'config',
-          'settings',
-          'conteudo',
-          'payload'
-        ].find(key =>
-          Object.prototype.hasOwnProperty.call(data, key)
-        );
+  for (const profileColumn of profileColumns) {
+    for (const dataColumn of dataColumns) {
+      try {
+        const { data, error } = await supabase
+          .from('robo_perfis')
+          .select('*')
+          .eq(profileColumn, profile)
+          .maybeSingle();
 
-        if (dataColumn) {
+        if (error) continue;
+
+        if (data) {
           return {
             row: data,
-            profileColumn: column,
+            profileColumn,
             dataColumn
           };
         }
-      }
-    } catch (_) {}
-  }
 
-  return {
-    row: null,
-    profileColumn: null,
-    dataColumn: null
-  };
-}
-
-async function loadProfile(profile) {
-  const localFile = path.join(DATA_DIR, `${profile}.json`);
-  let localData = null;
-
-  try {
-    localData = safeJson(fs.readFileSync(localFile, 'utf8'));
-  } catch (_) {}
-
-  if (supabase) {
-    const found = await findProfileRow(profile);
-
-    if (found.row && found.dataColumn) {
-      const parsed = safeJson(
-        found.row[found.dataColumn],
-        found.row[found.dataColumn]
-      );
-
-      storeCache[profile] = mergeProfileData(parsed);
-      return storeCache[profile];
+      } catch (_) {}
     }
   }
 
-  if (localData) {
-    storeCache[profile] = mergeProfileData(localData);
+  return null;
+}
+
+
+// ======================================================
+// CARREGAR PERFIL
+// ======================================================
+
+async function loadProfile(profile) {
+  if (!PROFILE_IDS.includes(profile)) {
+    throw new Error('Perfil inválido.');
   }
 
-  return getData(profile);
+  let localData = null;
+
+  const filePath = path.join(
+    DATA_DIR,
+    `${profile}.json`
+  );
+
+  try {
+    if (fs.existsSync(filePath)) {
+      localData = safeJson(
+        fs.readFileSync(filePath, 'utf8'),
+        null
+      );
+    }
+  } catch (error) {
+    logger.error(
+      {
+        profile,
+        error: error.message
+      },
+      'Erro ao ler arquivo local do perfil'
+    );
+  }
+
+  if (supabase) {
+    try {
+      const found = await findProfileRow(profile);
+
+      if (found?.row) {
+        const remoteData = safeJson(
+          found.row[found.dataColumn],
+          null
+        );
+
+        if (remoteData) {
+          storeCache[profile] = mergeProfileData(
+            remoteData
+          );
+
+          return storeCache[profile];
+        }
+      }
+
+    } catch (error) {
+      logger.warn(
+        {
+          profile,
+          error: error.message
+        },
+        'Não foi possível carregar perfil do Supabase'
+      );
+    }
+  }
+
+  storeCache[profile] = mergeProfileData(
+    localData || storeCache[profile] || {}
+  );
+
+  return storeCache[profile];
 }
+
+
+// ======================================================
+// SALVAR PERFIL
+// ======================================================
 
 async function saveProfile(profile) {
   const data = getData(profile);
+
   data.updatedAt = new Date().toISOString();
+
+  storeCache[profile] = data;
+
+  const filePath = path.join(
+    DATA_DIR,
+    `${profile}.json`
+  );
 
   try {
     fs.writeFileSync(
-      path.join(DATA_DIR, `${profile}.json`),
-      JSON.stringify(data, null, 2)
+      filePath,
+      JSON.stringify(data, null, 2),
+      'utf8'
     );
+
   } catch (error) {
-    logger.warn(
-      { error: error.message },
-      'Falha ao salvar cópia local'
+    logger.error(
+      {
+        profile,
+        error: error.message
+      },
+      'Erro ao salvar arquivo local'
     );
   }
 
-  if (!supabase) return;
+  if (!supabase) return true;
 
-  const found = await findProfileRow(profile);
+  const profileColumns = [
+    'perfil',
+    'profile',
+    'profile_id',
+    'id'
+  ];
 
-  if (found.row && found.dataColumn) {
+  const dataColumns = [
+    'dados',
+    'data',
+    'config',
+    'settings',
+    'conteudo',
+    'payload'
+  ];
+
+  const existing = await findProfileRow(profile);
+
+  if (existing) {
     const payload = {
-      [found.dataColumn]: data
+      [existing.dataColumn]: data,
+      updated_at: new Date().toISOString()
     };
-
-    if (Object.prototype.hasOwnProperty.call(found.row, 'updated_at')) {
-      payload.updated_at = data.updatedAt;
-    }
 
     const { error } = await supabase
       .from('robo_perfis')
       .update(payload)
-      .eq(found.profileColumn, profile);
+      .eq(existing.profileColumn, profile);
 
-    if (error) {
-      logger.error(
-        { error: error.message },
-        'Falha ao atualizar robo_perfis'
-      );
-    }
+    if (!error) return true;
 
-    return;
+    logger.warn(
+      {
+        profile,
+        error: error.message
+      },
+      'Falha ao atualizar perfil no Supabase'
+    );
   }
 
-  const candidates = [
-    { perfil: profile, dados: data },
-    { profile, data },
-    { profile_id: profile, data },
-    { perfil: profile, data },
-    { id: profile, dados: data }
-  ];
+  for (const profileColumn of profileColumns) {
+    for (const dataColumn of dataColumns) {
+      try {
+        const payload = {
+          [profileColumn]: profile,
+          [dataColumn]: data,
+          updated_at: new Date().toISOString()
+        };
 
-  for (const payload of candidates) {
-    try {
-      const { error } = await supabase
-        .from('robo_perfis')
-        .insert(payload);
+        const { error } = await supabase
+          .from('robo_perfis')
+          .insert(payload);
 
-      if (!error) return;
-    } catch (_) {}
+        if (!error) return true;
+
+      } catch (_) {}
+    }
   }
 
   logger.warn(
-    'Não foi possível gravar em robo_perfis. Confira as colunas da tabela; cópia local mantida.'
+    { profile },
+    'Perfil salvo localmente; Supabase não confirmou gravação.'
   );
+
+  return true;
 }
+
+
+// ======================================================
+// CLASSIFICAÇÃO DE GRUPOS E PRODUTOS
+// ======================================================
 
 function classifyGroupNiche(name) {
   const normalized = normalizeText(name);
@@ -493,7 +866,7 @@ function classifyGroupNiche(name) {
 
   return {
     id: 'unknown',
-    label: 'Geral / não identificado'
+    label: 'Não identificado'
   };
 }
 
@@ -503,164 +876,163 @@ function classifyProductNiches(product) {
     product?.name,
     product?.title,
     product?.description,
-    product?.categoryName,
-    product?.category,
-    product?.productCatName
+    product?.category
   ].filter(Boolean).join(' '));
 
-  return NICHE_DEFINITIONS.filter(niche =>
-    niche.aliases.some(alias =>
-      text.includes(normalizeText(alias))
-    )
-  );
+  const matches = [];
+
+  for (const niche of NICHE_DEFINITIONS) {
+    if (
+      niche.aliases.some(alias =>
+        text.includes(normalizeText(alias))
+      )
+    ) {
+      matches.push(niche.id);
+    }
+  }
+
+  return [...new Set(matches)];
 }
 
 function destinationMatchesProduct(destination, product) {
-  const selectedNicheId = String(
-    destination?.nicheId || 'auto'
-  ).trim().toLowerCase();
-
-  const productNiches = classifyProductNiches(product || {});
+  const selected = normalizeText(
+    destination?.nicheId ||
+    destination?.niche ||
+    'auto'
+  );
 
   if (
-    ['all', 'geral', 'todos', 'todas', 'qualquer']
-      .includes(selectedNicheId)
+    ['all', 'geral', 'todos', 'todas'].includes(selected)
   ) {
     return {
       matches: true,
-      reason: 'Grupo configurado para receber todos os nichos.',
-      groupNiche: {
-        id: 'all',
-        label: 'Todos os nichos'
-      },
-      productNiches
+      reason: 'Destino aceita todos os nichos.'
     };
   }
 
-  let groupNiche;
+  let destinationNiche = selected;
 
-  if (!selectedNicheId || selectedNicheId === 'auto') {
-    groupNiche = classifyGroupNiche(destination?.name || '');
-  } else {
-    const selected = NICHE_DEFINITIONS.find(
-      item => item.id === selectedNicheId
+  if (
+    !destinationNiche ||
+    destinationNiche === 'auto'
+  ) {
+    const classified = classifyGroupNiche(
+      destination?.name ||
+      destination?.subject ||
+      ''
     );
 
-    if (!selected) {
-      return {
-        matches: false,
-        reason: 'O nicho selecionado para este grupo não é válido.',
-        groupNiche: {
-          id: 'invalid',
-          label: 'Nicho inválido'
-        },
-        productNiches
-      };
-    }
-
-    groupNiche = {
-      id: selected.id,
-      label: selected.label
-    };
+    destinationNiche = classified.id;
   }
 
-  if (groupNiche.id === 'unknown') {
+  if (destinationNiche === 'unknown') {
     return {
       matches: false,
-      reason: 'Selecione manualmente o nicho deste grupo.',
-      groupNiche,
-      productNiches
+      reason: 'Selecione manualmente o nicho deste grupo.'
     };
   }
+
+  const productNiches = classifyProductNiches(product);
 
   if (!productNiches.length) {
     return {
       matches: false,
-      reason: 'Não foi possível identificar o nicho do produto.',
-      groupNiche,
-      productNiches
+      reason: 'Não foi possível identificar o nicho do produto.'
     };
   }
 
-  const matches = productNiches.some(
-    item => item.id === groupNiche.id
-  );
-
   return {
-    matches,
-    reason: matches
-      ? `Produto compatível com ${groupNiche.label}.`
-      : `Produto fora do nicho ${groupNiche.label}.`,
-    groupNiche,
-    productNiches
+    matches: productNiches.includes(destinationNiche),
+    reason: productNiches.includes(destinationNiche)
+      ? 'Nicho compatível.'
+      : 'Produto não pertence ao nicho deste grupo.'
   };
 }
 
-// Usa os grupos selecionados diretamente no painel.
-// Mantém os destinos antigos como alternativa de compatibilidade.
-function getAutomationTargets(data) {
-  const automation = data?.automation || {};
 
-  if (automation.groupSelectionMode === true) {
-    const ids = Array.isArray(automation.groupIds)
-      ? [
-          ...new Set(
-            automation.groupIds
-              .map(id => String(id || '').trim())
-              .filter(Boolean)
-          )
-        ]
+// ======================================================
+// DESTINOS DA AUTOMAÇÃO
+// ======================================================
+
+function getAutomationTargets(data) {
+  const automation = data.automation || {};
+
+  if (automation.groupSelectionMode) {
+    const selectedIds = Array.isArray(
+      automation.groupIds
+    )
+      ? automation.groupIds
       : [];
 
-    return ids.map(groupId => {
-      const nicheValue = getMapValueByGroupId(
-        automation.groupNiches,
-        groupId
-      );
-
-      const nameValue = getMapValueByGroupId(
-        automation.groupNames,
-        groupId
+    return selectedIds.map(groupId => {
+      const destination = data.destinations.find(
+        item =>
+          normalizeGroupId(item.groupId || item.id) ===
+          normalizeGroupId(groupId)
       );
 
       return {
+        ...(destination || {}),
         id: groupId,
         groupId,
-        phone: '',
-        name: String(nameValue || groupId),
-        nicheId: String(nicheValue || ''),
-        active: true,
-        source: 'whatsapp_group'
+        name:
+          getMapValueByGroupId(
+            automation.groupNames,
+            groupId
+          ) ||
+          destination?.name ||
+          groupId,
+
+        nicheId:
+          getMapValueByGroupId(
+            automation.groupNiches,
+            groupId
+          ) ||
+          destination?.nicheId ||
+          'auto',
+
+        active: true
       };
     });
+
   }
 
-  const destinationIds = Array.isArray(automation.destinationIds)
-    ? automation.destinationIds.map(String)
+  const selected = Array.isArray(
+    automation.destinationIds
+  )
+    ? automation.destinationIds
     : [];
 
-  const destinations = Array.isArray(data?.destinations)
-    ? data.destinations
-    : [];
+  return data.destinations.filter(destination => {
+    if (destination.active === false) return false;
 
-  return destinations.filter(destination =>
-    destination.active !== false &&
-    (
-      !destinationIds.length ||
-      destinationIds.includes(String(destination.id)) ||
-      destinationIds.includes(String(destination.groupId || ''))
-    )
-  );
+    if (!selected.length) return false;
+
+    return selected.some(id =>
+      String(id) === String(destination.id) ||
+      normalizeGroupId(id) ===
+        normalizeGroupId(destination.groupId)
+    );
+  });
 }
 
+
+// ======================================================
+// CRIPTOGRAFIA DAS CREDENCIAIS
+// ======================================================
+
 function encryptionKey() {
-  const raw = process.env.SHOPEE_CREDENTIALS_KEY ||
+  const secret =
+    process.env.SHOPEE_CREDENTIALS_KEY ||
     process.env.APP_ENCRYPTION_KEY ||
     '';
 
-  if (!raw) return null;
+  if (!secret) return null;
 
-  return crypto.createHash('sha256').update(raw).digest();
+  return crypto
+    .createHash('sha256')
+    .update(secret)
+    .digest();
 }
 
 function encryptObject(value) {
@@ -668,21 +1040,32 @@ function encryptObject(value) {
 
   if (!key) {
     throw new Error(
-      'Configure SHOPEE_CREDENTIALS_KEY nas variáveis do serviço.'
+      'Configure SHOPEE_CREDENTIALS_KEY ou APP_ENCRYPTION_KEY nas variáveis do servidor.'
     );
   }
 
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+
+  const cipher = crypto.createCipheriv(
+    'aes-256-gcm',
+    key,
+    iv
+  );
 
   const encrypted = Buffer.concat([
-    cipher.update(JSON.stringify(value), 'utf8'),
+    cipher.update(
+      JSON.stringify(value),
+      'utf8'
+    ),
     cipher.final()
   ]);
 
+  const authTag = cipher.getAuthTag();
+
   return {
+    algorithm: 'aes-256-gcm',
     iv: iv.toString('base64'),
-    tag: cipher.getAuthTag().toString('base64'),
+    tag: authTag.toString('base64'),
     data: encrypted.toString('base64')
   };
 }
@@ -690,123 +1073,196 @@ function encryptObject(value) {
 function decryptObject(payload) {
   if (!payload) return null;
 
-  try {
-    const key = encryptionKey();
+  const key = encryptionKey();
 
-    if (!key) return null;
+  if (!key) return null;
+
+  try {
+    const iv = Buffer.from(
+      payload.iv,
+      'base64'
+    );
+
+    const tag = Buffer.from(
+      payload.tag,
+      'base64'
+    );
+
+    const encrypted = Buffer.from(
+      payload.data,
+      'base64'
+    );
 
     const decipher = crypto.createDecipheriv(
       'aes-256-gcm',
       key,
-      Buffer.from(payload.iv, 'base64')
+      iv
     );
 
-    decipher.setAuthTag(
-      Buffer.from(payload.tag, 'base64')
-    );
+    decipher.setAuthTag(tag);
 
-    const clear = Buffer.concat([
-      decipher.update(
-        Buffer.from(payload.data, 'base64')
-      ),
+    const decrypted = Buffer.concat([
+      decipher.update(encrypted),
       decipher.final()
-    ]).toString('utf8');
+    ]);
 
-    return JSON.parse(clear);
+    return JSON.parse(
+      decrypted.toString('utf8')
+    );
 
   } catch (error) {
-    logger.error(
+    logger.warn(
       { error: error.message },
-      'Não foi possível descriptografar as credenciais Shopee'
+      'Não foi possível descriptografar credenciais.'
     );
 
     return null;
   }
 }
 
+
+// ======================================================
+// SERIALIZAÇÃO DA AUTENTICAÇÃO BAILEYS
+// ======================================================
+
 function serializeAuth(value) {
-  return JSON.stringify(value, BufferJSON.replacer);
+  return JSON.stringify(
+    value,
+    BufferJSON.replacer
+  );
 }
 
 function deserializeAuth(value) {
-  if (value == null || value === '') return null;
+  if (!value) return null;
 
-  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(
+      value,
+      BufferJSON.reviver
+    );
 
-  return JSON.parse(value, BufferJSON.reviver);
+  } catch (_) {
+    return null;
+  }
 }
 
-async function readAuthTableValue(profile, key) {
+
+// ======================================================
+// SUPABASE: TABELA DE CHAVES DO WHATSAPP
+// ======================================================
+
+async function readAuthTableValue(profile, keyName) {
   if (!supabase) return null;
 
-  const profileColumns = ['perfil', 'profile', 'profile_id'];
-  const keyColumns = ['chave', 'key', 'nome'];
-  const valueColumns = ['valor', 'value', 'dados', 'data', 'conteudo'];
+  const profileColumns = [
+    'perfil',
+    'profile',
+    'profile_id'
+  ];
+
+  const keyColumns = [
+    'chave',
+    'key',
+    'nome'
+  ];
+
+  const valueColumns = [
+    'valor',
+    'value',
+    'dados',
+    'data',
+    'conteudo'
+  ];
 
   for (const profileColumn of profileColumns) {
     for (const keyColumn of keyColumns) {
-      try {
-        const { data, error } = await supabase
-          .from('robo_whatsapp_chaves')
-          .select('*')
-          .eq(profileColumn, profile)
-          .eq(keyColumn, key)
-          .maybeSingle();
+      for (const valueColumn of valueColumns) {
+        try {
+          const { data, error } = await supabase
+            .from('robo_whatsapp_chaves')
+            .select(valueColumn)
+            .eq(profileColumn, profile)
+            .eq(keyColumn, keyName)
+            .maybeSingle();
 
-        if (error || !data) continue;
+          if (error) continue;
 
-        const valueColumn = valueColumns.find(column =>
-          Object.prototype.hasOwnProperty.call(data, column)
-        );
+          if (data) {
+            return data[valueColumn];
+          }
 
-        if (valueColumn) return data[valueColumn];
-
-      } catch (_) {}
+        } catch (_) {}
+      }
     }
   }
 
   return null;
 }
 
-async function writeAuthTableValue(profile, key, value) {
+async function writeAuthTableValue(
+  profile,
+  keyName,
+  value
+) {
   if (!supabase) return false;
 
-  const profileColumns = ['perfil', 'profile', 'profile_id'];
-  const keyColumns = ['chave', 'key', 'nome'];
-  const valueColumns = ['valor', 'value', 'dados', 'data', 'conteudo'];
+  const profileColumns = [
+    'perfil',
+    'profile',
+    'profile_id'
+  ];
+
+  const keyColumns = [
+    'chave',
+    'key',
+    'nome'
+  ];
+
+  const valueColumns = [
+    'valor',
+    'value',
+    'dados',
+    'data',
+    'conteudo'
+  ];
+
+  const serialized = serializeAuth(value);
 
   for (const profileColumn of profileColumns) {
     for (const keyColumn of keyColumns) {
       for (const valueColumn of valueColumns) {
         try {
-          const { data: updated, error: updateError } = await supabase
+          const lookup = await supabase
             .from('robo_whatsapp_chaves')
-            .update({ [valueColumn]: value })
+            .select('*')
             .eq(profileColumn, profile)
-            .eq(keyColumn, key)
-            .select('*');
+            .eq(keyColumn, keyName)
+            .maybeSingle();
 
-          if (
-            !updateError &&
-            (
-              (Array.isArray(updated) && updated.length) ||
-              (updated && !Array.isArray(updated))
-            )
-          ) {
-            return true;
+          if (!lookup.error && lookup.data) {
+            const { error } = await supabase
+              .from('robo_whatsapp_chaves')
+              .update({
+                [valueColumn]: serialized,
+                updated_at: new Date().toISOString()
+              })
+              .eq(profileColumn, profile)
+              .eq(keyColumn, keyName);
+
+            if (!error) return true;
+
+          } else {
+            const { error } = await supabase
+              .from('robo_whatsapp_chaves')
+              .insert({
+                [profileColumn]: profile,
+                [keyColumn]: keyName,
+                [valueColumn]: serialized,
+                updated_at: new Date().toISOString()
+              });
+
+            if (!error) return true;
           }
-
-          const payload = {
-            [profileColumn]: profile,
-            [keyColumn]: key,
-            [valueColumn]: value
-          };
-
-          const { error: insertError } = await supabase
-            .from('robo_whatsapp_chaves')
-            .insert(payload);
-
-          if (!insertError) return true;
 
         } catch (_) {}
       }
@@ -817,173 +1273,221 @@ async function writeAuthTableValue(profile, key, value) {
 }
 
 async function deleteAuthTableValues(profile) {
-  if (!supabase) return;
+  if (!supabase) return false;
 
-  for (const profileColumn of ['perfil', 'profile', 'profile_id']) {
+  const profileColumns = [
+    'perfil',
+    'profile',
+    'profile_id'
+  ];
+
+  for (const profileColumn of profileColumns) {
     try {
       const { error } = await supabase
         .from('robo_whatsapp_chaves')
         .delete()
         .eq(profileColumn, profile);
 
-      if (!error) return;
+      if (!error) return true;
 
     } catch (_) {}
   }
+
+  return false;
 }
 
-async function deleteAuthTableValue(profile, key) {
-  if (!supabase) return;
+async function deleteAuthTableValue(
+  profile,
+  keyName
+) {
+  if (!supabase) return false;
 
-  for (const profileColumn of ['perfil', 'profile', 'profile_id']) {
-    for (const keyColumn of ['chave', 'key', 'nome']) {
+  const profileColumns = [
+    'perfil',
+    'profile',
+    'profile_id'
+  ];
+
+  const keyColumns = [
+    'chave',
+    'key',
+    'nome'
+  ];
+
+  for (const profileColumn of profileColumns) {
+    for (const keyColumn of keyColumns) {
       try {
         const { error } = await supabase
           .from('robo_whatsapp_chaves')
           .delete()
           .eq(profileColumn, profile)
-          .eq(keyColumn, key);
+          .eq(keyColumn, keyName);
 
-        if (!error) return;
+        if (!error) return true;
 
       } catch (_) {}
     }
   }
+
+  return false;
 }
 
-// Estado de autenticação com cache local e persistência no Supabase.
+
+// ======================================================
+// ESTADO DE AUTENTICAÇÃO DO WHATSAPP
+// ======================================================
+
 async function createSupabaseAuthState(profile) {
   const data = getData(profile);
-  const auth = data.whatsappAuth || {
-    creds: null,
-    keys: {}
-  };
 
-  const storedCreds = await readAuthTableValue(
+  const memoryAuth =
+    data.whatsappAuth || {
+      creds: null,
+      keys: {}
+    };
+
+  let creds = null;
+
+  const remoteCreds = await readAuthTableValue(
     profile,
     'creds'
   );
 
-  const creds = storedCreds
-    ? deserializeAuth(storedCreds)
-    : (
-        auth.creds
-          ? deserializeAuth(auth.creds)
-          : initAuthCreds()
-      );
+  if (remoteCreds) {
+    creds = deserializeAuth(remoteCreds);
+  }
 
-  const keys = auth.keys || {};
+  if (!creds && memoryAuth.creds) {
+    creds = memoryAuth.creds;
+  }
 
-  authRegistered.set(
-    profile,
-    Boolean(creds.registered)
-  );
+  if (!creds) {
+    creds = initAuthCreds();
+  }
 
-  const persistCreds = async () => {
-    try {
-      const serialized = serializeAuth(creds);
-
-      data.whatsappAuth = {
-        creds: serialized,
-        keys
-      };
-
-      await writeAuthTableValue(
-        profile,
-        'creds',
-        serialized
-      );
-
-      await saveProfile(profile);
-
-      authRegistered.set(
-        profile,
-        Boolean(creds.registered)
-      );
-
-    } catch (error) {
-      logger.error(
-        { profile, error: error.message },
-        'Falha ao salvar credenciais do WhatsApp'
-      );
-    }
+  const keysCache = {
+    ...(memoryAuth.keys || {})
   };
 
   const keyStore = {
-    get: async (type, ids) => {
+    async get(type, ids) {
       const result = {};
 
       for (const id of ids) {
-        const storageKey = `${type}-${id}`;
+        const cacheKey = `${type}:${id}`;
 
-        let stored = keys[storageKey];
-
-        if (stored == null) {
-          stored = await readAuthTableValue(
-            profile,
-            storageKey
-          );
+        if (
+          Object.prototype.hasOwnProperty.call(
+            keysCache,
+            cacheKey
+          )
+        ) {
+          result[id] = keysCache[cacheKey];
+          continue;
         }
 
-        if (stored !== undefined && stored !== null) {
-          result[id] = deserializeAuth(stored);
+        const remote = await readAuthTableValue(
+          profile,
+          cacheKey
+        );
+
+        const parsed = deserializeAuth(remote);
+
+        if (parsed !== null && parsed !== undefined) {
+          keysCache[cacheKey] = parsed;
+          result[id] = parsed;
         }
       }
 
       return result;
     },
 
-    set: async dataToSet => {
-      const pendingWrites = [];
+    async set(dataToSet) {
+      const writes = [];
 
-      for (const [type, entries] of Object.entries(dataToSet || {})) {
-        for (const [id, value] of Object.entries(entries || {})) {
-          const storageKey = `${type}-${id}`;
+      for (const [type, entries] of Object.entries(
+        dataToSet || {}
+      )) {
+        for (const [id, value] of Object.entries(
+          entries || {}
+        )) {
+          const cacheKey = `${type}:${id}`;
 
-          if (value == null) {
-            delete keys[storageKey];
+          if (value === null || value === undefined) {
+            delete keysCache[cacheKey];
 
-            pendingWrites.push(
-              deleteAuthTableValue(profile, storageKey)
+            writes.push(
+              deleteAuthTableValue(profile, cacheKey)
             );
 
           } else {
-            const serialized = serializeAuth(value);
+            keysCache[cacheKey] = value;
 
-            keys[storageKey] = serialized;
-
-            pendingWrites.push(
+            writes.push(
               writeAuthTableValue(
                 profile,
-                storageKey,
-                serialized
+                cacheKey,
+                value
               )
             );
           }
         }
       }
 
-      data.whatsappAuth = {
-        creds: data.whatsappAuth?.creds || serializeAuth(creds),
-        keys
-      };
+      await Promise.allSettled(writes);
 
-      await Promise.allSettled(pendingWrites);
+      data.whatsappAuth = {
+        creds,
+        keys: keysCache
+      };
 
       await saveProfile(profile);
     }
   };
 
+  async function persistCreds() {
+    data.whatsappAuth = {
+      creds,
+      keys: keysCache
+    };
+
+    await Promise.allSettled([
+      writeAuthTableValue(
+        profile,
+        'creds',
+        creds
+      ),
+      saveProfile(profile)
+    ]);
+  }
+
+  const cachedKeyStore =
+    typeof makeCacheableSignalKeyStore === 'function'
+      ? makeCacheableSignalKeyStore(
+          keyStore,
+          logger
+        )
+      : keyStore;
+
   return {
     state: {
       creds,
-      keys: makeCacheableSignalKeyStore
-        ? makeCacheableSignalKeyStore(keyStore, logger)
-        : keyStore
+      keys: cachedKeyStore
     },
     saveCreds: persistCreds
   };
-}function setStatus(profile, status, extra = {}) {
+}
+
+
+// ======================================================
+// STATUS DO WHATSAPP
+// ======================================================
+
+function setStatus(
+  profile,
+  status,
+  extra = {}
+) {
   connectionStatus.set(profile, {
     status,
     updatedAt: new Date().toISOString(),
@@ -998,12 +1502,41 @@ function getStatus(profile) {
   };
 }
 
-// Inicializa apenas um socket por perfil e evita conexões duplicadas.
+
+// ======================================================
+// LIMPAR AUTENTICAÇÃO DO WHATSAPP
+// ======================================================
+
+async function clearWhatsAppAuth(profile) {
+  const data = getData(profile);
+
+  data.whatsappAuth = {
+    creds: null,
+    keys: {}
+  };
+
+  qrCache.delete(profile);
+  pairingCache.delete(profile);
+  authRegistered.delete(profile);
+
+  await deleteAuthTableValues(profile);
+  await saveProfile(profile);
+}
+
+
+// ======================================================
+// CONEXÃO WHATSAPP - BAILEYS
+// ======================================================
+
 async function startWhatsApp(profile) {
+  if (!PROFILE_IDS.includes(profile)) {
+    throw new Error('Perfil inválido.');
+  }
+
   if (sockets.has(profile)) {
     return {
       ok: true,
-      status: getStatus(profile).status
+      status: getStatus(profile)
     };
   }
 
@@ -1012,75 +1545,78 @@ async function startWhatsApp(profile) {
   }
 
   const startPromise = (async () => {
-    setStatus(profile, 'starting');
-
     await loadProfile(profile);
 
-    const auth = await createSupabaseAuthState(profile);
+    setStatus(profile, 'connecting');
+
+    const auth = await createSupabaseAuthState(
+      profile
+    );
 
     let version;
 
-    if (typeof fetchLatestBaileysVersion === 'function') {
-      try {
-        const latest = await fetchLatestBaileysVersion();
-
-        if (latest?.version) {
-          version = latest.version;
-
-          logger.info(
-            {
-              profile,
-              version,
-              isLatest: latest.isLatest
-            },
-            'Versão do WhatsApp carregada'
-          );
-        }
-
-      } catch (error) {
-        logger.warn(
-          {
-            profile,
-            error: error.message
-          },
-          'Não foi possível consultar a versão atual do WhatsApp; usando padrão do Baileys'
-        );
-      }
+    try {
+      const latest = await fetchLatestBaileysVersion();
+      version = latest.version;
+    } catch (error) {
+      logger.warn(
+        {
+          error: error.message
+        },
+        'Não foi possível consultar a versão mais recente do WhatsApp.'
+      );
     }
 
-    const sock = makeWASocket({
-      ...(version ? { version } : {}),
+    const socketOptions = {
       auth: auth.state,
-      logger: pino({ level: 'silent' }),
+
+      logger: pino({
+        level: 'silent'
+      }),
+
       printQRInTerminal: false,
-      browser: Browsers?.macOS
-        ? Browsers.macOS('Chrome')
-        : ['MEDEIROS DIGITAL', 'Chrome', '1.0.0'],
+
+      browser:
+        typeof Browsers?.macOS === 'function'
+          ? Browsers.macOS('Chrome')
+          : [
+              'MEDEIROS DIGITAL',
+              'Chrome',
+              '1.0.0'
+            ],
+
       connectTimeoutMs: 60000,
       defaultQueryTimeoutMs: 60000,
       keepAliveIntervalMs: 25000,
+
       markOnlineOnConnect: false,
       syncFullHistory: false,
       generateHighQualityLinkPreview: true
-    });
+    };
+
+    if (version) {
+      socketOptions.version = version;
+    }
+
+    const sock = makeWASocket(socketOptions);
 
     sockets.set(profile, sock);
 
-    sock.ev.on('creds.update', () => {
-      auth.saveCreds().catch(error => {
+    sock.ev.on('creds.update', async () => {
+      try {
+        await auth.saveCreds();
+      } catch (error) {
         logger.error(
           {
             profile,
             error: error.message
           },
-          'Erro ao persistir atualização de autenticação'
+          'Erro ao salvar credenciais do WhatsApp'
         );
-      });
+      }
     });
 
     sock.ev.on('connection.update', async update => {
-      if (sockets.get(profile) !== sock) return;
-
       const {
         connection,
         lastDisconnect,
@@ -1089,12 +1625,13 @@ async function startWhatsApp(profile) {
 
       if (qr) {
         try {
-          const qrData = await QRCode.toDataURL(qr);
+          const qrDataUrl = await QRCode.toDataURL(qr);
 
-          if (sockets.get(profile) === sock) {
-            qrCache.set(profile, qrData);
-            setStatus(profile, 'qr');
-          }
+          qrCache.set(profile, qrDataUrl);
+
+          setStatus(profile, 'qr', {
+            message: 'Escaneie o QR Code pelo WhatsApp.'
+          });
 
         } catch (error) {
           logger.error(
@@ -1115,83 +1652,91 @@ async function startWhatsApp(profile) {
         qrCache.delete(profile);
         pairingCache.delete(profile);
 
+        reconnectAttempts.set(profile, 0);
         authRegistered.set(profile, true);
 
-        setStatus(profile, 'connected', {
-          phone: sock.user?.id || null
-        });
+        setStatus(profile, 'connected');
 
         logger.info(
           { profile },
-          'WhatsApp conectado'
+          'WhatsApp conectado.'
         );
       }
 
       if (connection === 'close') {
-        if (sockets.get(profile) === sock) {
+        const currentSocket = sockets.get(profile);
+
+        if (currentSocket === sock) {
           sockets.delete(profile);
         }
 
         qrCache.delete(profile);
-        pairingCache.delete(profile);
 
-        const code = lastDisconnect?.error?.output?.statusCode;
+        const statusCode =
+          lastDisconnect?.error?.output?.statusCode ||
+          lastDisconnect?.error?.statusCode ||
+          null;
 
-        const loggedOut = code === DisconnectReason.loggedOut;
+        const loggedOut =
+          statusCode === DisconnectReason.loggedOut ||
+          statusCode === 401;
 
-        setStatus(
-          profile,
-          loggedOut ? 'logged_out' : 'disconnected',
-          {
-            reason: code || null,
-            message: lastDisconnect?.error?.message || null
-          }
-        );
+        if (loggedOut) {
+          setStatus(profile, 'logged_out', {
+            reason: statusCode,
+            message: 'WhatsApp desconectado. É necessário conectar novamente.'
+          });
+
+          await clearWhatsAppAuth(profile);
+
+          logger.warn(
+            { profile, statusCode },
+            'Sessão do WhatsApp encerrada.'
+          );
+
+          return;
+        }
+
+        setStatus(profile, 'disconnected', {
+          reason: statusCode,
+          message: 'Conexão do WhatsApp encerrada.'
+        });
 
         logger.warn(
           {
             profile,
-            code: code || null,
-            loggedOut,
-            error: lastDisconnect?.error?.message || null
+            statusCode
           },
-          'Conexão do WhatsApp encerrada'
+          'WhatsApp desconectado.'
         );
 
         if (
-          !loggedOut &&
-          process.env.WHATSAPP_AUTO_RECONNECT !== 'false'
+          WHATSAPP_AUTO_RECONNECT &&
+          !reconnectTimers.has(profile)
         ) {
-          const configuredDelay = Number(
-            process.env.WHATSAPP_RECONNECT_MS || 5000
+          const attempts =
+            (reconnectAttempts.get(profile) || 0) + 1;
+
+          reconnectAttempts.set(profile, attempts);
+
+          const delay = Math.min(
+            60000,
+            3000 * Math.pow(2, Math.min(attempts - 1, 4))
           );
 
-          const delay = Math.max(
-            2000,
-            Math.min(30000, configuredDelay)
-          );
-
-          const oldTimer = reconnectTimers.get(profile);
-
-          if (oldTimer) {
-            clearTimeout(oldTimer);
-          }
-
-          const timer = setTimeout(async () => {
+          const timer = setTimeout(() => {
             reconnectTimers.delete(profile);
 
-            try {
-              await startWhatsApp(profile);
-
-            } catch (error) {
+            startWhatsApp(profile).catch(error => {
               logger.error(
                 {
                   profile,
                   error: error.message
                 },
-                'Falha ao reconectar WhatsApp'
+                'Falha na reconexão automática'
               );
-            }
+            });
+
           }, delay);
 
           reconnectTimers.set(profile, timer);
@@ -1201,7 +1746,7 @@ async function startWhatsApp(profile) {
 
     return {
       ok: true,
-      status: getStatus(profile).status
+      status: getStatus(profile)
     };
   })();
 
@@ -1215,376 +1760,508 @@ async function startWhatsApp(profile) {
   }
 }
 
-async function clearWhatsAppAuth(profile) {
-  const data = getData(profile);
 
-  data.whatsappAuth = {
-    creds: null,
-    keys: {}
-  };
-
-  await deleteAuthTableValues(profile);
-  await saveProfile(profile);
-
-  qrCache.delete(profile);
-  pairingCache.delete(profile);
-  authRegistered.delete(profile);
-}
+// ======================================================
+// NORMALIZAÇÃO DOS DESTINOS
+// ======================================================
 
 function publicDestination(destination) {
+  const classified = classifyGroupNiche(
+    destination.name ||
+    destination.subject ||
+    ''
+  );
+
   return {
     ...destination,
-    niche: destination.nicheId === 'auto'
-      ? classifyGroupNiche(destination.name)
-      : (
-          NICHE_DEFINITIONS.find(
-            n => n.id === destination.nicheId
-          ) ||
-          (
-            destination.nicheId === 'all'
-              ? {
-                  id: 'all',
-                  label: 'Todos os nichos'
-                }
-              : {
-                  id: destination.nicheId,
-                  label: destination.nicheId
-                }
-            )
-        )
+
+    niche:
+      destination.nicheId &&
+      destination.nicheId !== 'auto'
+        ? (
+            NICHE_DEFINITIONS.find(
+              item => item.id === destination.nicheId
+            )?.label ||
+            destination.nicheId
+          )
+        : classified.label
   };
 }
 
+
+// ======================================================
+// NORMALIZAÇÃO DOS PRODUTOS
+// ======================================================
+
 function normalizeProduct(product) {
-  const item = { ...product };
+  const item = product || {};
 
-  item.id = String(
-    item.id ||
-    item.productId ||
-    item.itemId ||
-    crypto.randomUUID()
-  );
-
-  item.productName = String(
-    item.productName ||
-    item.name ||
-    item.title ||
-    'Oferta Shopee'
-  );
-
-  item.productLink = String(
-    item.productLink ||
-    item.offerLink ||
-    item.productUrl ||
-    item.url ||
-    ''
-  );
-
-  item.imageUrl = String(
-    item.imageUrl ||
-    item.image ||
-    item.image_url ||
-    ''
-  );
-
-  item.price = item.price ??
+  const price = item.price ??
+    item.productPrice ??
     item.priceMin ??
-    item.price_min ??
-    null;
+    '';
 
-  const discountRate = Number(
-    item.priceDiscountRate ||
-    item.discountRate ||
-    0
-  );
+  const oldPrice = item.oldPrice ??
+    item.originalPrice ??
+    item.priceBeforeDiscount ??
+    '';
 
-  const currentPrice = Number(item.price);
+  const discount = item.discount ??
+    item.discountRate ??
+    '';
 
-  if (
-    !item.oldPrice &&
-    discountRate > 0 &&
-    discountRate < 100 &&
-    currentPrice > 0
-  ) {
-    item.oldPrice = (
-      currentPrice / (1 - discountRate / 100)
-    ).toFixed(2);
-  }
+  return {
+    id: String(
+      item.id ||
+      item.productId ||
+      crypto.randomUUID()
+    ),
 
-  if (!item.discount && discountRate > 0) {
-    item.discount = `${discountRate}% de desconto`;
-  }
+    productName: String(
+      item.productName ||
+      item.name ||
+      item.title ||
+      'Produto Shopee'
+    ),
 
-  item.createdAt = item.createdAt || new Date().toISOString();
+    name: String(
+      item.name ||
+      item.productName ||
+      item.title ||
+      'Produto Shopee'
+    ),
 
-  return item;
+    productLink: String(
+      item.productLink ||
+      item.link ||
+      item.url ||
+      item.offerLink ||
+      ''
+    ),
+
+    imageUrl: String(
+      item.imageUrl ||
+      item.image ||
+      item.imageUrlList?.[0] ||
+      ''
+    ),
+
+    price: String(price),
+    oldPrice: String(oldPrice),
+    discount: String(discount),
+
+    category: String(
+      item.category ||
+      item.categoryName ||
+      ''
+    ),
+
+    description: String(
+      item.description ||
+      ''
+    ),
+
+    createdAt:
+      item.createdAt ||
+      new Date().toISOString()
+  };
 }
+
+
+// ======================================================
+// TEXTO DA OFERTA
+// ======================================================
 
 function buildOfferMessage(product) {
-  const price = product.price != null
-    ? `R$ ${String(product.price).replace('.', ',')}`
-    : '';
+  const item = normalizeProduct(product);
 
-  const oldPrice = product.oldPrice || product.priceMax || '';
+  const lines = [
+    '🔥 *OFERTA IMPERDÍVEL* 🔥',
+    '',
+    `🛍️ *${item.productName}*`
+  ];
 
-  const discount = product.discount
-    ? `🔥 ${product.discount}\n`
-    : '';
+  if (item.oldPrice) {
+    lines.push(`De: R$ ${item.oldPrice}`);
+  }
 
-  return `🔥 *OFERTA IMPERDÍVEL* 🔥\n\n🛍️ *${product.productName}*\n${oldPrice ? `De: R$ ${String(oldPrice).replace('.', ',')}\n` : ''}${price ? `Por: *${price}*\n` : ''}${discount}\n🔗 ${product.productLink || 'Consulte o link da oferta'}`;
+  if (item.price) {
+    lines.push(`Por: *R$ ${item.price}*`);
+  }
+
+  if (item.discount) {
+    lines.push(`🔥 ${item.discount}`);
+  }
+
+  lines.push('');
+
+  if (item.productLink) {
+    lines.push(`🔗 ${item.productLink}`);
+  }
+
+  lines.push('');
+  lines.push('⚡ Aproveite antes que acabe!');
+
+  return lines.join('\n');
 }
 
-// Envio corrigido: normaliza o JID e tenta texto se a imagem falhar.
-async function sendToDestination(profile, destination, product) {
+
+// ======================================================
+// ENVIO PARA UM DESTINO WHATSAPP
+// ======================================================
+
+async function sendToDestination(
+  profile,
+  destination,
+  product
+) {
   const sock = sockets.get(profile);
 
   if (
     !sock ||
     getStatus(profile).status !== 'connected'
   ) {
-    throw new Error('WhatsApp não está conectado.');
+    throw new Error(
+      'WhatsApp não está conectado.'
+    );
   }
 
-  const rawJid =
+  const target =
     destination?.groupId ||
+    destination?.jid ||
     destination?.phone ||
     destination?.id ||
     '';
 
-  const jid = normalizeWhatsAppJid(rawJid);
+  const jid = normalizeWhatsAppJid(target);
 
   if (!jid) {
     throw new Error(
-      `ID de grupo ou telefone inválido: ${rawJid || 'vazio'}`
+      'Número ou ID do grupo inválido.'
     );
   }
 
-  const text = buildOfferMessage(product);
+  const item = normalizeProduct(product);
+
+  const caption = buildOfferMessage(item);
+
+  let result;
 
   if (
-    product.imageUrl &&
-    /^https?:\/\//i.test(product.imageUrl)
+    item.imageUrl &&
+    /^https?:\/\//i.test(item.imageUrl)
   ) {
     try {
-      const result = await sock.sendMessage(jid, {
-        image: { url: product.imageUrl },
-        caption: text
-      });
-
-      if (result) {
-        logger.info(
-          {
-            profile,
-            destination: jid,
-            messageId: result.key?.id || null,
-            type: 'image'
+      result = await sock.sendMessage(
+        jid,
+        {
+          image: {
+            url: item.imageUrl
           },
-          'Oferta enviada ao WhatsApp'
-        );
+          caption
+        }
+      );
 
-        return result;
-      }
-
-    } catch (imageError) {
+    } catch (error) {
       logger.warn(
         {
           profile,
-          destination: jid,
-          error: imageError.message
+          jid,
+          error: error.message
         },
-        'Falha no envio da imagem; tentando enviar somente texto'
+        'Falha ao enviar imagem; tentando enviar texto.'
+      );
+
+      result = await sock.sendMessage(
+        jid,
+        {
+          text: caption
+        }
       );
     }
-  }
 
-  const result = await sock.sendMessage(jid, {
-    text
-  });
-
-  if (!result) {
-    throw new Error('O WhatsApp não confirmou o envio da mensagem.');
+  } else {
+    result = await sock.sendMessage(
+      jid,
+      {
+        text: caption
+      }
+    );
   }
 
   logger.info(
     {
       profile,
-      destination: jid,
-      messageId: result.key?.id || null,
-      type: 'text'
+      jid,
+      messageId: result?.key?.id || null
     },
-    'Mensagem enviada ao WhatsApp'
+    'Mensagem aceita pelo WhatsApp para envio.'
   );
 
   return result;
-}
+}// ======================================================
+// CREDENCIAIS DA SHOPEE
+// ======================================================
 
 function getShopeeCredentials(profile) {
   const data = getData(profile);
 
-  const stored = decryptObject(data.shopeeCredentials);
-
-  const envId =
-    process.env.SHOPEE_APP_ID ||
-    process.env.SHOPEE_PARTNER_ID ||
-    '';
-
-  const envSecret =
-    process.env.SHOPEE_APP_SECRET ||
-    process.env.SHOPEE_PARTNER_KEY ||
-    '';
-
-  const credentials = stored || {
-    appId: envId,
-    appSecret: envSecret
-  };
+  const saved = decryptObject(
+    data.shopeeCredentials
+  );
 
   return {
     appId: String(
-      credentials.appId ||
-      credentials.partnerId ||
-      credentials.partner_id ||
-      envId
+      saved?.appId ||
+      process.env.SHOPEE_APP_ID ||
+      process.env.SHOPEE_PARTNER_ID ||
+      ''
     ),
+
     appSecret: String(
-      credentials.appSecret ||
-      credentials.partnerKey ||
-      credentials.partner_key ||
-      envSecret
+      saved?.appSecret ||
+      process.env.SHOPEE_APP_SECRET ||
+      process.env.SHOPEE_PARTNER_KEY ||
+      ''
     )
   };
 }
 
-async function shopeeGraphQL(profile, query, variables = {}) {
+
+// ======================================================
+// REQUISIÇÃO GRAPHQL DA SHOPEE
+// ======================================================
+
+async function shopeeGraphQL(
+  profile,
+  query,
+  variables = {}
+) {
   const credentials = getShopeeCredentials(profile);
 
-  if (!credentials.appId || !credentials.appSecret) {
+  if (
+    !credentials.appId ||
+    !credentials.appSecret
+  ) {
     throw new Error(
-      'Configure o App ID e o Secret da Shopee no painel.'
+      'Configure o App ID e o App Secret da Shopee.'
     );
   }
 
-  const timestamp = Math.floor(Date.now() / 1000);
+  const endpoint =
+    process.env.SHOPEE_API_URL ||
+    'https://open-api.affiliate.shopee.com.br/graphql';
+
+  const timestamp = Math.floor(
+    Date.now() / 1000
+  );
 
   const payload = JSON.stringify({
     query,
     variables
   });
 
-  const base =
-    `${credentials.appId}${timestamp}${payload}${credentials.appSecret}`;
-
   const signature = crypto
     .createHash('sha256')
-    .update(base, 'utf8')
+    .update(
+      `${credentials.appId}${timestamp}${payload}${credentials.appSecret}`
+    )
     .digest('hex');
 
   const authorization =
-    `SHA256 Credential=${credentials.appId}, Timestamp=${timestamp}, Signature=${signature}`;
+    `SHA256 Credential=${credentials.appId}, ` +
+    `Timestamp=${timestamp}, ` +
+    `Signature=${signature}`;
 
-  const response = await fetch(
-    process.env.SHOPEE_API_URL ||
-      'https://open-api.affiliate.shopee.com.br/graphql',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: authorization
-      },
-      body: payload
-    }
-  );
+  const response = await fetch(endpoint, {
+    method: 'POST',
 
-  const result = await response.json().catch(() => ({}));
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': authorization
+    },
 
-  if (!response.ok || result.errors?.length) {
+    body: payload,
+
+    signal: AbortSignal.timeout(30000)
+  });
+
+  const responseText = await response.text();
+
+  let result;
+
+  try {
+    result = JSON.parse(responseText);
+  } catch (_) {
     throw new Error(
-      result.errors?.[0]?.message ||
-      `Shopee respondeu HTTP ${response.status}`
+      'A Shopee retornou uma resposta inválida.'
     );
   }
 
-  return result.data || result;
+  if (!response.ok) {
+    throw new Error(
+      result?.message ||
+      result?.error ||
+      `Erro HTTP da Shopee: ${response.status}`
+    );
+  }
+
+  if (
+    Array.isArray(result?.errors) &&
+    result.errors.length
+  ) {
+    throw new Error(
+      result.errors
+        .map(item => item.message)
+        .filter(Boolean)
+        .join('; ')
+    );
+  }
+
+  return result?.data || result;
 }
 
-async function fetchShopeeOffers(profile, limit = 10) {
+
+// ======================================================
+// BUSCAR OFERTAS NA SHOPEE
+// ======================================================
+
+async function fetchShopeeOffers(
+  profile,
+  limit = 10
+) {
   const safeLimit = Math.max(
     1,
     Math.min(50, Number(limit) || 10)
   );
 
-  const query = `query {
-    productOfferV2(
-      listType: 1,
-      sortType: 5,
-      page: 1,
-      limit: ${safeLimit}
-    ) {
-      nodes {
-        itemId
-        productName
-        productLink
-        offerLink
-        imageUrl
-        priceMin
-        priceMax
-        priceDiscountRate
-        sales
-        ratingStar
-        commissionRate
-        sellerCommissionRate
-        shopeeCommissionRate
-        commission
-        shopId
-        shopName
-        shopType
-      }
-      pageInfo {
-        page
-        limit
-        hasNextPage
+  const query = `
+    query ProductOffer($limit: Int!) {
+      productOfferV2(
+        listType: 0,
+        sortType: 2,
+        page: 1,
+        limit: $limit
+      ) {
+        nodes {
+          productName
+          itemId
+          priceMin
+          priceMax
+          priceDiscountRate
+          imageUrl
+          productLink
+          offerLink
+          sales
+          ratingStar
+          commissionRate
+          categoryName
+        }
       }
     }
-  }`;
+  `;
 
-  const data = await shopeeGraphQL(profile, query);
+  const result = await shopeeGraphQL(
+    profile,
+    query,
+    {
+      limit: safeLimit
+    }
+  );
 
   const nodes =
-    data?.productOfferV2?.nodes ||
-    data?.productOfferV2 ||
+    result?.productOfferV2?.nodes ||
+    result?.productOfferV2?.products ||
     [];
 
-  return (
-    Array.isArray(nodes) ? nodes : []
-  ).map(normalizeProduct);
+  if (!Array.isArray(nodes)) {
+    return [];
+  }
+
+  return nodes.map(item => {
+    const price = item.priceMin ??
+      item.priceMax ??
+      '';
+
+    const discount = item.priceDiscountRate;
+
+    return normalizeProduct({
+      id: item.itemId,
+
+      productName: item.productName,
+
+      name: item.productName,
+
+      price,
+
+      oldPrice: '',
+
+      discount:
+        discount !== undefined &&
+        discount !== null
+          ? `${discount}% OFF`
+          : '',
+
+      imageUrl: item.imageUrl,
+
+      productLink:
+        item.offerLink ||
+        item.productLink ||
+        '',
+
+      category: item.categoryName,
+
+      description: '',
+
+      sales: item.sales,
+
+      rating: item.ratingStar,
+
+      commissionRate: item.commissionRate
+    });
+  });
 }
+
+
+// ======================================================
+// PROCESSAMENTO DA FILA DE OFERTAS
+// ======================================================
 
 async function processQueue(profile) {
   const data = getData(profile);
 
-  const item = data.queue.find(
-    entry => entry.status === 'pending'
+  const current = data.queue.find(
+    item => item.status === 'pending'
   );
 
-  if (!item) return;
+  if (!current) {
+    return {
+      ok: false,
+      message: 'Não existem ofertas pendentes.'
+    };
+  }
 
-  item.status = 'processing';
-  item.startedAt = new Date().toISOString();
+  current.status = 'processing';
+  current.startedAt = new Date().toISOString();
 
   await saveProfile(profile);
 
+  const product = normalizeProduct(
+    current.product || current
+  );
+
+  const targets = getAutomationTargets(data);
+
+  const results = [];
+
   try {
-    const product = normalizeProduct(
-      item.product || item
-    );
+    if (!targets.length) {
+      throw new Error(
+        'Nenhum grupo ou destino está selecionado.'
+      );
+    }
 
-    const destinations = getAutomationTargets(data);
-
-    let sent = 0;
-
-    const results = [];
-
-    for (const destination of destinations) {
+    for (const destination of targets) {
       const match = destinationMatchesProduct(
         destination,
         product
@@ -1592,8 +2269,8 @@ async function processQueue(profile) {
 
       if (!match.matches) {
         results.push({
-          destinationId: destination.id,
-          sent: false,
+          destination: destination.name || destination.id,
+          status: 'skipped',
           reason: match.reason
         });
 
@@ -1601,79 +2278,151 @@ async function processQueue(profile) {
       }
 
       try {
-        await sendToDestination(
+        const sent = await sendToDestination(
           profile,
           destination,
           product
         );
 
-        sent++;
-
         results.push({
-          destinationId: destination.id,
-          sent: true
+          destination: destination.name || destination.id,
+          status: 'accepted',
+          messageId: sent?.key?.id || null
         });
-
-        await sleep(1200);
 
       } catch (error) {
         results.push({
-          destinationId: destination.id,
-          sent: false,
-          reason: error.message
+          destination: destination.name || destination.id,
+          status: 'error',
+          message: error.message
         });
       }
+
+      await sleep(1200);
     }
 
-    item.status = sent ? 'sent' : 'skipped';
-    item.sentAt = new Date().toISOString();
-    item.results = results;
+    const accepted = results.filter(
+      item => item.status === 'accepted'
+    );
+
+    const errors = results.filter(
+      item => item.status === 'error'
+    );
+
+    if (accepted.length > 0) {
+      current.status = 'sent';
+      current.sentAt = new Date().toISOString();
+
+      current.results = results;
+
+      current.product = product;
+
+      const key = String(
+        current.productKey ||
+        product.id ||
+        product.productLink ||
+        product.productName
+      );
+
+      if (key) {
+        data.sentProducts[key] = {
+          sentAt: current.sentAt,
+          productName: product.productName
+        };
+      }
+
+      data.automation.lastSentAt =
+        current.sentAt;
+
+    } else if (errors.length > 0) {
+      current.status = 'error';
+
+      current.error = errors
+        .map(item => item.message)
+        .join('; ');
+
+      current.results = results;
+
+    } else {
+      current.status = 'skipped';
+
+      current.error =
+        'Nenhum destino compatível com o nicho do produto.';
+
+      current.results = results;
+    }
+
+    current.finishedAt = new Date().toISOString();
+
+    await saveProfile(profile);
+
+    return {
+      ok: accepted.length > 0,
+      status: current.status,
+      results
+    };
 
   } catch (error) {
-    item.status = 'error';
-    item.error = error.message;
-  }
+    current.status = 'error';
+    current.error = error.message;
+    current.finishedAt = new Date().toISOString();
 
-  await saveProfile(profile);
+    await saveProfile(profile);
+
+    return {
+      ok: false,
+      status: 'error',
+      message: error.message,
+      results
+    };
+  }
 }
+
+
+// ======================================================
+// CONFIGURAÇÕES DA AUTOMAÇÃO
+// ======================================================
 
 function isAutomationActive(automation) {
   return Boolean(
-    automation?.enabled ||
-    automation?.active
+    automation?.active ||
+    automation?.enabled
   );
 }
 
-// Intervalo mínimo de 10 segundos.
 function getAutomationIntervalMs(automation) {
-  const seconds = Number(automation?.intervalSeconds);
+  const seconds = Number(
+    automation?.intervalSeconds
+  );
 
   if (
-    automation?.intervalSeconds !== undefined &&
-    automation?.intervalSeconds !== null &&
     Number.isFinite(seconds) &&
     seconds > 0
   ) {
     return Math.max(
-      10,
-      Math.min(86400, Math.round(seconds))
-    ) * 1000;
+      10000,
+      Math.min(86400000, seconds * 1000)
+    );
   }
 
-  const rawMinutes = Number(
-    automation?.intervalMinutes || 30
+  const minutes = Number(
+    automation?.intervalMinutes
   );
 
-  const minutes = Number.isFinite(rawMinutes)
-    ? Math.max(1, Math.min(1440, rawMinutes))
-    : 30;
-
-  return minutes * 60 * 1000;
+  return Math.max(
+    60000,
+    Math.min(
+      86400000,
+      (Number.isFinite(minutes) && minutes > 0
+        ? minutes
+        : 30) * 60000
+    )
+  );
 }
 
 function currentTimeInAutomationZone() {
   try {
-    return new Intl.DateTimeFormat('en-GB', {
+    return new Intl.DateTimeFormat('pt-BR', {
       timeZone: AUTOMATION_TIME_ZONE,
       hour: '2-digit',
       minute: '2-digit',
@@ -1694,26 +2443,53 @@ function isInsideAutomationWindow(automation) {
     automation?.endTime || ''
   ).trim();
 
-  if (!start || !end) return true;
+  if (!start && !end) return true;
+
+  const validTime = value =>
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 
   if (
-    !/^([01]\d|2[0-3]):[0-5]\d$/.test(start) ||
-    !/^([01]\d|2[0-3]):[0-5]\d$/.test(end)
+    !validTime(start) ||
+    !validTime(end)
   ) {
     return true;
   }
 
-  if (start === end) return true;
-
   const now = currentTimeInAutomationZone();
 
-  if (start < end) {
-    return now >= start && now <= end;
+  const currentMinutes =
+    Number(now.slice(0, 2)) * 60 +
+    Number(now.slice(3, 5));
+
+  const startMinutes =
+    Number(start.slice(0, 2)) * 60 +
+    Number(start.slice(3, 5));
+
+  const endMinutes =
+    Number(end.slice(0, 2)) * 60 +
+    Number(end.slice(3, 5));
+
+  if (startMinutes === endMinutes) {
+    return true;
   }
 
-  // Também permite horários que passam da meia-noite.
-  return now >= start || now <= end;
+  if (startMinutes < endMinutes) {
+    return (
+      currentMinutes >= startMinutes &&
+      currentMinutes <= endMinutes
+    );
+  }
+
+  return (
+    currentMinutes >= startMinutes ||
+    currentMinutes <= endMinutes
+  );
 }
+
+
+// ======================================================
+// EXECUTAR AUTOMAÇÃO
+// ======================================================
 
 async function runAutomation(profile) {
   if (automationLocks.has(profile)) {
@@ -1726,312 +2502,363 @@ async function runAutomation(profile) {
   automationLocks.add(profile);
 
   const data = getData(profile);
+  const automation = data.automation || {};
 
   try {
-    if (!isAutomationActive(data.automation)) {
+    if (!isAutomationActive(automation)) {
       return {
         ok: false,
-        message: 'Automação pausada.'
+        message: 'Automação está desativada.'
       };
     }
 
-    if (!isInsideAutomationWindow(data.automation)) {
+    if (!isInsideAutomationWindow(automation)) {
       return {
         ok: false,
-        message: 'Fora do horário configurado para a automação.'
+        message: 'Fora do horário configurado.'
       };
     }
 
-    if (
-      !sockets.has(profile) ||
-      getStatus(profile).status !== 'connected'
-    ) {
-      return {
-        ok: false,
-        message: 'Conecte o WhatsApp antes de iniciar a automação.'
-      };
+    if (getStatus(profile).status !== 'connected') {
+      throw new Error(
+        'Conecte o WhatsApp antes de executar a automação.'
+      );
     }
 
     const destinations = getAutomationTargets(data);
 
     if (!destinations.length) {
-      return {
-        ok: false,
-        message: 'Nenhum grupo ou destino foi selecionado para a automação.'
-      };
+      throw new Error(
+        'Nenhum grupo ou destino foi selecionado.'
+      );
     }
 
-    // Salva o início da execução para o agendador.
-    data.automation.lastRunAt = new Date().toISOString();
-    data.automation.lastError = null;
-
-    await saveProfile(profile);
-
-    await processQueue(profile);
-
-    const offers = await fetchShopeeOffers(
-      profile,
-      data.automation.maxProducts || 10
+    const maxProducts = Math.max(
+      1,
+      Math.min(
+        50,
+        Number(automation.maxProducts) || 10
+      )
     );
 
-    let sent = 0;
-    let errors = 0;
+    const products = await fetchShopeeOffers(
+      profile,
+      maxProducts
+    );
 
-    for (const product of offers) {
-      if (!product.productLink) continue;
+    if (!products.length) {
+      throw new Error(
+        'A Shopee não retornou ofertas.'
+      );
+    }
 
+    const sevenDaysAgo =
+      Date.now() - (7 * 24 * 60 * 60 * 1000);
+
+    let queued = 0;
+    let duplicated = 0;
+
+    for (const product of products) {
       const productKey = String(
-        product.id || product.productLink
+        product.id ||
+        product.productLink ||
+        product.productName
       );
 
-      for (const destination of destinations) {
-        const match = destinationMatchesProduct(
-          destination,
-          product
+      const previous =
+        data.sentProducts[productKey];
+
+      let previousDate = 0;
+
+      if (typeof previous === 'string') {
+        previousDate = Date.parse(previous) || 0;
+
+      } else if (
+        previous &&
+        typeof previous === 'object'
+      ) {
+        previousDate = Date.parse(
+          previous.sentAt ||
+          previous.date ||
+          ''
+        ) || 0;
+      }
+
+      if (previousDate > sevenDaysAgo) {
+        duplicated++;
+        continue;
+      }
+
+      const alreadyQueued = data.queue.some(item => {
+        const itemKey = String(
+          item.productKey ||
+          item.product?.id ||
+          item.product?.productLink ||
+          ''
         );
 
-        if (!match.matches) continue;
+        return (
+          itemKey === productKey &&
+          ['pending', 'processing'].includes(item.status)
+        );
+      });
 
-        const sentKey = `${destination.id}:${productKey}`;
-
-        // Evita enviar a mesma oferta novamente ao mesmo grupo.
-        if (data.sentProducts[sentKey]) continue;
-
-        try {
-          await sendToDestination(
-            profile,
-            destination,
-            product
-          );
-
-          data.sentProducts[sentKey] = new Date().toISOString();
-
-          sent++;
-
-          await sleep(1500);
-
-        } catch (error) {
-          errors++;
-
-          logger.warn(
-            {
-              profile,
-              destination: destination.name,
-              error: error.message
-            },
-            'Falha ao enviar oferta'
-          );
-        }
+      if (alreadyQueued) {
+        duplicated++;
+        continue;
       }
+
+      data.queue.push({
+        id: crypto.randomUUID(),
+        product,
+        productKey,
+        status: 'pending',
+        source: 'automation',
+        createdAt: new Date().toISOString()
+      });
+
+      queued++;
     }
-
-    const finishedAt = new Date().toISOString();
-
-    data.automation.lastRunAt = finishedAt;
-    data.automation.lastFoundCount = offers.length;
-    data.automation.lastSentCount = sent;
-
-    if (sent > 0) {
-      data.automation.lastSentAt = finishedAt;
-    }
-
-    data.automation.lastError = errors > 0
-      ? `${errors} envio(s) não foram concluídos. Confira os logs do servidor.`
-      : null;
-
-    data.products = offers;
-
-    // Mantém somente os 1.500 registros mais recentes.
-    const sentEntries = Object.entries(data.sentProducts)
-      .sort((a, b) =>
-        String(b[1]).localeCompare(String(a[1]))
-      )
-      .slice(0, 1500);
-
-    data.sentProducts = Object.fromEntries(sentEntries);
 
     await saveProfile(profile);
+
+    let processed = 0;
+    let sent = 0;
+    let failed = 0;
+    let skipped = 0;
+
+    while (
+      data.queue.some(
+        item => item.status === 'pending'
+      ) &&
+      processed < 100
+    ) {
+      const current = data.queue.find(
+        item => item.status === 'pending'
+      );
+
+      if (!current) break;
+
+      const result = await processQueue(profile);
+
+      processed++;
+
+      if (result.status === 'sent') {
+        sent++;
+
+      } else if (result.status === 'error') {
+        failed++;
+
+      } else if (result.status === 'skipped') {
+        skipped++;
+      }
+
+      await sleep(1500);
+    }
+
+    automation.lastRunAt =
+      new Date().toISOString();
+
+    automation.lastError = null;
+
+    await saveProfile(profile);
+
+    logger.info(
+      {
+        profile,
+        productsFound: products.length,
+        queued,
+        duplicated,
+        sent,
+        failed,
+        skipped
+      },
+      'Execução da automação finalizada.'
+    );
 
     return {
       ok: true,
-      found: offers.length,
+      productsFound: products.length,
+      queued,
+      duplicated,
+      processed,
       sent,
-      errors,
-      lastRunAt: data.automation.lastRunAt,
-      lastSentAt: data.automation.lastSentAt || null
+      failed,
+      skipped,
+      message: 'Automação finalizada.'
     };
 
   } catch (error) {
+    automation.lastError = error.message;
+
+    automation.lastRunAt =
+      new Date().toISOString();
+
+    await saveProfile(profile);
+
     logger.error(
       {
         profile,
         error: error.message
       },
-      'Erro na automação'
+      'Erro durante a automação.'
     );
-
-    data.automation.lastError = error.message;
-
-    try {
-      await saveProfile(profile);
-
-    } catch (saveError) {
-      logger.error(
-        {
-          profile,
-          error: saveError.message
-        },
-        'Falha ao salvar erro da automação'
-      );
-    }
 
     return {
       ok: false,
-      error: error.message
+      message: error.message
     };
 
   } finally {
     automationLocks.delete(profile);
   }
-}function routeError(res, error, status = 400) {
-  logger.error(
-    {
-      message: error?.message || String(error),
-      stack: error?.stack || null,
-      statusCode: error?.output?.statusCode || null
-    },
-    'Erro em rota'
-  );
-
-  return res.status(status).json({
-    ok: false,
-    error: error?.message || 'Erro interno.'
-  });
 }
 
-function cleanTime(value) {
-  const time = String(value || '').trim();
 
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(time)
-    ? time
-    : '';
-}
+// ======================================================
+// AGENDADOR AUTOMÁTICO
+// ======================================================
 
-function cleanStringMap(value, maxLength = 200) {
-  if (
-    !value ||
-    typeof value !== 'object' ||
-    Array.isArray(value)
-  ) {
-    return {};
+function getAutomationMinuteKey(date = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('sv-SE', {
+      timeZone: AUTOMATION_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23'
+    }).format(date).replace(' ', 'T');
+
+  } catch (_) {
+    return date.toISOString().slice(0, 16);
   }
-
-  const result = {};
-
-  for (const [key, raw] of Object.entries(value)) {
-    const id = String(key || '').trim();
-
-    if (!id || id.length > 200) continue;
-
-    result[id] = String(raw ?? '')
-      .trim()
-      .slice(0, maxLength);
-  }
-
-  return result;
 }
 
-function cleanGroupIds(value) {
-  if (!Array.isArray(value)) return [];
+async function automationSchedulerTick() {
+  for (const profile of PROFILE_IDS) {
+    try {
+      const data = getData(profile);
+      const automation = data.automation || {};
 
-  return [
-    ...new Set(
-      value
-        .map(item => String(item || '').trim())
-        .filter(item => item && item.length <= 200)
-    )
-  ].slice(0, 500);
-}
+      if (!isAutomationActive(automation)) continue;
 
-function cleanAutomationNiches(value) {
-  const map = cleanStringMap(value, 50);
+      if (!isInsideAutomationWindow(automation)) continue;
 
-  const valid = new Set([
-    'all',
-    'auto',
-    ...NICHE_DEFINITIONS.map(item => item.id)
-  ]);
+      if (automationLocks.has(profile)) continue;
 
-  for (const [groupId, nicheId] of Object.entries(map)) {
-    if (!valid.has(String(nicheId).toLowerCase())) {
-      delete map[groupId];
+      if (getStatus(profile).status !== 'connected') {
+        continue;
+      }
 
-    } else {
-      map[groupId] = String(nicheId).toLowerCase();
+      const scheduleTimes = Array.isArray(
+        automation.scheduleTimes
+      )
+        ? automation.scheduleTimes
+        : [];
+
+      const now = currentTimeInAutomationZone();
+      const minuteKey = getAutomationMinuteKey();
+
+      if (scheduleTimes.length) {
+        const alreadyRan =
+          automation.lastScheduleMinute === minuteKey;
+
+        if (
+          scheduleTimes.includes(now) &&
+          !alreadyRan
+        ) {
+          automation.lastScheduleMinute = minuteKey;
+
+          await saveProfile(profile);
+
+          await runAutomation(profile);
+        }
+
+        continue;
+      }
+
+      const intervalMs =
+        getAutomationIntervalMs(automation);
+
+      const lastRun = automation.lastRunAt
+        ? new Date(automation.lastRunAt).getTime()
+        : 0;
+
+      const elapsed = Date.now() - lastRun;
+
+      if (!lastRun || elapsed >= intervalMs) {
+        await runAutomation(profile);
+      }
+
+    } catch (error) {
+      logger.error(
+        {
+          profile,
+          error: error.message
+        },
+        'Erro no agendador da automação.'
+      );
     }
   }
-
-  return map;
 }
 
-app.get('/health', (req, res) => {
-  const profile = profileIdFrom(req);
 
+// ======================================================
+// ROTA DE SAÚDE
+// ======================================================
+
+app.get('/health', (req, res) => {
   res.json({
     ok: true,
-    whatsapp: getStatus(profile).status,
-    note: 'Saúde do servidor; não garante que o WhatsApp esteja conectado.'
+
+    service: 'MEDEIROS DIGITAL',
+
+    whatsapp: PROFILE_IDS.map(profile => ({
+      profile,
+      status: getStatus(profile).status
+    })),
+
+    timestamp: new Date().toISOString()
   });
 });
 
-app.get('/', (req, res) => {
-  const htmlPath = path.join(__dirname, 'index.html');
 
-  if (fs.existsSync(htmlPath)) {
-    return res.sendFile(htmlPath);
-  }
-
-  res.type('html').send(
-    '<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>MEDEIROS DIGITAL</title><body style="font-family:Arial;background:#101010;color:#fff;padding:32px"><h1>MEDEIROS DIGITAL</h1><p>Servidor do Robô de Ofertas está ativo.</p><p>Abra o painel index.html publicado junto com este servidor.</p></body></html>'
-  );
-});
+// ======================================================
+// ROTAS DE PERFIS
+// ======================================================
 
 app.get('/api/profiles', (req, res) => {
   res.json({
     ok: true,
-    profiles: PROFILE_IDS.map(id => ({
-      id,
-      name: id === 'rafael'
-        ? 'Rafael'
-        : 'Usuário 2'
-    }))
+    profiles: PROFILE_IDS
   });
 });
 
-app.get('/api/status', async (req, res) => {
-  try {
-    const profile = profileIdFrom(req);
 
-    const data = await loadProfile(profile);
+// ======================================================
+// ROTAS DE STATUS
+// ======================================================
 
-    const credentials = getShopeeCredentials(profile);
+app.get('/api/status', (req, res) => {
+  const profile = profileIdFrom(req);
 
-    res.json({
-      ok: true,
-      profile,
-      whatsapp: getStatus(profile),
-      automation: data.automation,
-      destinations: data.destinations.length,
-      shopeeConfigured: Boolean(
-        credentials.appId &&
-        credentials.appSecret
-      )
-    });
-
-  } catch (error) {
-    routeError(res, error, 500);
-  }
+  res.json({
+    ok: true,
+    profile,
+    status: getStatus(profile),
+    qr: qrCache.get(profile) || null,
+    pairingCode: pairingCache.get(profile) || null,
+    connected:
+      getStatus(profile).status === 'connected'
+  });
 });
+
+
+// ======================================================
+// ROTAS DOS DADOS
+// ======================================================
 
 app.get('/api/data', async (req, res) => {
   try {
@@ -2042,219 +2869,164 @@ app.get('/api/data', async (req, res) => {
     res.json({
       ok: true,
       profile,
-      data: {
-        ...data,
-        whatsappAuth: undefined,
-        shopeeCredentials: undefined
+      data
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: error.message
+    });
+  }
+});
+
+app.post('/api/data', async (req, res) => {
+  try {
+    const profile = profileIdFrom(req);
+
+    const current = getData(profile);
+
+    const incoming =
+      req.body?.data ||
+      req.body ||
+      {};
+
+    storeCache[profile] = mergeProfileData({
+      ...current,
+      ...incoming,
+
+      automation: {
+        ...current.automation,
+        ...(incoming.automation || {})
       },
-      whatsapp: getStatus(profile),
-      niches: NICHE_DEFINITIONS
+
+      whatsappAuth: current.whatsappAuth
     });
-
-  } catch (error) {
-    routeError(res, error, 500);
-  }
-});
-
-app.get('/api/automation', async (req, res) => {
-  try {
-    const profile = profileIdFrom(req);
-
-    const data = await loadProfile(profile);
-
-    res.json({
-      ok: true,
-      automation: data.automation
-    });
-
-  } catch (error) {
-    routeError(res, error);
-  }
-});
-
-// Salva a configuração da automação.
-// Aceita active/intervalSeconds e também enabled/intervalMinutes.
-app.post('/api/automation', async (req, res) => {
-  try {
-    const profile = profileIdFrom(req);
-
-    const data = await loadProfile(profile);
-
-    const body = req.body || {};
-
-    const current = data.automation ||
-      defaultProfileData().automation;
-
-    const next = { ...current };
-
-    if (
-      body.active !== undefined ||
-      body.enabled !== undefined
-    ) {
-      const value = body.active !== undefined
-        ? body.active
-        : body.enabled;
-
-      const active = (
-        value === true ||
-        value === 1 ||
-        value === '1' ||
-        String(value).toLowerCase() === 'true'
-      );
-
-      next.enabled = active;
-      next.active = active;
-    }
-
-    // Aceita o intervalo mínimo de 10 segundos.
-    if (body.intervalSeconds !== undefined) {
-      const seconds = Number(body.intervalSeconds);
-
-      if (!Number.isFinite(seconds) || seconds < 1) {
-        return res.status(400).json({
-          ok: false,
-          error: 'Intervalo da automação inválido.'
-        });
-      }
-
-      next.intervalSeconds = Math.max(
-        10,
-        Math.min(86400, Math.round(seconds))
-      );
-
-      next.intervalMinutes = Math.max(
-        1,
-        Math.ceil(next.intervalSeconds / 60)
-      );
-
-    } else if (body.intervalMinutes !== undefined) {
-      const minutes = Number(body.intervalMinutes);
-
-      if (!Number.isFinite(minutes) || minutes < 1) {
-        return res.status(400).json({
-          ok: false,
-          error: 'Intervalo da automação inválido.'
-        });
-      }
-
-      next.intervalMinutes = Math.max(
-        1,
-        Math.min(1440, Math.round(minutes))
-      );
-
-      next.intervalSeconds = next.intervalMinutes * 60;
-    }
-
-    if (body.maxProducts !== undefined) {
-      const maxProducts = Number(body.maxProducts);
-
-      next.maxProducts = Number.isFinite(maxProducts)
-        ? Math.max(1, Math.min(50, Math.round(maxProducts)))
-        : 10;
-    }
-
-    if (body.startTime !== undefined) {
-      next.startTime = cleanTime(body.startTime);
-    }
-
-    if (body.endTime !== undefined) {
-      next.endTime = cleanTime(body.endTime);
-    }
-
-    if (body.scheduleTimes !== undefined) {
-      next.scheduleTimes = Array.isArray(body.scheduleTimes)
-        ? body.scheduleTimes
-            .map(cleanTime)
-            .filter(Boolean)
-            .slice(0, 50)
-        : [];
-    }
-
-    if (Array.isArray(body.destinationIds)) {
-      next.destinationIds = [
-        ...new Set(body.destinationIds.map(String))
-      ];
-    }
-
-    if (body.groupSelectionMode !== undefined) {
-      next.groupSelectionMode = Boolean(
-        body.groupSelectionMode
-      );
-    }
-
-    if (Array.isArray(body.groupIds)) {
-      next.groupIds = cleanGroupIds(body.groupIds);
-
-      if (body.groupSelectionMode === undefined) {
-        next.groupSelectionMode = true;
-      }
-    }
-
-    if (body.groupNiches !== undefined) {
-      next.groupNiches = cleanAutomationNiches(
-        body.groupNiches
-      );
-    }
-
-    if (body.groupNames !== undefined) {
-      next.groupNames = cleanStringMap(
-        body.groupNames,
-        160
-      );
-    }
-
-    // Confere se os grupos selecionados possuem nichos definidos.
-    if (
-      next.groupSelectionMode &&
-      isAutomationActive(next)
-    ) {
-      if (!next.groupIds.length) {
-        return res.status(400).json({
-          ok: false,
-          error: 'Selecione pelo menos um grupo para ativar a automação.'
-        });
-      }
-
-      const missingNiche = next.groupIds.find(groupId => {
-        const niche = String(
-          getMapValueByGroupId(
-            next.groupNiches,
-            groupId
-          ) || ''
-        ).toLowerCase();
-
-        return !niche || niche === 'auto';
-      });
-
-      if (missingNiche) {
-        return res.status(400).json({
-          ok: false,
-          error: 'Escolha manualmente o nicho de todos os grupos selecionados antes de ativar.'
-        });
-      }
-    }
-
-    data.automation = next;
 
     await saveProfile(profile);
 
     res.json({
       ok: true,
+      message: 'Dados salvos.',
+      data: getData(profile)
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: error.message
+    });
+  }
+});
+
+
+// ======================================================
+// ROTAS DA AUTOMAÇÃO
+// ======================================================
+
+app.get('/api/automation', (req, res) => {
+  const profile = profileIdFrom(req);
+
+  const automation =
+    getData(profile).automation;
+
+  res.json({
+    ok: true,
+    automation,
+    active: isAutomationActive(automation)
+  });
+});
+
+app.post('/api/automation', async (req, res) => {
+  try {
+    const profile = profileIdFrom(req);
+
+    const incoming =
+      req.body?.automation ||
+      req.body ||
+      {};
+
+    const data = getData(profile);
+
+    data.automation = {
+      ...data.automation,
+      ...incoming
+    };
+
+    if (incoming.enabled !== undefined) {
+      data.automation.enabled =
+        Boolean(incoming.enabled);
+
+      data.automation.active =
+        Boolean(incoming.enabled);
+    }
+
+    if (incoming.active !== undefined) {
+      data.automation.active =
+        Boolean(incoming.active);
+
+      data.automation.enabled =
+        Boolean(incoming.active);
+    }
+
+    const seconds = Number(
+      data.automation.intervalSeconds
+    );
+
+    if (
+      Number.isFinite(seconds) &&
+      seconds > 0
+    ) {
+      data.automation.intervalSeconds =
+        Math.max(
+          10,
+          Math.min(86400, Math.round(seconds))
+        );
+
+      data.automation.intervalMinutes =
+        Math.max(
+          1,
+          Math.ceil(
+            data.automation.intervalSeconds / 60
+          )
+        );
+    }
+
+    await saveProfile(profile);
+
+    res.json({
+      ok: true,
+      message: 'Configurações da automação salvas.',
       automation: data.automation
     });
 
   } catch (error) {
-    routeError(res, error);
+    res.status(500).json({
+      ok: false,
+      message: error.message
+    });
   }
 });
 
-// STATUS, QR CODE E PAREAMENTO DO WHATSAPP
+app.post('/api/automation/run', async (req, res) => {
+  const profile = profileIdFrom(req);
+
+  const result = await runAutomation(profile);
+
+  res.status(result.ok ? 200 : 400).json(result);
+});
+
+
+// ======================================================
+// ROTAS DO WHATSAPP
+// ======================================================
 
 app.get('/api/whatsapp', (req, res) => {
   const profile = profileIdFrom(req);
 
   res.json({
     ok: true,
+    profile,
     status: getStatus(profile),
     qr: qrCache.get(profile) || null,
     pairingCode: pairingCache.get(profile) || null
@@ -2268,12 +3040,17 @@ app.post('/api/whatsapp/connect', async (req, res) => {
     const result = await startWhatsApp(profile);
 
     res.json({
+      ok: true,
       ...result,
-      status: getStatus(profile).status
+      status: getStatus(profile),
+      qr: qrCache.get(profile) || null
     });
 
   } catch (error) {
-    routeError(res, error);
+    res.status(500).json({
+      ok: false,
+      message: error.message
+    });
   }
 });
 
@@ -2281,72 +3058,43 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
 
-    const phone = String(
+    let phone = String(
       req.body?.phone || ''
     ).replace(/\D/g, '');
 
-    if (!phone || phone.length < 10) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Informe o telefone com código do país e DDD. Exemplo: 5511999999999.'
-      });
+    if (
+      phone.length === 10 ||
+      phone.length === 11
+    ) {
+      phone = `55${phone}`;
     }
-
-    let sock = sockets.get(profile);
-
-    if (!sock) {
-      await startWhatsApp(profile);
-      sock = sockets.get(profile);
-    }
-
-    if (!sock) {
-      return res.status(409).json({
-        ok: false,
-        error: 'O WhatsApp ainda está iniciando. Aguarde alguns segundos e tente novamente.'
-      });
-    }
-
-    if (authRegistered.get(profile)) {
-      return res.status(409).json({
-        ok: false,
-        error: 'Este perfil já possui uma sessão registrada. Se deseja conectar outro aparelho, desconecte a sessão atual primeiro.'
-      });
-    }
-
-    if (typeof sock.requestPairingCode !== 'function') {
-      return res.status(409).json({
-        ok: false,
-        error: 'Esta versão do Baileys não disponibilizou o código de pareamento.'
-      });
-    }
-
-    const pairingDelay = Math.max(
-      3000,
-      Math.min(
-        10000,
-        Number(process.env.WHATSAPP_PAIRING_DELAY_MS || 5000)
-      )
-    );
-
-    await sleep(pairingDelay);
-
-    if (sockets.get(profile) !== sock) {
-      return res.status(409).json({
-        ok: false,
-        error: 'A conexão foi reiniciada durante o pareamento. Tente novamente.'
-      });
-    }
-
-    const currentStatus = getStatus(profile).status;
 
     if (
-      ['logged_out', 'disconnected', 'error']
-        .includes(currentStatus)
+      phone.length < 12 ||
+      phone.length > 15
     ) {
-      return res.status(409).json({
+      return res.status(400).json({
         ok: false,
-        error: 'A conexão foi encerrada. Clique em Conectar WhatsApp e tente novamente.'
+        message: 'Informe telefone com DDD e código do país.'
       });
+    }
+
+    await startWhatsApp(profile);
+
+    const sock = sockets.get(profile);
+
+    if (!sock) {
+      throw new Error(
+        'Socket do WhatsApp ainda não está disponível.'
+      );
+    }
+
+    if (
+      typeof sock.requestPairingCode !== 'function'
+    ) {
+      throw new Error(
+        'Esta versão do Baileys não oferece código de pareamento.'
+      );
     }
 
     const code = await sock.requestPairingCode(phone);
@@ -2355,19 +3103,39 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
 
     res.json({
       ok: true,
-      code,
-      message: 'Código gerado. Digite-o no WhatsApp do celular.'
+      pairingCode: code,
+      message: 'Código de pareamento gerado.'
     });
 
   } catch (error) {
-    routeError(res, error);
+    res.status(500).json({
+      ok: false,
+      message: error.message
+    });
   }
 });
 
 app.post('/api/whatsapp/disconnect', async (req, res) => {
-  const profile = profileIdFrom(req);
-
   try {
+    const profile = profileIdFrom(req);
+
+    const sock = sockets.get(profile);
+
+    if (sock) {
+      sockets.delete(profile);
+
+      try {
+        sock.end(
+          new Error('Desconexão solicitada pelo painel.')
+        );
+
+      } catch (_) {
+        try {
+          sock.ws?.close();
+        } catch (_) {}
+      }
+    }
+
     const timer = reconnectTimers.get(profile);
 
     if (timer) {
@@ -2375,149 +3143,60 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
       reconnectTimers.delete(profile);
     }
 
-    const sock = sockets.get(profile);
+    reconnectAttempts.delete(profile);
 
-    sockets.delete(profile);
-
-    if (sock) {
-      try {
-        await sock.logout();
-
-      } catch (error) {
-        logger.warn(
-          {
-            profile,
-            error: error.message
-          },
-          'O socket já estava encerrado durante a desconexão'
-        );
-      }
-
-      try {
-        sock.end(undefined);
-      } catch (_) {}
-    }
-
-    await clearWhatsAppAuth(profile);
+    qrCache.delete(profile);
+    pairingCache.delete(profile);
 
     setStatus(profile, 'disconnected');
 
     res.json({
       ok: true,
-      message: 'WhatsApp desconectado. A sessão salva foi removida por solicitação.'
+      message: 'WhatsApp desconectado.'
     });
 
   } catch (error) {
-    routeError(res, error);
+    res.status(500).json({
+      ok: false,
+      message: error.message
+    });
   }
 });
 
-// ENVIO MANUAL CORRIGIDO.
-// Aceita destination, to, groupId, jid e phone.
 app.post('/api/whatsapp/send', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
 
-    const sock = sockets.get(profile);
+    const destination =
+      req.body?.destination ||
+      req.body?.target ||
+      req.body ||
+      {};
 
-    if (
-      !sock ||
-      getStatus(profile).status !== 'connected'
-    ) {
-      return res.status(409).json({
-        ok: false,
-        error: 'WhatsApp não conectado. Verifique a conexão do perfil.'
-      });
-    }
-
-    const rawDestination =
-      req.body?.destination ??
-      req.body?.to ??
-      req.body?.groupId ??
-      req.body?.jid ??
-      req.body?.phone ??
-      '';
-
-    const destinationValue =
-      rawDestination && typeof rawDestination === 'object'
-        ? (
-            rawDestination.groupId ||
-            rawDestination.id ||
-            rawDestination.jid ||
-            rawDestination.phone ||
-            ''
-          )
-        : rawDestination;
-
-    const to = normalizeWhatsAppJid(destinationValue);
-
-    const message = String(
-      req.body?.message ||
-      req.body?.text ||
-      req.body?.caption ||
-      ''
-    ).trim();
-
-    if (!to) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Destino inválido. Selecione um grupo ou informe um telefone válido.',
-        receivedDestination: String(destinationValue || '')
-      });
-    }
-
-    if (!message) {
-      return res.status(400).json({
-        ok: false,
-        error: 'A mensagem está vazia.'
-      });
-    }
-
-    logger.info(
-      {
-        profile,
-        destination: to,
-        messageLength: message.length
-      },
-      'Solicitação de envio manual recebida'
+    const product = normalizeProduct(
+      req.body?.product ||
+      req.body?.offer ||
+      req.body ||
+      {}
     );
 
-    const result = await sock.sendMessage(to, {
-      text: message
-    });
-
-    if (!result) {
-      throw new Error(
-        'O WhatsApp não retornou confirmação do envio.'
-      );
-    }
-
-    logger.info(
-      {
-        profile,
-        destination: to,
-        messageId: result.key?.id || null
-      },
-      'Envio manual realizado'
+    const result = await sendToDestination(
+      profile,
+      destination,
+      product
     );
 
-    return res.json({
+    res.json({
       ok: true,
-      message: 'Mensagem encaminhada ao WhatsApp.',
-      destination: to,
-      messageId: result.key?.id || null
+      message: 'Solicitação aceita pelo WhatsApp.',
+      messageId: result?.key?.id || null
     });
 
   } catch (error) {
-    logger.error(
-      {
-        error: error.message,
-        stack: error.stack || null
-      },
-      'Falha no envio manual do WhatsApp'
-    );
-
-    return routeError(res, error, 502);
+    res.status(400).json({
+      ok: false,
+      message: error.message
+    });
   }
 });
 
@@ -2531,131 +3210,172 @@ app.get('/api/whatsapp/groups', async (req, res) => {
       !sock ||
       getStatus(profile).status !== 'connected'
     ) {
-      return res.status(409).json({
+      return res.status(400).json({
         ok: false,
-        error: 'WhatsApp não conectado.'
+        message: 'Conecte o WhatsApp antes de listar os grupos.'
       });
     }
 
-    const groups = await sock.groupFetchAllParticipating();
+    if (
+      typeof sock.groupFetchAllParticipating !== 'function'
+    ) {
+      throw new Error(
+        'Não foi possível consultar os grupos nesta versão do Baileys.'
+      );
+    }
+
+    const groups =
+      await sock.groupFetchAllParticipating();
+
+    const result = Object.entries(
+      groups || {}
+    ).map(([id, group]) => ({
+      id,
+      groupId: id,
+      name: group.subject || group.name || id,
+      subject: group.subject || '',
+      participants: Array.isArray(group.participants)
+        ? group.participants.length
+        : 0
+    }));
 
     res.json({
       ok: true,
-      groups: Object.entries(groups || {}).map(([id, group]) => ({
-        id,
-        groupId: id,
-        name: group.subject || id,
-        participants: group.participants?.length || 0
-      }))
+      groups: result
     });
 
   } catch (error) {
-    routeError(res, error);
+    res.status(500).json({
+      ok: false,
+      message: error.message
+    });
   }
 });
 
-// CLASSIFICAÇÃO DE NICHOS
+
+// ======================================================
+// ROTAS DE NICHOS
+// ======================================================
 
 app.get('/api/niches', (req, res) => {
   res.json({
     ok: true,
-    niches: NICHE_DEFINITIONS
+
+    niches: [
+      {
+        id: 'all',
+        label: 'Todos os nichos'
+      },
+
+      ...NICHE_DEFINITIONS.map(item => ({
+        id: item.id,
+        label: item.label
+      }))
+    ]
   });
 });
 
 app.post('/api/niches/classify', (req, res) => {
-  const product = req.body?.product || req.body || {};
+  const name = String(
+    req.body?.name ||
+    req.body?.groupName ||
+    req.body?.productName ||
+    ''
+  );
 
   res.json({
     ok: true,
-    niches: classifyProductNiches(product)
+    niche: classifyGroupNiche(name)
   });
 });
 
-// GRUPOS E DESTINOS MANUAIS (mantidos para compatibilidade)
 
-app.get('/api/destinations', async (req, res) => {
-  try {
-    const profile = profileIdFrom(req);
+// ======================================================
+// ROTAS DE DESTINOS E GRUPOS
+// ======================================================
 
-    const data = await loadProfile(profile);
+app.get('/api/destinations', (req, res) => {
+  const profile = profileIdFrom(req);
 
-    res.json({
-      ok: true,
-      destinations: data.destinations.map(publicDestination),
-      niches: NICHE_DEFINITIONS
-    });
+  const destinations =
+    getData(profile).destinations;
 
-  } catch (error) {
-    routeError(res, error, 500);
-  }
+  res.json({
+    ok: true,
+    destinations: destinations.map(publicDestination)
+  });
 });
 
 app.post('/api/destinations', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
 
-    const data = await loadProfile(profile);
+    const data = getData(profile);
 
-    const body = req.body || {};
-
-    const groupId = String(
-      body.groupId ||
-      body.id ||
-      ''
-    ).trim();
-
-    const name = String(
-      body.name ||
-      body.subject ||
-      ''
-    ).trim();
-
-    if (!name || !groupId) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Informe o nome e o ID do grupo WhatsApp.'
-      });
-    }
-
-    const existing = data.destinations.find(
-      item => item.groupId === groupId
-    );
-
-    if (existing) {
-      return res.status(409).json({
-        ok: false,
-        error: 'Este grupo já está cadastrado.',
-        destination: publicDestination(existing)
-      });
-    }
+    const incoming =
+      req.body?.destination ||
+      req.body ||
+      {};
 
     const destination = {
-      id: crypto.randomUUID(),
-      name,
-      phone: String(body.phone || '').trim(),
-      groupId,
+      id: String(
+        incoming.id ||
+        crypto.randomUUID()
+      ),
+
+      groupId: String(
+        incoming.groupId ||
+        incoming.jid ||
+        ''
+      ),
+
+      jid: String(
+        incoming.jid ||
+        incoming.groupId ||
+        ''
+      ),
+
+      phone: String(
+        incoming.phone || ''
+      ),
+
+      name: String(
+        incoming.name ||
+        incoming.subject ||
+        incoming.groupId ||
+        'Novo destino'
+      ),
+
       nicheId: String(
-        body.nicheId || 'auto'
-      ).trim().toLowerCase(),
-      active: body.active !== false,
-      createdAt: new Date().toISOString()
+        incoming.nicheId || 'auto'
+      ),
+
+      active: incoming.active !== false,
+
+      source: incoming.source || 'manual'
     };
 
     if (
-      destination.nicheId !== 'auto' &&
-      destination.nicheId !== 'all' &&
-      !NICHE_DEFINITIONS.some(
-        n => n.id === destination.nicheId
-      )
+      !destination.groupId &&
+      !destination.phone
     ) {
       return res.status(400).json({
         ok: false,
-        error: 'Nicho inválido.'
+        message: 'Informe o ID do grupo ou telefone.'
       });
     }
 
-    data.destinations.push(destination);
+    const existing = data.destinations.findIndex(
+      item =>
+        String(item.id) === destination.id
+    );
+
+    if (existing >= 0) {
+      data.destinations[existing] = destination;
+
+    } else {
+      data.destinations.push(destination);
+    }
 
     await saveProfile(profile);
 
@@ -2666,119 +3386,96 @@ app.post('/api/destinations', async (req, res) => {
     });
 
   } catch (error) {
-    routeError(res, error);
-  }
-});
-
-async function updateDestination(profile, id, body) {
-  const data = await loadProfile(profile);
-
-  const destination = data.destinations.find(
-    item => item.id === id || item.groupId === id
-  );
-
-  if (!destination) {
-    return {
-      error: 'Grupo não encontrado.',
-      status: 404
-    };
-  }
-
-  if (body.name !== undefined) {
-    destination.name = String(body.name).trim();
-  }
-
-  if (body.nicheId !== undefined) {
-    destination.nicheId = String(
-      body.nicheId
-    ).trim().toLowerCase();
-  }
-
-  if (body.active !== undefined) {
-    destination.active = Boolean(body.active);
-  }
-
-  if (body.groupId !== undefined) {
-    destination.groupId = String(
-      body.groupId
-    ).trim();
-  }
-
-  if (
-    destination.nicheId !== 'auto' &&
-    destination.nicheId !== 'all' &&
-    !NICHE_DEFINITIONS.some(
-      n => n.id === destination.nicheId
-    )
-  ) {
-    return {
-      error: 'Nicho inválido.',
-      status: 400
-    };
-  }
-
-  await saveProfile(profile);
-
-  return {
-    destination: publicDestination(destination),
-    destinations: data.destinations.map(publicDestination)
-  };
-}
-
-app.patch('/api/destinations/:id', async (req, res) => {
-  try {
-    const result = await updateDestination(
-      profileIdFrom(req),
-      req.params.id,
-      req.body || {}
-    );
-
-    if (result.error) {
-      return res.status(result.status).json({
-        ok: false,
-        error: result.error
-      });
-    }
-
-    res.json({
-      ok: true,
-      ...result
+    res.status(500).json({
+      ok: false,
+      message: error.message
     });
-
-  } catch (error) {
-    routeError(res, error);
   }
 });
 
 app.post('/api/destinations/update', async (req, res) => {
   try {
-    const id = String(
-      req.body?.id ||
-      req.body?.destinationId ||
-      req.body?.groupId ||
-      ''
+    const profile = profileIdFrom(req);
+
+    const data = getData(profile);
+
+    const incoming =
+      req.body?.destination ||
+      req.body ||
+      {};
+
+    const id = String(incoming.id || '');
+
+    const index = data.destinations.findIndex(
+      item => String(item.id) === id
     );
 
-    const result = await updateDestination(
-      profileIdFrom(req),
-      id,
-      req.body || {}
-    );
-
-    if (result.error) {
-      return res.status(result.status).json({
+    if (index < 0) {
+      return res.status(404).json({
         ok: false,
-        error: result.error
+        message: 'Destino não encontrado.'
       });
     }
 
+    data.destinations[index] = {
+      ...data.destinations[index],
+      ...incoming
+    };
+
+    await saveProfile(profile);
+
     res.json({
       ok: true,
-      ...result
+      destination: publicDestination(
+        data.destinations[index]
+      )
     });
 
   } catch (error) {
-    routeError(res, error);
+    res.status(500).json({
+      ok: false,
+      message: error.message
+    });
+  }
+});
+
+app.patch('/api/destinations/:id', async (req, res) => {
+  try {
+    const profile = profileIdFrom(req);
+
+    const data = getData(profile);
+
+    const index = data.destinations.findIndex(
+      item =>
+        String(item.id) === String(req.params.id)
+    );
+
+    if (index < 0) {
+      return res.status(404).json({
+        ok: false,
+        message: 'Destino não encontrado.'
+      });
+    }
+
+    data.destinations[index] = {
+      ...data.destinations[index],
+      ...(req.body || {})
+    };
+
+    await saveProfile(profile);
+
+    res.json({
+      ok: true,
+      destination: publicDestination(
+        data.destinations[index]
+      )
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: error.message
+    });
   }
 });
 
@@ -2786,22 +3483,12 @@ app.delete('/api/destinations/:id', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
 
-    const data = await loadProfile(profile);
-
-    const before = data.destinations.length;
+    const data = getData(profile);
 
     data.destinations = data.destinations.filter(
       item =>
-        item.id !== req.params.id &&
-        item.groupId !== req.params.id
+        String(item.id) !== String(req.params.id)
     );
-
-    if (before === data.destinations.length) {
-      return res.status(404).json({
-        ok: false,
-        error: 'Grupo não encontrado.'
-      });
-    }
 
     await saveProfile(profile);
 
@@ -2811,83 +3498,136 @@ app.delete('/api/destinations/:id', async (req, res) => {
     });
 
   } catch (error) {
-    routeError(res, error);
+    res.status(500).json({
+      ok: false,
+      message: error.message
+    });
   }
 });
 
-// PRODUTOS E FILA DE ENVIO
+
+// ======================================================
+// ROTAS DE PRODUTOS
+// ======================================================
+
+app.get('/api/products', (req, res) => {
+  const profile = profileIdFrom(req);
+
+  res.json({
+    ok: true,
+    products: getData(profile).products
+  });
+});
 
 app.post('/api/products', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
 
-    const data = await loadProfile(profile);
+    const data = getData(profile);
 
-    const product = normalizeProduct(
-      req.body?.product || req.body || {}
-    );
+    const incoming =
+      req.body?.product ||
+      req.body ||
+      {};
+
+    const product = normalizeProduct(incoming);
 
     data.products.unshift(product);
 
-    data.products = data.products.slice(0, 200);
+    data.products = data.products.slice(0, 500);
 
     await saveProfile(profile);
 
     res.json({
       ok: true,
-      product
+      product,
+      products: data.products
     });
 
   } catch (error) {
-    routeError(res, error);
+    res.status(500).json({
+      ok: false,
+      message: error.message
+    });
   }
+});
+
+app.delete('/api/products/:id', async (req, res) => {
+  try {
+    const profile = profileIdFrom(req);
+
+    const data = getData(profile);
+
+    data.products = data.products.filter(
+      item =>
+        String(item.id) !== String(req.params.id)
+    );
+
+    await saveProfile(profile);
+
+    res.json({
+      ok: true,
+      products: data.products
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: error.message
+    });
+  }
+});
+
+
+// ======================================================
+// ROTAS DA FILA
+// ======================================================
+
+app.get('/api/queue', (req, res) => {
+  const profile = profileIdFrom(req);
+
+  res.json({
+    ok: true,
+    queue: getData(profile).queue
+  });
 });
 
 app.post('/api/queue', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
 
-    const data = await loadProfile(profile);
+    const data = getData(profile);
 
-    const product = normalizeProduct(
-      req.body?.product || req.body || {}
-    );
+    const incoming =
+      req.body?.product ||
+      req.body ||
+      {};
 
-    const entry = {
+    const product = normalizeProduct(incoming);
+
+    const item = {
       id: crypto.randomUUID(),
       product,
       status: 'pending',
+      source: 'manual',
       createdAt: new Date().toISOString()
     };
 
-    data.queue.push(entry);
+    data.queue.push(item);
 
     await saveProfile(profile);
 
     res.json({
       ok: true,
-      item: entry,
-      message: 'Oferta adicionada à fila.'
+      item,
+      queue: data.queue
     });
 
   } catch (error) {
-    routeError(res, error);
-  }
-});
-
-app.get('/api/queue', async (req, res) => {
-  try {
-    const profile = profileIdFrom(req);
-
-    const data = await loadProfile(profile);
-
-    res.json({
-      ok: true,
-      queue: data.queue.slice(-100).reverse()
+    res.status(500).json({
+      ok: false,
+      message: error.message
     });
-
-  } catch (error) {
-    routeError(res, error, 500);
   }
 });
 
@@ -2895,112 +3635,102 @@ app.post('/api/queue/process', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
 
-    await processQueue(profile);
+    let processed = 0;
+
+    while (
+      getData(profile).queue.some(
+        item => item.status === 'pending'
+      ) &&
+      processed < 100
+    ) {
+      await processQueue(profile);
+
+      processed++;
+    }
 
     res.json({
       ok: true,
-      queue: getData(profile).queue.slice(-100).reverse()
+      processed,
+      queue: getData(profile).queue
     });
 
   } catch (error) {
-    routeError(res, error);
+    res.status(500).json({
+      ok: false,
+      message: error.message
+    });
   }
 });
 
-// CREDENCIAIS E PRODUTOS DA SHOPEE
 
-app.get('/api/shopee/credentials', async (req, res) => {
-  try {
-    const profile = profileIdFrom(req);
+// ======================================================
+// ROTAS DA SHOPEE
+// ======================================================
 
-    await loadProfile(profile);
+app.get('/api/shopee/credentials', (req, res) => {
+  const profile = profileIdFrom(req);
 
-    const credentials = getShopeeCredentials(profile);
+  const credentials =
+    getShopeeCredentials(profile);
 
-    const configured = Boolean(
+  res.json({
+    ok: true,
+
+    configured: Boolean(
       credentials.appId &&
       credentials.appSecret
-    );
+    ),
 
-    res.json({
-      ok: true,
-      configured,
-      appId: credentials.appId || '',
-      credentials: {
-        appId: credentials.appId || '',
-        appSecret: credentials.appSecret ? '••••••' : '',
-        partnerId: credentials.appId || '',
-        partnerKey: credentials.appSecret ? '••••••' : ''
-      }
-    });
+    appId: credentials.appId,
 
-  } catch (error) {
-    routeError(res, error);
-  }
+    appSecretConfigured: Boolean(
+      credentials.appSecret
+    )
+  });
 });
 
 app.post('/api/shopee/credentials', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
 
-    const data = await loadProfile(profile);
+    const appId = String(
+      req.body?.appId ||
+      req.body?.partnerId ||
+      ''
+    ).trim();
 
-    const body = req.body || {};
+    const appSecret = String(
+      req.body?.appSecret ||
+      req.body?.partnerKey ||
+      ''
+    ).trim();
 
-    const previous = getShopeeCredentials(profile);
-
-    const credentials = {
-      appId: String(
-        body.appId ||
-        body.partnerId ||
-        body.partner_id ||
-        previous.appId ||
-        ''
-      ).trim(),
-
-      appSecret: String(
-        body.secret ||
-        body.appSecret ||
-        body.partnerKey ||
-        body.partner_key ||
-        previous.appSecret ||
-        ''
-      ).trim()
-    };
-
-    if (!credentials.appId || !credentials.appSecret) {
+    if (!appId || !appSecret) {
       return res.status(400).json({
         ok: false,
-        error: 'Informe o App ID e o Secret da Shopee.'
+        message: 'Informe o App ID e o App Secret da Shopee.'
       });
     }
 
-    if (!/^\d+$/.test(credentials.appId)) {
-      return res.status(400).json({
-        ok: false,
-        error: 'O App ID deve conter somente números.'
-      });
-    }
+    const data = getData(profile);
 
-    if (credentials.appSecret.length < 8) {
-      return res.status(400).json({
-        ok: false,
-        error: 'A Secret da Shopee é inválida ou muito curta.'
-      });
-    }
-
-    data.shopeeCredentials = encryptObject(credentials);
+    data.shopeeCredentials = encryptObject({
+      appId,
+      appSecret
+    });
 
     await saveProfile(profile);
 
     res.json({
       ok: true,
-      configured: true,
-      message: 'Credenciais da Shopee salvas com segurança!'
+      message: 'Credenciais Shopee salvas.'
     });
 
   } catch (error) {
-    routeError(res, error);
+    res.status(400).json({
+      ok: false,
+      message: error.message
+    });
   }
 });
 
@@ -3008,9 +3738,13 @@ app.get('/api/shopee/products', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
 
+    const limit = Number(
+      req.query.limit || 10
+    );
+
     const products = await fetchShopeeOffers(
       profile,
-      req.query.limit || 10
+      limit
     );
 
     res.json({
@@ -3019,7 +3753,10 @@ app.get('/api/shopee/products', async (req, res) => {
     });
 
   } catch (error) {
-    routeError(res, error);
+    res.status(400).json({
+      ok: false,
+      message: error.message
+    });
   }
 });
 
@@ -3029,176 +3766,250 @@ app.post('/api/shopee/test', async (req, res) => {
 
     const products = await fetchShopeeOffers(
       profile,
-      3
+      1
     );
 
     res.json({
       ok: true,
-      count: products.length,
-      products
+      connected: true,
+      products,
+      message: 'Conexão com a API Shopee realizada.'
     });
 
   } catch (error) {
-    routeError(res, error);
+    res.status(400).json({
+      ok: false,
+      connected: false,
+      message: error.message
+    });
   }
 });
 
-// EXECUÇÃO MANUAL DA AUTOMAÇÃO
 
-app.post('/api/automation/run', async (req, res) => {
-  try {
-    const profile = profileIdFrom(req);
+// ======================================================
+// PÁGINA PRINCIPAL
+// ======================================================
 
-    const result = await runAutomation(profile);
+app.get('/', (req, res) => {
+  const indexFile = path.join(
+    __dirname,
+    'index.html'
+  );
 
-    res.status(result.ok ? 200 : 409).json(result);
-
-  } catch (error) {
-    routeError(res, error);
+  if (fs.existsSync(indexFile)) {
+    return res.sendFile(indexFile);
   }
+
+  res.type('html').send(`
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>MEDEIROS DIGITAL</title>
+    </head>
+
+    <body style="
+      background:#101010;
+      color:white;
+      font-family:Arial,sans-serif;
+      padding:30px;
+    ">
+      <h1>MEDEIROS DIGITAL</h1>
+      <p>Servidor do robô Shopee funcionando.</p>
+      <p>O painel será carregado pelo arquivo index.html.</p>
+    </body>
+    </html>
+  `);
 });
 
-// ROTAS NÃO ENCONTRADAS E TRATAMENTO GERAL
+
+// ======================================================
+// ROTA NÃO ENCONTRADA
+// ======================================================
 
 app.use((req, res) => {
   res.status(404).json({
     ok: false,
-    error: 'Rota não encontrada.'
+    message: 'Rota não encontrada.',
+    path: req.path
   });
 });
 
+
+// ======================================================
+// TRATAMENTO GLOBAL DE ERROS
+// ======================================================
+
 app.use((error, req, res, next) => {
+  logger.error(
+    {
+      error: error.message,
+      path: req.path
+    },
+    'Erro não tratado na aplicação.'
+  );
+
   if (res.headersSent) {
     return next(error);
   }
 
-  routeError(res, error, 500);
-});
+  res.status(500).json({
+    ok: false,
+    message: 'Erro interno do servidor.',
 
-// INICIALIZAÇÃO DO SERVIDOR
-
-let profilesLoaded = false;
-let automationSchedulerRunning = false;
-
-async function initializeApp() {
-  for (const profile of PROFILE_IDS) {
-    await loadProfile(profile);
-  }
-
-  profilesLoaded = true;
-
-  logger.info(
-    {
-      port: PORT,
-      supabase: Boolean(supabase),
-      profiles: PROFILE_IDS
-    },
-    'MEDEIROS DIGITAL iniciado'
-  );
-}
-
-// Verifica a automação a cada segundo.
-// Isso permite respeitar intervalos configurados em segundos.
-const automationTimer = setInterval(async () => {
-  if (!profilesLoaded || automationSchedulerRunning) {
-    return;
-  }
-
-  automationSchedulerRunning = true;
-
-  try {
-    for (const profile of PROFILE_IDS) {
-      const data = getData(profile);
-
-      const automation = data.automation || {};
-
-      if (!isAutomationActive(automation)) continue;
-
-      if (!isInsideAutomationWindow(automation)) continue;
-
-      if (automationLocks.has(profile)) continue;
-
-      if (
-        !sockets.has(profile) ||
-        getStatus(profile).status !== 'connected'
-      ) {
-        continue;
-      }
-
-      const interval = getAutomationIntervalMs(
-        automation
-      );
-
-      const lastRun = automation.lastRunAt
-        ? new Date(automation.lastRunAt).getTime()
-        : 0;
-
-      const elapsed = Date.now() - lastRun;
-
-      if (
-        !Number.isFinite(lastRun) ||
-        elapsed >= interval
-      ) {
-        await runAutomation(profile);
-      }
-    }
-
-  } catch (error) {
-    logger.error(
-      { error: error.message },
-      'Erro no agendador automático'
-    );
-
-  } finally {
-    automationSchedulerRunning = false;
-  }
-
-}, 1000);
-
-if (typeof automationTimer.unref === 'function') {
-  automationTimer.unref();
-}
-
-const server = app.listen(PORT, '0.0.0.0', () => {
-  initializeApp().catch(error => {
-    logger.error(
-      {
-        error: error.message,
-        stack: error.stack
-      },
-      'Falha ao inicializar aplicação'
-    );
+    detail:
+      process.env.NODE_ENV === 'production'
+        ? undefined
+        : error.message
   });
 });
 
-process.on('unhandledRejection', error => {
-  logger.error(
-    {
-      error: error?.message || String(error),
-      stack: error?.stack || null
-    },
-    'Promise rejeitada'
-  );
-});
 
-process.on('uncaughtException', error => {
-  logger.error(
-    {
-      error: error?.message || String(error),
-      stack: error?.stack || null
-    },
-    'Exceção não tratada'
-  );
-});
+// ======================================================
+// INICIALIZAÇÃO DO SERVIDOR
+// ======================================================
 
-process.on('SIGTERM', () => {
-  logger.info('Recebido SIGTERM; encerrando servidor');
+let httpServer = null;
+let schedulerTimer = null;
 
-  clearInterval(automationTimer);
+async function initializeApp() {
+  for (const profile of PROFILE_IDS) {
+    try {
+      await loadProfile(profile);
 
-  for (const timer of reconnectTimers.values()) {
-    clearTimeout(timer);
+      const data = getData(profile);
+
+      if (data.whatsappAuth?.creds) {
+        startWhatsApp(profile).catch(error => {
+          logger.error(
+            {
+              profile,
+              error: error.message
+            },
+            'Erro ao iniciar WhatsApp automaticamente.'
+          );
+        });
+      }
+
+    } catch (error) {
+      logger.error(
+        {
+          profile,
+          error: error.message
+        },
+        'Erro ao carregar perfil.'
+      );
+    }
   }
 
-  server.close(() => process.exit(0));
+  httpServer = app.listen(
+    PORT,
+    '0.0.0.0',
+    () => {
+      logger.info(
+        {
+          port: PORT
+        },
+        'MEDEIROS DIGITAL iniciado.'
+      );
+    }
+  );
+
+  schedulerTimer = setInterval(() => {
+    automationSchedulerTick().catch(error => {
+      logger.error(
+        {
+          error: error.message
+        },
+        'Erro no agendador.'
+      );
+    });
+  }, 60000);
+
+  schedulerTimer.unref?.();
+
+  return httpServer;
+}
+
+
+// ======================================================
+// ENCERRAMENTO SEGURO
+// ======================================================
+
+async function shutdown(signal) {
+  logger.info(
+    { signal },
+    'Encerrando MEDEIROS DIGITAL.'
+  );
+
+  if (schedulerTimer) {
+    clearInterval(schedulerTimer);
+    schedulerTimer = null;
+  }
+
+  for (const [profile, timer] of reconnectTimers.entries()) {
+    clearTimeout(timer);
+    reconnectTimers.delete(profile);
+  }
+
+  for (const [profile, sock] of sockets.entries()) {
+    try {
+      sock.end(
+        new Error('Servidor encerrando.')
+      );
+    } catch (_) {
+      try {
+        sock.ws?.close();
+      } catch (_) {}
+    }
+
+    sockets.delete(profile);
+  }
+
+  if (httpServer) {
+    await new Promise(resolve => {
+      httpServer.close(resolve);
+    });
+  }
+
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => {
+  shutdown('SIGTERM').catch(error => {
+    logger.error(
+      { error: error.message },
+      'Erro durante encerramento SIGTERM.'
+    );
+
+    process.exit(1);
+  });
+});
+
+process.on('SIGINT', () => {
+  shutdown('SIGINT').catch(error => {
+    logger.error(
+      { error: error.message },
+      'Erro durante encerramento SIGINT.'
+    );
+
+    process.exit(1);
+  });
+});
+
+
+// ======================================================
+// INICIAR APLICAÇÃO
+// ======================================================
+
+initializeApp().catch(error => {
+  logger.fatal(
+    {
+      error: error.message
+    },
+    'Falha ao iniciar o servidor.'
+  );
+
+  process.exit(1);
 });
