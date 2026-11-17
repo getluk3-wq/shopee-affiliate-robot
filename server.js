@@ -662,7 +662,6 @@ async function createSupabaseAuthState(profile) {
       for (const id of ids) {
         const storageKey = `${type}-${id}`;
 
-        // Primeiro consulta o cache para evitar chamadas desnecessárias ao banco.
         let stored = keys[storageKey];
 
         if (stored == null) {
@@ -703,7 +702,6 @@ async function createSupabaseAuthState(profile) {
         keys
       };
 
-      // Não bloqueia cada chave esperando uma gravação individual em sequência.
       await Promise.allSettled(pendingWrites);
       await saveProfile(profile);
     }
@@ -757,7 +755,6 @@ async function startWhatsApp(profile) {
 
     let version;
 
-    // Busca a versão atual do protocolo; se falhar, usa o padrão da biblioteca.
     if (typeof fetchLatestBaileysVersion === 'function') {
       try {
         const latest = await fetchLatestBaileysVersion();
@@ -810,7 +807,6 @@ async function startWhatsApp(profile) {
     });
 
     sock.ev.on('connection.update', async update => {
-      // Ignora eventos de sockets antigos que já foram substituídos.
       if (sockets.get(profile) !== sock) return;
 
       const { connection, lastDisconnect, qr } = update;
@@ -1587,7 +1583,6 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
       });
     }
 
-    // O socket precisa de alguns segundos para iniciar antes do pedido do código.
     const pairingDelay = Math.max(
       3000,
       Math.min(
@@ -1598,7 +1593,6 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
 
     await sleep(pairingDelay);
 
-    // Confere se o socket continua sendo o mesmo e não foi encerrado.
     if (sockets.get(profile) !== sock) {
       return res.status(409).json({
         ok: false,
@@ -1646,7 +1640,6 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
 
     const sock = sockets.get(profile);
 
-    // Retira o socket do mapa antes de encerrar para evitar reconexão automática.
     sockets.delete(profile);
 
     if (sock) {
@@ -2074,6 +2067,9 @@ app.post('/api/queue/process', async (req, res) => {
 app.get('/api/shopee/credentials', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
+    await loadProfile(profile);
+
     const credentials = getShopeeCredentials(profile);
 
     const configured = Boolean(
@@ -2083,10 +2079,15 @@ app.get('/api/shopee/credentials', async (req, res) => {
     res.json({
       ok: true,
       configured,
+
+      // O App ID pode ser exibido no painel.
+      // A Secret nunca é enviada de volta.
+      appId: credentials.appId || '',
+
       credentials: {
-        appId: credentials.appId ? '••••••' : '',
+        appId: credentials.appId || '',
         appSecret: credentials.appSecret ? '••••••' : '',
-        partnerId: credentials.appId ? '••••••' : '',
+        partnerId: credentials.appId || '',
         partnerKey: credentials.appSecret ? '••••••' : ''
       }
     });
@@ -2110,20 +2111,37 @@ app.post('/api/shopee/credentials', async (req, res) => {
         body.partner_id ||
         previous.appId ||
         ''
-      ),
+      ).trim(),
+
+      // O painel envia "secret"; também aceitamos os nomes antigos.
       appSecret: String(
+        body.secret ||
         body.appSecret ||
         body.partnerKey ||
         body.partner_key ||
         previous.appSecret ||
         ''
-      )
+      ).trim()
     };
 
     if (!credentials.appId || !credentials.appSecret) {
       return res.status(400).json({
         ok: false,
         error: 'Informe o App ID e o Secret da Shopee.'
+      });
+    }
+
+    if (!/^\d+$/.test(credentials.appId)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'O App ID deve conter somente números.'
+      });
+    }
+
+    if (credentials.appSecret.length < 8) {
+      return res.status(400).json({
+        ok: false,
+        error: 'A Secret da Shopee é inválida ou muito curta.'
       });
     }
 
@@ -2134,7 +2152,7 @@ app.post('/api/shopee/credentials', async (req, res) => {
     res.json({
       ok: true,
       configured: true,
-      message: 'Credenciais salvas com segurança para este perfil.'
+      message: 'Credenciais da Shopee salvas com segurança!'
     });
   } catch (error) {
     routeError(res, error);
