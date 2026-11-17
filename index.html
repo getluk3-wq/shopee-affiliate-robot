@@ -360,10 +360,6 @@ let waTimer = null;
 let connecting = false;
 let loadedGroups = [];
 
-/*
- * Os IDs abaixo correspondem aos nichos aceitos pelo servidor.
- * "all" representa todos os nichos.
- */
 const GROUP_NICHES = [
   { id: "eletricos", label: "Eletrônicos e tecnologia" },
   { id: "perfumaria", label: "Perfumes e perfumaria" },
@@ -431,10 +427,6 @@ function createNicheOptions(select, selectedValue = "") {
   select.value = normalizeNicheId(selectedValue);
 }
 
-/*
- * Converte estados que podem chegar como texto ou objeto.
- * Evita que o painel mostre "[object Object]".
- */
 function getSimpleStatus(value, fallback = "indisponível") {
   if (typeof value === "string" || typeof value === "number") {
     return String(value);
@@ -455,9 +447,6 @@ function getSimpleStatus(value, fallback = "indisponível") {
   return fallback;
 }
 
-/*
- * Normaliza a resposta da rota /api/whatsapp.
- */
 function normalizeWhatsAppResponse(data) {
   const statusObject =
     data?.status && typeof data.status === "object"
@@ -954,6 +943,10 @@ function formatInterval(seconds) {
   return value + " segundos";
 }
 
+function normalizeGroupId(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
 async function getSavedGroupIds(destinationIds) {
   const result = await api("/api/data");
   const destinations = Array.isArray(result.destinations)
@@ -1103,7 +1096,7 @@ async function renderGroupCheckboxes(selectedIds, groups = loadedGroups) {
   const list = $("groupsList");
   list.replaceChildren();
 
-  const selected = new Set(selectedIds.map(String));
+  const selected = new Set(selectedIds.map(normalizeGroupId));
 
   const data = await api("/api/data");
   const destinations = Array.isArray(data.destinations)
@@ -1112,16 +1105,22 @@ async function renderGroupCheckboxes(selectedIds, groups = loadedGroups) {
 
   const destinationByGroup = new Map(
     destinations
-      .filter(item => item.groupId)
-      .map(item => [String(item.groupId), item])
+      .filter(item => item.groupId || item.channel)
+      .map(item => [
+        normalizeGroupId(item.groupId || item.channel),
+        item
+      ])
   );
 
   groups.forEach(group => {
-    const groupId = String(group.id || group.groupId || "");
+    const groupId = String(group.id || group.groupId || "").trim();
 
     if (!groupId) return;
 
-    const savedDestination = destinationByGroup.get(groupId);
+    const savedDestination = destinationByGroup.get(
+      normalizeGroupId(groupId)
+    );
+
     const savedNiche = getGroupSavedNiche(group, savedDestination);
 
     const label = document.createElement("label");
@@ -1131,7 +1130,7 @@ async function renderGroupCheckboxes(selectedIds, groups = loadedGroups) {
     checkbox.type = "checkbox";
     checkbox.className = "automation-group";
     checkbox.value = groupId;
-    checkbox.checked = selected.has(groupId);
+    checkbox.checked = selected.has(normalizeGroupId(groupId));
     checkbox.disabled = false;
 
     const textBox = document.createElement("span");
@@ -1182,101 +1181,230 @@ function getSelectedGroupIds() {
 function getGroupNicheSelect(groupId) {
   return Array.from(
     document.querySelectorAll(".group-niche-select")
-  ).find(select => select.dataset.groupId === String(groupId));
+  ).find(select =>
+    normalizeGroupId(select.dataset.groupId) ===
+    normalizeGroupId(groupId)
+  );
 }
 
 /*
- * Salva a escolha manual de nicho de cada grupo.
- * Também atualiza os destinos que já estavam cadastrados.
- * Os grupos marcados serão os únicos incluídos na automação.
+ * CORREÇÃO:
+ * Procura os grupos já cadastrados considerando groupId e channel.
+ * Se encontrar, atualiza o cadastro existente.
+ * Só tenta cadastrar grupos realmente novos.
+ * Assim, não tenta criar novamente um grupo que já existe.
  */
 async function saveSelectedGroupsAsDestinations(groupIds) {
   const data = await api("/api/data");
-  const destinations = Array.isArray(data.destinations)
+
+  let destinations = Array.isArray(data.destinations)
     ? data.destinations
     : [];
 
-  const selectedSet = new Set(groupIds.map(String));
+  const selectedSet = new Set(
+    groupIds.map(normalizeGroupId)
+  );
+
   const destinationIds = [];
   const processedSelected = new Set();
 
+  function findExisting(groupId) {
+    const normalized = normalizeGroupId(groupId);
+
+    return destinations.find(item =>
+      normalizeGroupId(item.groupId || item.channel) === normalized
+    );
+  }
+
+  async function updateExisting(existing, group, groupId, nicheId, isSelected) {
+    if (!existing.id) {
+      throw new Error(
+        "O grupo " +
+        (group.name || group.subject || groupId) +
+        " já existe, mas o cadastro não possui um ID válido. " +
+        "Não foi feito um novo cadastro para evitar duplicidade."
+      );
+    }
+
+    const groupName =
+      group.name ||
+      group.subject ||
+      existing.name ||
+      "Grupo WhatsApp";
+
+    const result = await api(
+      "/api/destinations/" + encodeURIComponent(existing.id),
+      "PATCH",
+      {
+        name: groupName,
+        groupName,
+        groupId,
+        nicheId,
+        active: isSelected ? true : existing.active
+      }
+    );
+
+    const updated = result.destination || {
+      ...existing,
+      name: groupName,
+      groupName,
+      groupId,
+      nicheId,
+      active: isSelected ? true : existing.active
+    };
+
+    destinations = destinations.map(item =>
+      item.id === existing.id ? updated : item
+    );
+
+    return updated;
+  }
+
   for (const group of loadedGroups) {
-    const groupId = String(group.id || group.groupId || "");
+    const groupId = String(group.id || group.groupId || "").trim();
 
     if (!groupId) continue;
 
     const nicheSelect = getGroupNicheSelect(groupId);
     const nicheId = nicheSelect ? nicheSelect.value : "";
-    const isSelected = selectedSet.has(groupId);
 
-    if (isSelected && !nicheId) {
-      throw new Error(
-        "Escolha o nicho do grupo " +
-        (group.name || group.subject || groupId) +
-        " antes de ativar a automação."
-      );
-    }
-
-    /*
-     * Grupos sem nicho escolhido e não selecionados
-     * não precisam ser cadastrados.
-     */
-    if (!nicheId) continue;
+    const isSelected = selectedSet.has(
+      normalizeGroupId(groupId)
+    );
 
     const groupName =
       group.name ||
       group.subject ||
       "Grupo WhatsApp";
 
-    let existing = destinations.find(
-      item => String(item.groupId) === groupId
-    );
-
-    if (existing) {
-      await api(
-        "/api/destinations/" + encodeURIComponent(existing.id),
-        "PATCH",
-        {
-          name: groupName,
-          groupName,
-          groupId,
-          nicheId
-        }
+    if (isSelected && !nicheId) {
+      throw new Error(
+        "Escolha o nicho do grupo " +
+        groupName +
+        " antes de ativar a automação."
       );
-    } else {
-      const result = await api("/api/destinations", "POST", {
-        name: groupName,
-        groupName,
+    }
+
+    if (!nicheId) continue;
+
+    let existing = findExisting(groupId);
+
+    // Se já existe, atualiza o cadastro em vez de criar outro.
+    if (existing) {
+      existing = await updateExisting(
+        existing,
+        group,
         groupId,
         nicheId,
-        active: true
-      });
+        isSelected
+      );
+    }
 
-      existing = result.destination;
+    // Grupo novo que não foi selecionado: não cadastra.
+    else if (!isSelected) {
+      continue;
+    }
 
-      if (!existing?.id) {
-        throw new Error(
-          "Não foi possível cadastrar o grupo " + groupName + "."
+    // Só cadastra quando o grupo realmente ainda não existe.
+    else {
+      try {
+        const result = await api(
+          "/api/destinations",
+          "POST",
+          {
+            name: groupName,
+            groupName,
+            groupId,
+            nicheId,
+            active: true
+          }
+        );
+
+        existing = result.destination || null;
+
+      } catch (error) {
+        const duplicate =
+          /já está cadastrado|ja esta cadastrado|duplicad/i.test(
+            error.message
+          );
+
+        if (!duplicate) {
+          throw error;
+        }
+
+        // O servidor informou que já existe.
+        // Atualiza a lista e recupera o cadastro existente.
+        const latest = await api("/api/data");
+
+        destinations = Array.isArray(latest.destinations)
+          ? latest.destinations
+          : [];
+
+        existing = findExisting(groupId);
+
+        if (!existing) {
+          throw new Error(
+            "O servidor informou que o grupo já está cadastrado, " +
+            "mas ele não apareceu na lista de destinos. " +
+            "Nenhum grupo foi apagado."
+          );
+        }
+
+        existing = await updateExisting(
+          existing,
+          group,
+          groupId,
+          nicheId,
+          true
         );
       }
 
-      destinations.push(existing);
+      // Confere se o cadastro novo retornou o ID.
+      if (!existing || !existing.id) {
+        const latest = await api("/api/data");
+
+        destinations = Array.isArray(latest.destinations)
+          ? latest.destinations
+          : [];
+
+        existing = findExisting(groupId);
+      }
+
+      if (!existing || !existing.id) {
+        throw new Error(
+          "Não foi possível localizar o cadastro do grupo " +
+          groupName + " após salvar."
+        );
+      }
+
+      if (!destinations.some(item =>
+        normalizeGroupId(item.groupId || item.channel) ===
+        normalizeGroupId(groupId)
+      )) {
+        destinations.push(existing);
+      }
     }
 
     if (isSelected) {
+      if (!existing || !existing.id) {
+        throw new Error(
+          "Não foi possível obter o ID do grupo " + groupName + "."
+        );
+      }
+
       destinationIds.push(existing.id);
-      processedSelected.add(groupId);
+      processedSelected.add(normalizeGroupId(groupId));
     }
   }
 
-  const missingSelected = groupIds.filter(
-    groupId => !processedSelected.has(String(groupId))
+  const missingSelected = groupIds.filter(groupId =>
+    !processedSelected.has(normalizeGroupId(groupId))
   );
 
   if (missingSelected.length) {
     throw new Error(
       "Não foi possível salvar todos os grupos selecionados. " +
-      "Carregue novamente a lista de grupos e tente outra vez."
+      "Carregue novamente os grupos do WhatsApp e tente outra vez."
     );
   }
 
@@ -1322,7 +1450,7 @@ async function saveAutomation(activate) {
     : $("saveAutomationButton");
 
   button.disabled = true;
-  showMessage("automationMessage", "Salvando nichos dos grupos e configurações...");
+  showMessage("automationMessage", "Verificando grupos cadastrados e salvando configurações...");
 
   try {
     const destinationIds =
@@ -1575,3 +1703,4 @@ $("profile").addEventListener("change", changeProfile);
 
 </body>
 </html>
+
