@@ -51,17 +51,34 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 .product p{margin:4px 0;font-size:13px;color:#ccc}
 .product a{color:#ff9b52;font-weight:700;text-decoration:none}
 .product a:hover{text-decoration:underline}
-.group-list{display:grid;gap:8px;margin-top:12px}
-.group-item{display:flex;align-items:flex-start;gap:10px;background:#111;border:1px solid var(--line);padding:11px;border-radius:9px}
-.group-item input{width:20px;height:20px;margin:2px 0 0;accent-color:var(--orange);flex-shrink:0}
-.group-item span{overflow-wrap:anywhere;font-size:14px}
-.group-info{display:flex;flex-direction:column;gap:4px;min-width:0}
-.group-name{font-weight:700;color:var(--white)}
-.group-niche{font-size:12px;color:var(--green)}
-.group-niche.unknown{color:var(--red)}
+.group-list{display:grid;gap:10px;margin-top:12px}
+.group-item{
+  display:grid;
+  grid-template-columns:22px minmax(0,1fr);
+  align-items:start;
+  gap:10px;
+  background:#111;
+  border:1px solid var(--line);
+  padding:12px;
+  border-radius:10px;
+}
+.group-item input[type="checkbox"]{
+  width:20px;height:20px;margin:3px 0 0;
+  accent-color:var(--orange);flex-shrink:0;
+}
+.group-info{display:flex;flex-direction:column;gap:5px;min-width:0}
+.group-name{font-weight:700;color:var(--white);overflow-wrap:anywhere}
 .group-id{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
-.group-confidence{font-size:11px;color:#aaa}
-.group-warning{font-size:12px;color:var(--red);margin-top:3px}
+.group-niche-label{font-size:12px;color:var(--green)}
+.group-niche-select{
+  width:100%;
+  margin:3px 0 2px;
+  border:1px solid #555;
+  background:#191919;
+  color:#fff;
+  padding:10px;
+}
+.group-help{font-size:11px;color:var(--muted);line-height:1.4}
 .info-box{background:#111;border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px}
 .automation-status{font-weight:700;color:var(--orange)}
 .small{font-size:12px;color:var(--muted)}
@@ -220,22 +237,21 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 
     <h3>Grupos do WhatsApp</h3>
     <p class="muted">
-      Carregue os grupos dos quais este WhatsApp participa. O painel exibirá
-      o nicho identificado pelo servidor, quando essa informação estiver disponível.
-      Marque somente grupos autorizados a receber divulgações.
+      Carregue os grupos dos quais este WhatsApp participa. Escolha manualmente
+      o nicho de cada grupo e marque somente aqueles autorizados a receber ofertas.
+      A identificação automática pelo nome do grupo não é obrigatória.
     </p>
 
     <div class="info-box">
-      <b>Como funciona a identificação</b>
+      <b>Escolha manual do nicho</b>
       <p class="small">
-        O sistema deverá reconhecer referências no nome do grupo, mesmo que
-        não sejam nomes exatos de categorias. Exemplo: "Tudo para Elas",
-        "Estilo dos Homens", "Cantinho dos Pets" e "Mundo Tech".
+        Cada grupo terá seu próprio seletor. Mesmo que o servidor não reconheça
+        o nome do grupo, você poderá escolher normalmente entre perfumes,
+        eletrônicos, moda, beleza, casa, pets e outras categorias.
       </p>
       <p class="small">
-        Grupos não identificados ou ambíguos serão sinalizados para conferência.
-        A validação efetiva e o bloqueio de produtos incompatíveis dependem
-        também do servidor.
+        A opção "Todos os nichos" permite receber ofertas de qualquer categoria.
+        Os demais nichos recebem somente produtos compatíveis com a categoria escolhida.
       </p>
     </div>
 
@@ -344,12 +360,75 @@ let waTimer = null;
 let connecting = false;
 let loadedGroups = [];
 
+/*
+ * Os IDs abaixo correspondem aos nichos aceitos pelo servidor.
+ * "all" representa todos os nichos.
+ */
+const GROUP_NICHES = [
+  { id: "eletricos", label: "Eletrônicos e tecnologia" },
+  { id: "perfumaria", label: "Perfumes e perfumaria" },
+  { id: "beleza", label: "Beleza e cuidados pessoais" },
+  { id: "moda_feminina", label: "Moda feminina" },
+  { id: "moda_masculina", label: "Moda masculina" },
+  { id: "moda_infantil", label: "Moda infantil" },
+  { id: "calcados", label: "Calçados" },
+  { id: "casa", label: "Casa e utilidades" },
+  { id: "cozinha", label: "Cozinha" },
+  { id: "decoracao", label: "Decoração" },
+  { id: "fitness", label: "Fitness e esportes" },
+  { id: "pet", label: "Pets" },
+  { id: "brinquedos", label: "Brinquedos" },
+  { id: "acessorios", label: "Acessórios" },
+  { id: "all", label: "Todos os nichos" }
+];
+
 const $ = id => document.getElementById(id);
 
 function showMessage(id, message, type = "") {
   const el = $(id);
   el.textContent = String(message ?? "");
   el.className = "status " + type;
+}
+
+function normalizeNicheId(value) {
+  if (value && typeof value === "object") {
+    value = value.id ?? value.nicheId ?? "";
+  }
+
+  const id = String(value ?? "").trim();
+
+  return GROUP_NICHES.some(item => item.id === id) ? id : "";
+}
+
+function getGroupSavedNiche(group, savedDestination) {
+  const fromGroup =
+    normalizeNicheId(group?.nicheId) ||
+    normalizeNicheId(group?.niche?.id) ||
+    normalizeNicheId(group?.niche);
+
+  if (fromGroup) return fromGroup;
+
+  return (
+    normalizeNicheId(savedDestination?.nicheId) ||
+    normalizeNicheId(savedDestination?.niche?.id) ||
+    normalizeNicheId(savedDestination?.niche)
+  );
+}
+
+function createNicheOptions(select, selectedValue = "") {
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Selecione o nicho deste grupo";
+  select.appendChild(placeholder);
+
+  GROUP_NICHES.forEach(item => {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.label;
+    select.appendChild(option);
+  });
+
+  select.value = normalizeNicheId(selectedValue);
 }
 
 /*
@@ -378,10 +457,6 @@ function getSimpleStatus(value, fallback = "indisponível") {
 
 /*
  * Normaliza a resposta da rota /api/whatsapp.
- * Aceita tanto:
- * { status: "connected" }
- * quanto:
- * { status: { status: "connected" } }
  */
 function normalizeWhatsAppResponse(data) {
   const statusObject =
@@ -605,9 +680,6 @@ async function connectQR() {
       "error"
     );
 
-    /*
-     * Consulta o estado real do servidor mesmo quando a solicitação falha.
-     */
     await refreshWhatsApp();
   } finally {
     connecting = false;
@@ -680,9 +752,6 @@ async function refreshWhatsApp() {
 
     $("waStatus").textContent = statusText;
 
-    /*
-     * Exibe o QR somente quando o servidor retornar uma string válida.
-     */
     if (state.qr) {
       $("qrImage").src = state.qr;
       $("qrArea").classList.remove("hidden");
@@ -691,9 +760,6 @@ async function refreshWhatsApp() {
       $("qrArea").classList.add("hidden");
     }
 
-    /*
-     * Atualiza o código de pareamento sem transformar objetos em texto.
-     */
     if (state.pairingCode) {
       $("pairCode").textContent = String(state.pairingCode);
       $("pairArea").classList.remove("hidden");
@@ -724,7 +790,7 @@ async function refreshWhatsApp() {
     if (state.status === "logged_out") {
       showMessage(
         "waMessage",
-        "A sessão anterior foi encerrada pelo WhatsApp. Será necessário gerar uma nova conexão. Se o QR Code não aparecer ao tentar novamente, precisaremos ajustar a renovação da sessão no servidor.",
+        "A sessão anterior foi encerrada pelo WhatsApp. Será necessário gerar uma nova conexão.",
         "error"
       );
 
@@ -960,36 +1026,7 @@ async function loadAutomation() {
   }
 }
 
-// IDENTIFICAÇÃO E EXIBIÇÃO DOS GRUPOS
-
-function getGroupClassification(group) {
-  const niche = String(group.niche || "").trim();
-  const label = String(group.nicheLabel || "").trim();
-  const confidence = group.confidence;
-
-  const ambiguous =
-    group.ambiguous === true ||
-    group.identified === false ||
-    ["unknown", "ambiguous", "unidentified", "não identificado"].includes(niche.toLowerCase());
-
-  if (ambiguous || (!niche && !label)) {
-    return {
-      text: "Nicho não identificado — aguardando análise do servidor",
-      safe: false,
-      confidence
-    };
-  }
-
-  const general =
-    niche.toLowerCase() === "general" ||
-    niche.toLowerCase() === "geral";
-
-  return {
-    text: "Nicho: " + (label || (general ? "Grupo geral" : niche)),
-    safe: true,
-    confidence
-  };
-}
+// GRUPOS E SELEÇÃO MANUAL DE NICHOS
 
 async function loadWhatsAppGroups() {
   $("loadGroupsButton").disabled = true;
@@ -1013,7 +1050,7 @@ async function loadWhatsAppGroups() {
 
     showMessage(
       "groupsMessage",
-      loadedGroups.length + " grupo(s) carregado(s). Confira os nichos antes de salvar.",
+      loadedGroups.length + " grupo(s) carregado(s). Escolha o nicho de cada grupo e marque os autorizados.",
       "success"
     );
   } catch (error) {
@@ -1037,20 +1074,21 @@ async function renderSavedGroupSelection(selectedIds) {
       .map(item => ({
         id: item.groupId,
         name: item.groupName || item.name || item.groupId,
-        niche: item.niche,
-        nicheLabel: item.nicheLabel,
-        confidence: item.confidence,
-        identified: item.identified,
-        ambiguous: item.ambiguous
+        nicheId: item.nicheId || "",
+        niche: item.niche || "",
+        nicheLabel: item.nicheLabel || ""
       }));
 
     if (loadedGroups.length) {
       await renderGroupCheckboxes(selectedGroupIds, loadedGroups);
     } else if (savedGroups.length) {
+      loadedGroups = savedGroups;
+
       await renderGroupCheckboxes(selectedGroupIds, savedGroups);
+
       showMessage(
         "groupsMessage",
-        "Exibindo grupos cadastrados. Carregue novamente os grupos do WhatsApp para atualizar a classificação."
+        "Exibindo grupos cadastrados. Carregue novamente os grupos do WhatsApp para atualizar a lista."
       );
     } else {
       $("groupsList").replaceChildren();
@@ -1067,60 +1105,69 @@ async function renderGroupCheckboxes(selectedIds, groups = loadedGroups) {
 
   const selected = new Set(selectedIds.map(String));
 
+  const data = await api("/api/data");
+  const destinations = Array.isArray(data.destinations)
+    ? data.destinations
+    : [];
+
+  const destinationByGroup = new Map(
+    destinations
+      .filter(item => item.groupId)
+      .map(item => [String(item.groupId), item])
+  );
+
   groups.forEach(group => {
+    const groupId = String(group.id || group.groupId || "");
+
+    if (!groupId) return;
+
+    const savedDestination = destinationByGroup.get(groupId);
+    const savedNiche = getGroupSavedNiche(group, savedDestination);
+
     const label = document.createElement("label");
     label.className = "group-item";
 
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.className = "automation-group";
-    checkbox.value = group.id;
-
-    const classification = getGroupClassification(group);
-
-    checkbox.checked =
-      selected.has(String(group.id)) && classification.safe;
-
-    checkbox.disabled = !classification.safe;
+    checkbox.value = groupId;
+    checkbox.checked = selected.has(groupId);
+    checkbox.disabled = false;
 
     const textBox = document.createElement("span");
     textBox.className = "group-info";
 
     const name = document.createElement("span");
     name.className = "group-name";
-    name.textContent = group.name || "Grupo sem nome";
+    name.textContent = group.name || group.subject || "Grupo sem nome";
 
-    const niche = document.createElement("span");
-    niche.className = classification.safe
-      ? "group-niche"
-      : "group-niche unknown";
-    niche.textContent = classification.text;
+    const nicheLabel = document.createElement("span");
+    nicheLabel.className = "group-niche-label";
+    nicheLabel.textContent = "Nicho escolhido manualmente:";
+
+    const nicheSelect = document.createElement("select");
+    nicheSelect.className = "group-niche-select";
+    nicheSelect.dataset.groupId = groupId;
+
+    createNicheOptions(nicheSelect, savedNiche);
+
+    const help = document.createElement("span");
+    help.className = "group-help";
+    help.textContent =
+      "Escolha a categoria que este grupo deve receber. Essa escolha será salva junto com as configurações.";
 
     const small = document.createElement("span");
     small.className = "group-id";
-    small.textContent = group.id || "";
+    small.textContent = groupId;
 
-    textBox.append(name, niche);
+    textBox.append(
+      name,
+      nicheLabel,
+      nicheSelect,
+      help,
+      small
+    );
 
-    if (
-      classification.confidence !== undefined &&
-      classification.confidence !== null
-    ) {
-      const confidence = document.createElement("span");
-      confidence.className = "group-confidence";
-      confidence.textContent = "Confiança informada: " +
-        classification.confidence;
-      textBox.appendChild(confidence);
-    }
-
-    if (!classification.safe) {
-      const warning = document.createElement("span");
-      warning.className = "group-warning";
-      warning.textContent = "Seleção desativada até o servidor identificar o nicho.";
-      textBox.appendChild(warning);
-    }
-
-    textBox.appendChild(small);
     label.append(checkbox, textBox);
     list.appendChild(label);
   });
@@ -1132,48 +1179,105 @@ function getSelectedGroupIds() {
   ).map(input => input.value);
 }
 
+function getGroupNicheSelect(groupId) {
+  return Array.from(
+    document.querySelectorAll(".group-niche-select")
+  ).find(select => select.dataset.groupId === String(groupId));
+}
+
+/*
+ * Salva a escolha manual de nicho de cada grupo.
+ * Também atualiza os destinos que já estavam cadastrados.
+ * Os grupos marcados serão os únicos incluídos na automação.
+ */
 async function saveSelectedGroupsAsDestinations(groupIds) {
   const data = await api("/api/data");
   const destinations = Array.isArray(data.destinations)
     ? data.destinations
     : [];
 
+  const selectedSet = new Set(groupIds.map(String));
   const destinationIds = [];
+  const processedSelected = new Set();
 
-  for (const groupId of groupIds) {
-    const group = loadedGroups.find(item => item.id === groupId);
+  for (const group of loadedGroups) {
+    const groupId = String(group.id || group.groupId || "");
 
-    if (group && !getGroupClassification(group).safe) {
+    if (!groupId) continue;
+
+    const nicheSelect = getGroupNicheSelect(groupId);
+    const nicheId = nicheSelect ? nicheSelect.value : "";
+    const isSelected = selectedSet.has(groupId);
+
+    if (isSelected && !nicheId) {
       throw new Error(
-        "O grupo " + (group.name || groupId) +
-        " não possui classificação segura."
+        "Escolha o nicho do grupo " +
+        (group.name || group.subject || groupId) +
+        " antes de ativar a automação."
       );
     }
 
-    let existing = destinations.find(item => item.groupId === groupId);
+    /*
+     * Grupos sem nicho escolhido e não selecionados
+     * não precisam ser cadastrados.
+     */
+    if (!nicheId) continue;
 
-    if (!existing) {
+    const groupName =
+      group.name ||
+      group.subject ||
+      "Grupo WhatsApp";
+
+    let existing = destinations.find(
+      item => String(item.groupId) === groupId
+    );
+
+    if (existing) {
+      await api(
+        "/api/destinations/" + encodeURIComponent(existing.id),
+        "PATCH",
+        {
+          name: groupName,
+          groupName,
+          groupId,
+          nicheId
+        }
+      );
+    } else {
       const result = await api("/api/destinations", "POST", {
-        name: group?.name || "Grupo WhatsApp",
-        groupName: group?.name || "Grupo WhatsApp",
+        name: groupName,
+        groupName,
         groupId,
-        niche: group?.niche || null,
-        nicheLabel: group?.nicheLabel || null,
-        confidence: group?.confidence ?? null,
-        identified: group?.identified ?? false,
-        ambiguous: group?.ambiguous ?? false
+        nicheId,
+        active: true
       });
 
       existing = result.destination;
 
       if (!existing?.id) {
-        throw new Error("Não foi possível cadastrar um dos grupos selecionados.");
+        throw new Error(
+          "Não foi possível cadastrar o grupo " + groupName + "."
+        );
       }
 
       destinations.push(existing);
     }
 
-    destinationIds.push(existing.id);
+    if (isSelected) {
+      destinationIds.push(existing.id);
+      processedSelected.add(groupId);
+    }
+  }
+
+  const missingSelected = groupIds.filter(
+    groupId => !processedSelected.has(String(groupId))
+  );
+
+  if (missingSelected.length) {
+    throw new Error(
+      "Não foi possível salvar todos os grupos selecionados. " +
+      "Carregue novamente a lista de grupos e tente outra vez."
+    );
   }
 
   return destinationIds;
@@ -1209,7 +1313,7 @@ async function saveAutomation(activate) {
   }
 
   if (!selectedGroups.length) {
-    showMessage("automationMessage", "Marque pelo menos um grupo autorizado e identificado.", "error");
+    showMessage("automationMessage", "Marque pelo menos um grupo autorizado.", "error");
     return;
   }
 
@@ -1218,10 +1322,11 @@ async function saveAutomation(activate) {
     : $("saveAutomationButton");
 
   button.disabled = true;
-  showMessage("automationMessage", "Salvando configurações...");
+  showMessage("automationMessage", "Salvando nichos dos grupos e configurações...");
 
   try {
-    const destinationIds = await saveSelectedGroupsAsDestinations(selectedGroups);
+    const destinationIds =
+      await saveSelectedGroupsAsDestinations(selectedGroups);
 
     const current = await api("/api/automation");
     const currentlyActive = Boolean(current.automation?.active);
@@ -1238,8 +1343,8 @@ async function saveAutomation(activate) {
     showMessage(
       "automationMessage",
       activate
-        ? "Automação ativada para " + getProfileName() + "."
-        : "Configurações salvas para " + getProfileName() + ".",
+        ? "Automação ativada para " + getProfileName() + ". Os grupos receberão ofertas conforme os nichos escolhidos."
+        : "Nichos dos grupos e configurações salvos para " + getProfileName() + ".",
       "success"
     );
 
