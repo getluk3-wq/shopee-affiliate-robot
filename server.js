@@ -181,6 +181,37 @@ function normalizeGroupId(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+// Normaliza IDs de grupos e números para o formato aceito pelo Baileys.
+function normalizeWhatsAppJid(value) {
+  let raw = String(value || '').trim();
+
+  if (!raw) return '';
+
+  raw = raw.replace(/\s+/g, '');
+
+  if (raw.includes('@')) {
+    const separator = raw.lastIndexOf('@');
+
+    return (
+      raw.slice(0, separator) +
+      '@' +
+      raw.slice(separator + 1).toLowerCase()
+    );
+  }
+
+  if (/^\d+-\d+$/.test(raw)) {
+    return `${raw}@g.us`;
+  }
+
+  const digits = raw.replace(/\D/g, '');
+
+  if (digits.length >= 10) {
+    return `${digits}@s.whatsapp.net`;
+  }
+
+  return '';
+}
+
 function getMapValueByGroupId(map, groupId) {
   if (!map || typeof map !== 'object' || Array.isArray(map)) return '';
 
@@ -703,7 +734,9 @@ function deserializeAuth(value) {
   if (typeof value !== 'string') return value;
 
   return JSON.parse(value, BufferJSON.reviver);
-}async function readAuthTableValue(profile, key) {
+}
+
+async function readAuthTableValue(profile, key) {
   if (!supabase) return null;
 
   const profileColumns = ['perfil', 'profile', 'profile_id'];
@@ -950,9 +983,7 @@ async function createSupabaseAuthState(profile) {
     },
     saveCreds: persistCreds
   };
-}
-
-function setStatus(profile, status, extra = {}) {
+}function setStatus(profile, status, extra = {}) {
   connectionStatus.set(profile, {
     status,
     updatedAt: new Date().toISOString(),
@@ -1219,7 +1250,7 @@ function publicDestination(destination) {
                   id: destination.nicheId,
                   label: destination.nicheId
                 }
-          )
+            )
         )
   };
 }
@@ -1303,6 +1334,7 @@ function buildOfferMessage(product) {
   return `🔥 *OFERTA IMPERDÍVEL* 🔥\n\n🛍️ *${product.productName}*\n${oldPrice ? `De: R$ ${String(oldPrice).replace('.', ',')}\n` : ''}${price ? `Por: *${price}*\n` : ''}${discount}\n🔗 ${product.productLink || 'Consulte o link da oferta'}`;
 }
 
+// Envio corrigido: normaliza o JID e tenta texto se a imagem falhar.
 async function sendToDestination(profile, destination, product) {
   const sock = sockets.get(profile);
 
@@ -1313,11 +1345,17 @@ async function sendToDestination(profile, destination, product) {
     throw new Error('WhatsApp não está conectado.');
   }
 
-  const jid = destination.groupId || destination.phone;
+  const rawJid =
+    destination?.groupId ||
+    destination?.phone ||
+    destination?.id ||
+    '';
+
+  const jid = normalizeWhatsAppJid(rawJid);
 
   if (!jid) {
     throw new Error(
-      `Destino ${destination.name} sem ID de grupo ou telefone.`
+      `ID de grupo ou telefone inválido: ${rawJid || 'vazio'}`
     );
   }
 
@@ -1327,16 +1365,57 @@ async function sendToDestination(profile, destination, product) {
     product.imageUrl &&
     /^https?:\/\//i.test(product.imageUrl)
   ) {
-    await sock.sendMessage(jid, {
-      image: { url: product.imageUrl },
-      caption: text
-    });
+    try {
+      const result = await sock.sendMessage(jid, {
+        image: { url: product.imageUrl },
+        caption: text
+      });
 
-  } else {
-    await sock.sendMessage(jid, {
-      text
-    });
+      if (result) {
+        logger.info(
+          {
+            profile,
+            destination: jid,
+            messageId: result.key?.id || null,
+            type: 'image'
+          },
+          'Oferta enviada ao WhatsApp'
+        );
+
+        return result;
+      }
+
+    } catch (imageError) {
+      logger.warn(
+        {
+          profile,
+          destination: jid,
+          error: imageError.message
+        },
+        'Falha no envio da imagem; tentando enviar somente texto'
+      );
+    }
   }
+
+  const result = await sock.sendMessage(jid, {
+    text
+  });
+
+  if (!result) {
+    throw new Error('O WhatsApp não confirmou o envio da mensagem.');
+  }
+
+  logger.info(
+    {
+      profile,
+      destination: jid,
+      messageId: result.key?.id || null,
+      type: 'text'
+    },
+    'Mensagem enviada ao WhatsApp'
+  );
+
+  return result;
 }
 
 function getShopeeCredentials(profile) {
@@ -1478,7 +1557,9 @@ async function fetchShopeeOffers(profile, limit = 10) {
   return (
     Array.isArray(nodes) ? nodes : []
   ).map(normalizeProduct);
-}async function processQueue(profile) {
+}
+
+async function processQueue(profile) {
   const data = getData(profile);
 
   const item = data.queue.find(
@@ -1812,9 +1893,7 @@ async function runAutomation(profile) {
   } finally {
     automationLocks.delete(profile);
   }
-}
-
-function routeError(res, error, status = 400) {
+}function routeError(res, error, status = 400) {
   logger.error(
     {
       message: error?.message || String(error),
@@ -2333,6 +2412,8 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
   }
 });
 
+// ENVIO MANUAL CORRIGIDO.
+// Aceita destination, to, groupId, jid e phone.
 app.post('/api/whatsapp/send', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
@@ -2345,35 +2426,98 @@ app.post('/api/whatsapp/send', async (req, res) => {
     ) {
       return res.status(409).json({
         ok: false,
-        error: 'WhatsApp não conectado.'
+        error: 'WhatsApp não conectado. Verifique a conexão do perfil.'
       });
     }
 
-    const to = String(
-      req.body?.to ||
-      req.body?.groupId ||
+    const rawDestination =
+      req.body?.destination ??
+      req.body?.to ??
+      req.body?.groupId ??
+      req.body?.jid ??
+      req.body?.phone ??
+      '';
+
+    const destinationValue =
+      rawDestination && typeof rawDestination === 'object'
+        ? (
+            rawDestination.groupId ||
+            rawDestination.id ||
+            rawDestination.jid ||
+            rawDestination.phone ||
+            ''
+          )
+        : rawDestination;
+
+    const to = normalizeWhatsAppJid(destinationValue);
+
+    const message = String(
+      req.body?.message ||
+      req.body?.text ||
+      req.body?.caption ||
       ''
     ).trim();
 
-    const message = String(
-      req.body?.message || ''
-    ).trim();
-
-    if (!to || !message) {
+    if (!to) {
       return res.status(400).json({
         ok: false,
-        error: 'Informe destino e mensagem.'
+        error: 'Destino inválido. Selecione um grupo ou informe um telefone válido.',
+        receivedDestination: String(destinationValue || '')
       });
     }
 
-    await sock.sendMessage(to, {
+    if (!message) {
+      return res.status(400).json({
+        ok: false,
+        error: 'A mensagem está vazia.'
+      });
+    }
+
+    logger.info(
+      {
+        profile,
+        destination: to,
+        messageLength: message.length
+      },
+      'Solicitação de envio manual recebida'
+    );
+
+    const result = await sock.sendMessage(to, {
       text: message
     });
 
-    res.json({ ok: true });
+    if (!result) {
+      throw new Error(
+        'O WhatsApp não retornou confirmação do envio.'
+      );
+    }
+
+    logger.info(
+      {
+        profile,
+        destination: to,
+        messageId: result.key?.id || null
+      },
+      'Envio manual realizado'
+    );
+
+    return res.json({
+      ok: true,
+      message: 'Mensagem encaminhada ao WhatsApp.',
+      destination: to,
+      messageId: result.key?.id || null
+    });
 
   } catch (error) {
-    routeError(res, error);
+    logger.error(
+      {
+        error: error.message,
+        stack: error.stack || null
+      },
+      'Falha no envio manual do WhatsApp'
+    );
+
+    return routeError(res, error, 502);
   }
 });
 
