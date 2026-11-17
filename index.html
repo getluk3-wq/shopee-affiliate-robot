@@ -253,6 +253,10 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
         A opção "Todos os nichos" permite receber ofertas de qualquer categoria.
         Os demais nichos recebem somente produtos compatíveis com a categoria escolhida.
       </p>
+      <p class="small">
+        A seleção dos grupos será salva diretamente na automação deste perfil,
+        sem criar ou alterar cadastros na lista de destinos.
+      </p>
     </div>
 
     <button class="secondary" id="loadGroupsButton" onclick="loadWhatsAppGroups()">
@@ -300,7 +304,10 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 
   <section class="card">
     <h2>Destinos do perfil</h2>
-    <p class="muted">Cadastro manual de destinos para organização.</p>
+    <p class="muted">
+      Cadastro manual de destinos para organização. Esta área é independente
+      da seleção direta dos grupos na automação.
+    </p>
     <input id="dname" placeholder="Nome do destino">
     <input id="channel" placeholder="Identificação do grupo WhatsApp">
     <button onclick="addDestination()">Salvar destino</button>
@@ -360,6 +367,13 @@ let waTimer = null;
 let connecting = false;
 let loadedGroups = [];
 
+let savedGroupState = {
+  groupIds: [],
+  groupNiches: {},
+  groupNames: {},
+  directMode: false
+};
+
 const GROUP_NICHES = [
   { id: "eletricos", label: "Eletrônicos e tecnologia" },
   { id: "perfumaria", label: "Perfumes e perfumaria" },
@@ -394,6 +408,29 @@ function normalizeNicheId(value) {
   const id = String(value ?? "").trim();
 
   return GROUP_NICHES.some(item => item.id === id) ? id : "";
+}
+
+function normalizeGroupId(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function normalizeGroupIds(values) {
+  if (!Array.isArray(values)) return [];
+
+  const seen = new Set();
+  const result = [];
+
+  for (const value of values) {
+    const id = String(value ?? "").trim();
+    const normalized = normalizeGroupId(id);
+
+    if (!id || !normalized || seen.has(normalized)) continue;
+
+    seen.add(normalized);
+    result.push(id);
+  }
+
+  return result;
 }
 
 function getGroupSavedNiche(group, savedDestination) {
@@ -594,6 +631,13 @@ async function changeProfile() {
   profile = $("profile").value;
   stopWAPolling();
 
+  savedGroupState = {
+    groupIds: [],
+    groupNiches: {},
+    groupNames: {},
+    directMode: false
+  };
+
   $("profileLabel").textContent = "Perfil ativo: " + getProfileName();
   $("waProfileName").textContent = getProfileName();
 
@@ -609,6 +653,7 @@ async function changeProfile() {
   $("searchKeyword").value = "";
   $("groupsList").replaceChildren();
   $("groupsMessage").textContent = "";
+  $("automationMessage").textContent = "";
   loadedGroups = [];
 
   await loadProfile();
@@ -903,7 +948,9 @@ async function sendTestMessage() {
   }
 }
 
-// DESTINOS
+// DESTINOS MANUAIS
+// Esta função continua disponível, mas não é usada pela seleção de grupos
+// da automação.
 
 async function addDestination() {
   const name = $("dname").value.trim();
@@ -922,7 +969,6 @@ async function addDestination() {
 
     showMessage("destinationResult", "Destino salvo no perfil " + getProfileName() + ".", "success");
     await refresh();
-    await loadAutomation();
   } catch (error) {
     showMessage("destinationResult", error.message, "error");
   }
@@ -934,30 +980,133 @@ function formatInterval(seconds) {
   const value = Number(seconds);
 
   if (value < 60) return value + " segundos";
+
   if (value % 3600 === 0) {
     const hours = value / 3600;
     return hours + (hours === 1 ? " hora" : " horas");
   }
+
   if (value % 60 === 0) return (value / 60) + " minutos";
 
   return value + " segundos";
 }
 
-function normalizeGroupId(value) {
-  return String(value ?? "").trim().toLowerCase();
+function getAutomationGroupMaps(automation) {
+  const groupNiches = {};
+  const groupNames = {};
+
+  const sourceNiches =
+    automation?.groupNiches &&
+    typeof automation.groupNiches === "object"
+      ? automation.groupNiches
+      : {};
+
+  const sourceNames =
+    automation?.groupNames &&
+    typeof automation.groupNames === "object"
+      ? automation.groupNames
+      : {};
+
+  Object.entries(sourceNiches).forEach(([groupId, niche]) => {
+    const id = String(groupId || "").trim();
+    const nicheId = normalizeNicheId(niche);
+
+    if (id && nicheId) {
+      groupNiches[id] = nicheId;
+    }
+  });
+
+  Object.entries(sourceNames).forEach(([groupId, name]) => {
+    const id = String(groupId || "").trim();
+    const groupName = String(name || "").trim();
+
+    if (id && groupName) {
+      groupNames[id] = groupName;
+    }
+  });
+
+  return { groupNiches, groupNames };
 }
 
-async function getSavedGroupIds(destinationIds) {
-  const result = await api("/api/data");
-  const destinations = Array.isArray(result.destinations)
-    ? result.destinations
+/*
+ * Recupera a seleção direta de grupos salva na automação.
+ *
+ * Compatibilidade:
+ * se o perfil ainda tiver somente destinationIds do sistema antigo,
+ * consulta os destinos antigos apenas para recuperar a seleção.
+ *
+ * Esta função NÃO cria, edita ou exclui destinos.
+ */
+async function getAutomationGroupState(automation = {}) {
+  const directMode =
+    automation.groupSelectionMode === true ||
+    Array.isArray(automation.groupIds);
+
+  const maps = getAutomationGroupMaps(automation);
+
+  if (directMode) {
+    return {
+      groupIds: normalizeGroupIds(automation.groupIds || []),
+      groupNiches: maps.groupNiches,
+      groupNames: maps.groupNames,
+      directMode: true
+    };
+  }
+
+  const destinationIds = Array.isArray(automation.destinationIds)
+    ? automation.destinationIds.map(id => String(id))
     : [];
 
-  const selected = new Set(destinationIds.map(String));
+  if (!destinationIds.length) {
+    return {
+      groupIds: [],
+      groupNiches: maps.groupNiches,
+      groupNames: maps.groupNames,
+      directMode: false
+    };
+  }
 
-  return destinations
-    .filter(item => selected.has(String(item.id)) && item.groupId)
-    .map(item => item.groupId);
+  const data = await api("/api/data");
+  const destinations = Array.isArray(data.destinations)
+    ? data.destinations
+    : [];
+
+  const selectedDestinationIds = new Set(destinationIds);
+
+  const selectedDestinations = destinations.filter(item =>
+    selectedDestinationIds.has(String(item.id)) &&
+    (item.groupId || item.channel)
+  );
+
+  const groupIds = [];
+
+  selectedDestinations.forEach(item => {
+    const groupId = String(item.groupId || item.channel || "").trim();
+
+    if (!groupId) return;
+
+    groupIds.push(groupId);
+
+    const nicheId = normalizeNicheId(item.nicheId || item.niche);
+    const groupName = String(
+      item.groupName || item.name || groupId
+    ).trim();
+
+    if (nicheId && !maps.groupNiches[groupId]) {
+      maps.groupNiches[groupId] = nicheId;
+    }
+
+    if (groupName && !maps.groupNames[groupId]) {
+      maps.groupNames[groupId] = groupName;
+    }
+  });
+
+  return {
+    groupIds: normalizeGroupIds(groupIds),
+    groupNiches: maps.groupNiches,
+    groupNames: maps.groupNames,
+    directMode: false
+  };
 }
 
 async function loadAutomation() {
@@ -982,18 +1131,24 @@ async function loadAutomation() {
     $("autoEnd").value = end;
     $("autoInterval").value = String(intervalSeconds || 1800);
 
+    const isActive = Boolean(
+      automation.active ?? automation.enabled
+    );
+
     $("automationStatus").textContent =
-      automation.active ? "ATIVA" : "PAUSADA";
+      isActive ? "ATIVA" : "PAUSADA";
 
     $("automationStatus").className =
-      automation.active ? "automation-status success" : "automation-status";
+      isActive ? "automation-status success" : "automation-status";
 
     let details = "Horário: " + start + " até " + end;
     details += " | Intervalo: " + formatInterval(intervalSeconds || 1800);
 
-    if (automation.lastSentAt) {
+    if (automation.lastSentAt || automation.lastRunAt) {
       details += " | Último envio: " +
-        new Date(automation.lastSentAt).toLocaleString("pt-BR");
+        new Date(
+          automation.lastSentAt || automation.lastRunAt
+        ).toLocaleString("pt-BR");
     }
 
     if (automation.nextSendAt) {
@@ -1009,17 +1164,20 @@ async function loadAutomation() {
       showMessage("automationMessage", "");
     }
 
-    $("startAutomationButton").disabled = Boolean(automation.active);
-    $("pauseAutomationButton").disabled = !automation.active;
+    $("startAutomationButton").disabled = isActive;
+    $("pauseAutomationButton").disabled = !isActive;
 
-    await renderSavedGroupSelection(automation.destinationIds || []);
+    savedGroupState = await getAutomationGroupState(automation);
+
+    await renderSavedGroupSelection(savedGroupState);
+
   } catch (error) {
     showMessage("automationMessage", error.message, "error");
     $("automationStatus").textContent = "Não foi possível consultar";
   }
 }
 
-// GRUPOS E SELEÇÃO MANUAL DE NICHOS
+// GRUPOS E SELEÇÃO DIRETA DE NICHOS
 
 async function loadWhatsAppGroups() {
   $("loadGroupsButton").disabled = true;
@@ -1036,16 +1194,19 @@ async function loadWhatsAppGroups() {
     }
 
     const automationResult = await api("/api/automation");
-    const destinationIds = automationResult.automation?.destinationIds || [];
-    const selectedGroupIds = await getSavedGroupIds(destinationIds);
+    const automation = automationResult.automation || {};
 
-    await renderGroupCheckboxes(selectedGroupIds, loadedGroups);
+    savedGroupState = await getAutomationGroupState(automation);
+
+    await renderGroupCheckboxes(savedGroupState, loadedGroups);
 
     showMessage(
       "groupsMessage",
-      loadedGroups.length + " grupo(s) carregado(s). Escolha o nicho de cada grupo e marque os autorizados.",
+      loadedGroups.length +
+      " grupo(s) carregado(s). Escolha o nicho de cada grupo e marque os autorizados.",
       "success"
     );
+
   } catch (error) {
     showMessage("groupsMessage", error.message, "error");
   } finally {
@@ -1053,75 +1214,63 @@ async function loadWhatsAppGroups() {
   }
 }
 
-async function renderSavedGroupSelection(selectedIds) {
-  try {
-    const result = await api("/api/data");
-    const destinations = Array.isArray(result.destinations)
-      ? result.destinations
-      : [];
-
-    const selectedGroupIds = await getSavedGroupIds(selectedIds);
-
-    const savedGroups = destinations
-      .filter(item => item.groupId && item.groupId.endsWith("@g.us"))
-      .map(item => ({
-        id: item.groupId,
-        name: item.groupName || item.name || item.groupId,
-        nicheId: item.nicheId || "",
-        niche: item.niche || "",
-        nicheLabel: item.nicheLabel || ""
-      }));
-
-    if (loadedGroups.length) {
-      await renderGroupCheckboxes(selectedGroupIds, loadedGroups);
-    } else if (savedGroups.length) {
-      loadedGroups = savedGroups;
-
-      await renderGroupCheckboxes(selectedGroupIds, savedGroups);
-
-      showMessage(
-        "groupsMessage",
-        "Exibindo grupos cadastrados. Carregue novamente os grupos do WhatsApp para atualizar a lista."
-      );
-    } else {
-      $("groupsList").replaceChildren();
-      showMessage("groupsMessage", "Clique em Carregar meus grupos do WhatsApp.");
-    }
-  } catch (error) {
-    showMessage("groupsMessage", error.message, "error");
+async function renderSavedGroupSelection(state = savedGroupState) {
+  if (loadedGroups.length) {
+    await renderGroupCheckboxes(state, loadedGroups);
+    return;
   }
+
+  if (state.groupIds.length) {
+    const savedGroups = state.groupIds.map(groupId => ({
+      id: groupId,
+      groupId,
+      name: state.groupNames[groupId] || groupId,
+      nicheId: state.groupNiches[groupId] || ""
+    }));
+
+    loadedGroups = savedGroups;
+
+    await renderGroupCheckboxes(state, savedGroups);
+
+    showMessage(
+      "groupsMessage",
+      "Exibindo os grupos salvos neste perfil. Use 'Carregar meus grupos do WhatsApp' para atualizar a lista."
+    );
+
+    return;
+  }
+
+  $("groupsList").replaceChildren();
+
+  showMessage(
+    "groupsMessage",
+    "Clique em Carregar meus grupos do WhatsApp para escolher os grupos."
+  );
 }
 
-async function renderGroupCheckboxes(selectedIds, groups = loadedGroups) {
+async function renderGroupCheckboxes(state = savedGroupState, groups = loadedGroups) {
   const list = $("groupsList");
   list.replaceChildren();
 
+  const selectedIds = normalizeGroupIds(state.groupIds || []);
   const selected = new Set(selectedIds.map(normalizeGroupId));
 
-  const data = await api("/api/data");
-  const destinations = Array.isArray(data.destinations)
-    ? data.destinations
-    : [];
-
-  const destinationByGroup = new Map(
-    destinations
-      .filter(item => item.groupId || item.channel)
-      .map(item => [
-        normalizeGroupId(item.groupId || item.channel),
-        item
-      ])
-  );
+  const groupNiches = state.groupNiches || {};
+  const groupNames = state.groupNames || {};
 
   groups.forEach(group => {
     const groupId = String(group.id || group.groupId || "").trim();
 
     if (!groupId) return;
 
-    const savedDestination = destinationByGroup.get(
-      normalizeGroupId(groupId)
-    );
+    const normalizedId = normalizeGroupId(groupId);
+    const isSelected = selected.has(normalizedId);
 
-    const savedNiche = getGroupSavedNiche(group, savedDestination);
+    const savedNiche =
+      normalizeNicheId(groupNiches[groupId]) ||
+      normalizeNicheId(group.nicheId) ||
+      normalizeNicheId(group.niche?.id) ||
+      normalizeNicheId(group.niche);
 
     const label = document.createElement("label");
     label.className = "group-item";
@@ -1130,15 +1279,18 @@ async function renderGroupCheckboxes(selectedIds, groups = loadedGroups) {
     checkbox.type = "checkbox";
     checkbox.className = "automation-group";
     checkbox.value = groupId;
-    checkbox.checked = selected.has(normalizeGroupId(groupId));
-    checkbox.disabled = false;
+    checkbox.checked = isSelected;
 
     const textBox = document.createElement("span");
     textBox.className = "group-info";
 
     const name = document.createElement("span");
     name.className = "group-name";
-    name.textContent = group.name || group.subject || "Grupo sem nome";
+    name.textContent =
+      groupNames[groupId] ||
+      group.name ||
+      group.subject ||
+      "Grupo sem nome";
 
     const nicheLabel = document.createElement("span");
     nicheLabel.className = "group-niche-label";
@@ -1153,7 +1305,7 @@ async function renderGroupCheckboxes(selectedIds, groups = loadedGroups) {
     const help = document.createElement("span");
     help.className = "group-help";
     help.textContent =
-      "Escolha a categoria que este grupo deve receber. Essa escolha será salva junto com as configurações.";
+      "Escolha a categoria que este grupo deve receber. A escolha será salva diretamente na automação deste perfil.";
 
     const small = document.createElement("span");
     small.className = "group-id";
@@ -1173,9 +1325,11 @@ async function renderGroupCheckboxes(selectedIds, groups = loadedGroups) {
 }
 
 function getSelectedGroupIds() {
-  return Array.from(
-    document.querySelectorAll(".automation-group:checked")
-  ).map(input => input.value);
+  return normalizeGroupIds(
+    Array.from(
+      document.querySelectorAll(".automation-group:checked")
+    ).map(input => input.value)
+  );
 }
 
 function getGroupNicheSelect(groupId) {
@@ -1187,228 +1341,60 @@ function getGroupNicheSelect(groupId) {
   );
 }
 
-/*
- * CORREÇÃO:
- * Procura os grupos já cadastrados considerando groupId e channel.
- * Se encontrar, atualiza o cadastro existente.
- * Só tenta cadastrar grupos realmente novos.
- * Assim, não tenta criar novamente um grupo que já existe.
- */
-async function saveSelectedGroupsAsDestinations(groupIds) {
-  const data = await api("/api/data");
-
-  let destinations = Array.isArray(data.destinations)
-    ? data.destinations
-    : [];
-
-  const selectedSet = new Set(
-    groupIds.map(normalizeGroupId)
+function getGroupById(groupId) {
+  return loadedGroups.find(group =>
+    normalizeGroupId(group.id || group.groupId) ===
+    normalizeGroupId(groupId)
   );
+}
 
-  const destinationIds = [];
-  const processedSelected = new Set();
+/*
+ * Monta os dados dos grupos selecionados.
+ *
+ * IMPORTANTE:
+ * esta função não chama /api/destinations.
+ * Os grupos são enviados diretamente para /api/automation.
+ */
+function buildSelectedGroupSettings(groupIds) {
+  const groupNiches = {};
+  const groupNames = {};
 
-  function findExisting(groupId) {
-    const normalized = normalizeGroupId(groupId);
-
-    return destinations.find(item =>
-      normalizeGroupId(item.groupId || item.channel) === normalized
-    );
-  }
-
-  async function updateExisting(existing, group, groupId, nicheId, isSelected) {
-    if (!existing.id) {
-      throw new Error(
-        "O grupo " +
-        (group.name || group.subject || groupId) +
-        " já existe, mas o cadastro não possui um ID válido. " +
-        "Não foi feito um novo cadastro para evitar duplicidade."
-      );
-    }
-
-    const groupName =
-      group.name ||
-      group.subject ||
-      existing.name ||
-      "Grupo WhatsApp";
-
-    const result = await api(
-      "/api/destinations/" + encodeURIComponent(existing.id),
-      "PATCH",
-      {
-        name: groupName,
-        groupName,
-        groupId,
-        nicheId,
-        active: isSelected ? true : existing.active
-      }
-    );
-
-    const updated = result.destination || {
-      ...existing,
-      name: groupName,
-      groupName,
-      groupId,
-      nicheId,
-      active: isSelected ? true : existing.active
-    };
-
-    destinations = destinations.map(item =>
-      item.id === existing.id ? updated : item
-    );
-
-    return updated;
-  }
-
-  for (const group of loadedGroups) {
-    const groupId = String(group.id || group.groupId || "").trim();
-
-    if (!groupId) continue;
-
+  for (const groupId of groupIds) {
     const nicheSelect = getGroupNicheSelect(groupId);
-    const nicheId = nicheSelect ? nicheSelect.value : "";
+    const nicheId = nicheSelect
+      ? normalizeNicheId(nicheSelect.value)
+      : "";
 
-    const isSelected = selectedSet.has(
-      normalizeGroupId(groupId)
-    );
+    const group = getGroupById(groupId);
 
-    const groupName =
-      group.name ||
-      group.subject ||
-      "Grupo WhatsApp";
+    const groupName = String(
+      group?.name ||
+      group?.subject ||
+      savedGroupState.groupNames?.[groupId] ||
+      groupId
+    ).trim();
 
-    if (isSelected && !nicheId) {
+    if (!nicheId) {
       throw new Error(
         "Escolha o nicho do grupo " +
         groupName +
-        " antes de ativar a automação."
+        " antes de salvar ou ativar a automação."
       );
     }
 
-    if (!nicheId) continue;
-
-    let existing = findExisting(groupId);
-
-    // Se já existe, atualiza o cadastro em vez de criar outro.
-    if (existing) {
-      existing = await updateExisting(
-        existing,
-        group,
-        groupId,
-        nicheId,
-        isSelected
-      );
-    }
-
-    // Grupo novo que não foi selecionado: não cadastra.
-    else if (!isSelected) {
-      continue;
-    }
-
-    // Só cadastra quando o grupo realmente ainda não existe.
-    else {
-      try {
-        const result = await api(
-          "/api/destinations",
-          "POST",
-          {
-            name: groupName,
-            groupName,
-            groupId,
-            nicheId,
-            active: true
-          }
-        );
-
-        existing = result.destination || null;
-
-      } catch (error) {
-        const duplicate =
-          /já está cadastrado|ja esta cadastrado|duplicad/i.test(
-            error.message
-          );
-
-        if (!duplicate) {
-          throw error;
-        }
-
-        // O servidor informou que já existe.
-        // Atualiza a lista e recupera o cadastro existente.
-        const latest = await api("/api/data");
-
-        destinations = Array.isArray(latest.destinations)
-          ? latest.destinations
-          : [];
-
-        existing = findExisting(groupId);
-
-        if (!existing) {
-          throw new Error(
-            "O servidor informou que o grupo já está cadastrado, " +
-            "mas ele não apareceu na lista de destinos. " +
-            "Nenhum grupo foi apagado."
-          );
-        }
-
-        existing = await updateExisting(
-          existing,
-          group,
-          groupId,
-          nicheId,
-          true
-        );
-      }
-
-      // Confere se o cadastro novo retornou o ID.
-      if (!existing || !existing.id) {
-        const latest = await api("/api/data");
-
-        destinations = Array.isArray(latest.destinations)
-          ? latest.destinations
-          : [];
-
-        existing = findExisting(groupId);
-      }
-
-      if (!existing || !existing.id) {
-        throw new Error(
-          "Não foi possível localizar o cadastro do grupo " +
-          groupName + " após salvar."
-        );
-      }
-
-      if (!destinations.some(item =>
-        normalizeGroupId(item.groupId || item.channel) ===
-        normalizeGroupId(groupId)
-      )) {
-        destinations.push(existing);
-      }
-    }
-
-    if (isSelected) {
-      if (!existing || !existing.id) {
-        throw new Error(
-          "Não foi possível obter o ID do grupo " + groupName + "."
-        );
-      }
-
-      destinationIds.push(existing.id);
-      processedSelected.add(normalizeGroupId(groupId));
-    }
+    groupNiches[groupId] = nicheId;
+    groupNames[groupId] = groupName;
   }
 
-  const missingSelected = groupIds.filter(groupId =>
-    !processedSelected.has(normalizeGroupId(groupId))
-  );
+  return {
+    groupIds,
+    groupNiches,
+    groupNames
+  };
+}
 
-  if (missingSelected.length) {
-    throw new Error(
-      "Não foi possível salvar todos os grupos selecionados. " +
-      "Carregue novamente os grupos do WhatsApp e tente outra vez."
-    );
-  }
-
-  return destinationIds;
+function validTime(value) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
 async function saveAutomation(activate) {
@@ -1416,9 +1402,6 @@ async function saveAutomation(activate) {
   const endTime = $("autoEnd").value;
   const intervalSeconds = Number($("autoInterval").value);
   const selectedGroups = getSelectedGroupIds();
-
-  const validTime = value =>
-    /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 
   if (!validTime(startTime)) {
     showMessage("automationMessage", "Informe um horário inicial válido.", "error");
@@ -1435,13 +1418,25 @@ async function saveAutomation(activate) {
     return;
   }
 
-  if (!Number.isInteger(intervalSeconds) || intervalSeconds < 10 || intervalSeconds > 86400) {
-    showMessage("automationMessage", "Escolha um intervalo válido entre 10 segundos e 24 horas.", "error");
+  if (
+    !Number.isInteger(intervalSeconds) ||
+    intervalSeconds < 10 ||
+    intervalSeconds > 86400
+  ) {
+    showMessage(
+      "automationMessage",
+      "Escolha um intervalo válido entre 10 segundos e 24 horas.",
+      "error"
+    );
     return;
   }
 
   if (!selectedGroups.length) {
-    showMessage("automationMessage", "Marque pelo menos um grupo autorizado.", "error");
+    showMessage(
+      "automationMessage",
+      "Marque pelo menos um grupo autorizado.",
+      "error"
+    );
     return;
   }
 
@@ -1450,34 +1445,58 @@ async function saveAutomation(activate) {
     : $("saveAutomationButton");
 
   button.disabled = true;
-  showMessage("automationMessage", "Verificando grupos cadastrados e salvando configurações...");
+
+  showMessage(
+    "automationMessage",
+    "Salvando grupos, nichos e configurações diretamente na automação..."
+  );
 
   try {
-    const destinationIds =
-      await saveSelectedGroupsAsDestinations(selectedGroups);
+    const groupSettings =
+      buildSelectedGroupSettings(selectedGroups);
 
     const current = await api("/api/automation");
-    const currentlyActive = Boolean(current.automation?.active);
+    const currentlyActive = Boolean(
+      current.automation?.active ??
+      current.automation?.enabled
+    );
 
-    await api("/api/automation", "POST", {
+    const payload = {
       startTime,
       endTime,
       scheduleTimes: [startTime],
       intervalSeconds,
-      destinationIds,
+
+      // Seleção direta de grupos:
+      groupSelectionMode: true,
+      groupIds: groupSettings.groupIds,
+      groupNiches: groupSettings.groupNiches,
+      groupNames: groupSettings.groupNames,
+
+      // Mantém o estado atual ao apenas salvar.
       active: activate ? true : currentlyActive
-    });
+    };
+
+    await api("/api/automation", "POST", payload);
+
+    savedGroupState = {
+      ...groupSettings,
+      directMode: true
+    };
 
     showMessage(
       "automationMessage",
       activate
-        ? "Automação ativada para " + getProfileName() + ". Os grupos receberão ofertas conforme os nichos escolhidos."
-        : "Nichos dos grupos e configurações salvos para " + getProfileName() + ".",
+        ? "Automação ativada para " + getProfileName() +
+          ". Os grupos selecionados receberão ofertas conforme os nichos escolhidos."
+        : "Grupos, nichos e configurações salvos diretamente na automação de " +
+          getProfileName() + ".",
       "success"
     );
 
     await loadAutomation();
     await refresh();
+
   } catch (error) {
     showMessage("automationMessage", error.message, "error");
   } finally {
@@ -1495,25 +1514,48 @@ async function pauseAutomation() {
     const automation = current.automation || {};
 
     const startTime = automation.startTime ||
-      automation.scheduleTimes?.[0] || "08:00";
+      automation.scheduleTimes?.[0] ||
+      "08:00";
 
     const endTime = automation.endTime || "18:00";
+
+    const intervalSeconds = Number(
+      automation.intervalSeconds ||
+      (Number(automation.intervalMinutes || 30) * 60)
+    );
+
+    const groupSettings =
+      await getAutomationGroupState(automation);
 
     await api("/api/automation", "POST", {
       startTime,
       endTime,
       scheduleTimes: [startTime],
-      intervalSeconds: Number(
-        automation.intervalSeconds ||
-        (Number(automation.intervalMinutes || 30) * 60)
-      ),
-      destinationIds: automation.destinationIds || [],
+      intervalSeconds,
+
+      // Preserva a seleção direta ao pausar.
+      groupSelectionMode: true,
+      groupIds: groupSettings.groupIds,
+      groupNiches: groupSettings.groupNiches,
+      groupNames: groupSettings.groupNames,
+
       active: false
     });
 
-    showMessage("automationMessage", "Automação pausada neste perfil.", "success");
+    savedGroupState = {
+      ...groupSettings,
+      directMode: true
+    };
+
+    showMessage(
+      "automationMessage",
+      "Automação pausada neste perfil. A seleção dos grupos e nichos foi preservada.",
+      "success"
+    );
+
     await loadAutomation();
     await refresh();
+
   } catch (error) {
     showMessage("automationMessage", error.message, "error");
   } finally {
@@ -1687,6 +1729,7 @@ async function searchShopeeProducts() {
     const fragment = document.createDocumentFragment();
     products.forEach(product => fragment.appendChild(createProductCard(product)));
     $("productResults").appendChild(fragment);
+
   } catch (error) {
     showMessage("searchMessage", error.message, "error");
   } finally {
@@ -1703,4 +1746,3 @@ $("profile").addEventListener("change", changeProfile);
 
 </body>
 </html>
-
