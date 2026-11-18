@@ -2197,12 +2197,13 @@ function buildOfferMessage(product) {
 }
 
 // ======================================================
-// ENVIO PARA UM DESTINO WHATSAPP
-// ======================================================
+// ENVIO PARA UM DESTINO WHATSAPP// ======================================================
+
 async function sendToDestination(
   profile,
   destination,
-  product
+  product,
+  messageOverride = ''
 ) {
   const sock = sockets.get(profile);
 
@@ -2215,12 +2216,18 @@ async function sendToDestination(
     );
   }
 
+  // O endpoint de teste também envia o destino como texto (telefone).
+  // Aceitamos tanto string quanto objeto de grupo/telefone.
   const target =
-    destination?.groupId ||
-    destination?.jid ||
-    destination?.phone ||
-    destination?.id ||
-    '';
+    typeof destination === 'string'
+      ? destination
+      : (
+          destination?.groupId ||
+          destination?.jid ||
+          destination?.phone ||
+          destination?.id ||
+          ''
+        );
 
   const jid = normalizeWhatsAppJid(target);
 
@@ -2231,7 +2238,8 @@ async function sendToDestination(
   }
 
   const item = normalizeProduct(product);
-  const caption = buildOfferMessage(item);
+  const caption = String(messageOverride || '').trim() ||
+    buildOfferMessage(item);
 
   let result;
 
@@ -3263,7 +3271,10 @@ app.post('/api/automation', async (req, res) => {
 
     data.automation = {
       ...data.automation,
-      ...incoming
+      ...incoming,
+      // Ao salvar uma configuração nova, não reapresentar erro antigo
+      // de uma execução anterior que já foi corrigida.
+      lastError: null
     };
 
     if (incoming.enabled !== undefined) {
@@ -3515,7 +3526,8 @@ app.post('/api/whatsapp/send', async (req, res) => {
     const result = await sendToDestination(
       profile,
       destination,
-      product
+      product,
+      req.body?.message || ''
     );
 
     res.json({
