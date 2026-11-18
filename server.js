@@ -1,4 +1,3 @@
-
 'use strict';
 
 const express = require('express');
@@ -40,10 +39,10 @@ const PROFILE_IDS = ['rafael', 'usuario2'];
 const SUPABASE_URL =
   process.env.SUPABASE_URL || '';
 
+// A autenticação do WhatsApp exige a chave de serviço.
+// Não utilizar SUPABASE_ANON_KEY como alternativa.
 const SUPABASE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_ANON_KEY ||
-  '';
+  process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 const AUTOMATION_TIME_ZONE =
   process.env.AUTOMATION_TIME_ZONE ||
@@ -101,8 +100,6 @@ const socketStarts = new Map();
 const reconnectTimers = new Map();
 const reconnectAttempts = new Map();
 
-// Identifica a geração atual de cada conexão.
-// Eventos de sockets antigos serão ignorados.
 const connectionIds = new Map();
 
 const connectionStatus = new Map();
@@ -1100,274 +1097,291 @@ function decryptObject(payload) {
 
 
 // ======================================================
-// SERIALIZAÇÃO DA AUTENTICAÇÃO BAILEYS
+// SUPABASE: ARMAZENAMENTO PERMANENTE DO WHATSAPP
+// Tabela: public.whatsapp_auth_store
+// Colunas: profile, key, value, updated_at
 // ======================================================
 
-function serializeAuth(value) {
-  return JSON.stringify(
-    value,
-    BufferJSON.replacer
+const authMemoryCache = new Map();
+
+function authCacheKey(profile, key) {
+  return `${profile}:${key}`;
+}
+
+function packAuthValue(value) {
+  return JSON.parse(
+    JSON.stringify(value, BufferJSON.replacer)
   );
 }
 
-function deserializeAuth(value) {
-  if (!value) return null;
+function unpackAuthValue(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
 
   try {
+    if (typeof value === 'string') {
+      try {
+        value = JSON.parse(value);
+      } catch (_) {
+        return null;
+      }
+    }
+
     return JSON.parse(
-      value,
+      JSON.stringify(value),
       BufferJSON.reviver
     );
-  } catch (_) {
+
+  } catch (error) {
+    logger.error(
+      { error: error.message },
+      'Erro ao recuperar dado de autenticação.'
+    );
+
     return null;
   }
 }
 
+async function readWhatsAppAuth(profile, key) {
+  if (!supabase) {
+    throw new Error(
+      'Supabase não configurado. Verifique as variáveis do Render.'
+    );
+  }
 
-// ======================================================
-// SUPABASE: TABELA DE CHAVES DO WHATSAPP
-// ======================================================
+  const cacheKey = authCacheKey(profile, key);
 
-async function readAuthTableValue(profile, keyName) {
-  if (!supabase) return null;
+  if (authMemoryCache.has(cacheKey)) {
+    return authMemoryCache.get(cacheKey);
+  }
 
-  const profileColumns = [
-    'perfil',
-    'profile',
-    'profile_id'
-  ];
+  const { data, error } = await supabase
+    .from('whatsapp_auth_store')
+    .select('value')
+    .eq('profile', profile)
+    .eq('key', key)
+    .maybeSingle();
 
-  const keyColumns = [
-    'chave',
-    'key',
-    'nome'
-  ];
+  if (error) {
+    logger.error(
+      {
+        profile,
+        key,
+        error: error.message
+      },
+      'Erro ao ler autenticação do Supabase.'
+    );
 
-  const valueColumns = [
-    'valor',
-    'value',
-    'dados',
-    'data',
-    'conteudo'
-  ];
+    throw error;
+  }
 
-  for (const profileColumn of profileColumns) {
-    for (const keyColumn of keyColumns) {
-      for (const valueColumn of valueColumns) {
-        try {
-          const { data, error } = await supabase
-            .from('robo_whatsapp_chaves')
-            .select(valueColumn)
-            .eq(profileColumn, profile)
-            .eq(keyColumn, keyName)
-            .maybeSingle();
+  const value = data
+    ? unpackAuthValue(data.value)
+    : null;
 
-          if (error) continue;
+  if (value !== null && value !== undefined) {
+    authMemoryCache.set(cacheKey, value);
+  }
 
-          if (data) {
-            return data[valueColumn];
-          }
-        } catch (_) {}
+  return value;
+}
+
+async function writeWhatsAppAuth(profile, key, value) {
+  if (!supabase) {
+    throw new Error(
+      'Supabase não configurado. Não é seguro salvar a sessão somente na memória.'
+    );
+  }
+
+  const cacheKey = authCacheKey(profile, key);
+  const storedValue = packAuthValue(value);
+
+  const { error } = await supabase
+    .from('whatsapp_auth_store')
+    .upsert(
+      {
+        profile,
+        key,
+        value: storedValue,
+        updated_at: new Date().toISOString()
+      },
+      {
+        onConflict: 'profile,key'
       }
+    );
+
+  if (error) {
+    logger.error(
+      {
+        profile,
+        key,
+        error: error.message
+      },
+      'Falha ao salvar autenticação no Supabase.'
+    );
+
+    throw error;
+  }
+
+  authMemoryCache.set(cacheKey, value);
+
+  return true;
+}
+
+async function deleteWhatsAppAuth(profile, key) {
+  if (!supabase) {
+    throw new Error('Supabase não configurado.');
+  }
+
+  const { error } = await supabase
+    .from('whatsapp_auth_store')
+    .delete()
+    .eq('profile', profile)
+    .eq('key', key);
+
+  if (error) {
+    logger.error(
+      {
+        profile,
+        key,
+        error: error.message
+      },
+      'Falha ao excluir chave de autenticação.'
+    );
+
+    throw error;
+  }
+
+  authMemoryCache.delete(
+    authCacheKey(profile, key)
+  );
+
+  return true;
+}
+
+async function deleteAllWhatsAppAuth(profile) {
+  if (!supabase) {
+    throw new Error('Supabase não configurado.');
+  }
+
+  const { error } = await supabase
+    .from('whatsapp_auth_store')
+    .delete()
+    .eq('profile', profile);
+
+  if (error) {
+    logger.error(
+      {
+        profile,
+        error: error.message
+      },
+      'Falha ao limpar autenticação do Supabase.'
+    );
+
+    throw error;
+  }
+
+  for (const key of authMemoryCache.keys()) {
+    if (key.startsWith(`${profile}:`)) {
+      authMemoryCache.delete(key);
     }
   }
 
-  return null;
+  return true;
 }
 
-async function writeAuthTableValue(
-  profile,
-  keyName,
-  value
-) {
-  if (!supabase) return false;
-
-  const profileColumns = [
-    'perfil',
-    'profile',
-    'profile_id'
-  ];
-
-  const keyColumns = [
-    'chave',
-    'key',
-    'nome'
-  ];
-
-  const valueColumns = [
-    'valor',
-    'value',
-    'dados',
-    'data',
-    'conteudo'
-  ];
-
-  const serialized = serializeAuth(value);
-
-  for (const profileColumn of profileColumns) {
-    for (const keyColumn of keyColumns) {
-      for (const valueColumn of valueColumns) {
-        try {
-          const lookup = await supabase
-            .from('robo_whatsapp_chaves')
-            .select('*')
-            .eq(profileColumn, profile)
-            .eq(keyColumn, keyName)
-            .maybeSingle();
-
-          if (!lookup.error && lookup.data) {
-            const { error } = await supabase
-              .from('robo_whatsapp_chaves')
-              .update({
-                [valueColumn]: serialized,
-                updated_at: new Date().toISOString()
-              })
-              .eq(profileColumn, profile)
-              .eq(keyColumn, keyName);
-
-            if (!error) return true;
-          } else {
-            const { error } = await supabase
-              .from('robo_whatsapp_chaves')
-              .insert({
-                [profileColumn]: profile,
-                [keyColumn]: keyName,
-                [valueColumn]: serialized,
-                updated_at: new Date().toISOString()
-              });
-
-            if (!error) return true;
-          }
-        } catch (_) {}
-      }
-    }
-  }
-
-  return false;
-}
-
-async function deleteAuthTableValues(profile) {
-  if (!supabase) return false;
-
-  const profileColumns = [
-    'perfil',
-    'profile',
-    'profile_id'
-  ];
-
-  for (const profileColumn of profileColumns) {
-    try {
-      const { error } = await supabase
-        .from('robo_whatsapp_chaves')
-        .delete()
-        .eq(profileColumn, profile);
-
-      if (!error) return true;
-    } catch (_) {}
-  }
-
-  return false;
-}
-
-async function deleteAuthTableValue(
-  profile,
-  keyName
-) {
-  if (!supabase) return false;
-
-  const profileColumns = [
-    'perfil',
-    'profile',
-    'profile_id'
-  ];
-
-  const keyColumns = [
-    'chave',
-    'key',
-    'nome'
-  ];
-
-  for (const profileColumn of profileColumns) {
-    for (const keyColumn of keyColumns) {
-      try {
-        const { error } = await supabase
-          .from('robo_whatsapp_chaves')
-          .delete()
-          .eq(profileColumn, profile)
-          .eq(keyColumn, keyName);
-
-        if (!error) return true;
-      } catch (_) {}
-    }
-  }
-
-  return false;
-}
-
-
-// ======================================================
-// ESTADO DE AUTENTICAÇÃO DO WHATSAPP
-// ======================================================
-
-async function createSupabaseAuthState(profile) {
-  const data = getData(profile);
-
-  const memoryAuth =
-    data.whatsappAuth || {
-      creds: null,
-      keys: {}
-    };
-
-  let creds = null;
-
-  const remoteCreds = await readAuthTableValue(
+async function hasWhatsAppAuth(profile) {
+  const creds = await readWhatsAppAuth(
     profile,
     'creds'
   );
 
-  if (remoteCreds) {
-    creds = deserializeAuth(remoteCreds);
+  return Boolean(creds?.registered);
+}
+
+
+// ======================================================
+// ESTADO DE AUTENTICAÇÃO BAILEYS
+// ======================================================
+
+async function createSupabaseAuthState(profile) {
+  if (!supabase) {
+    throw new Error(
+      'Conexão com Supabase obrigatória para salvar a sessão do WhatsApp.'
+    );
   }
 
-  if (!creds && memoryAuth.creds) {
-    creds = memoryAuth.creds;
-  }
+  let creds = await readWhatsAppAuth(
+    profile,
+    'creds'
+  );
 
   if (!creds) {
     creds = initAuthCreds();
   }
 
-  const keysCache = {
-    ...(memoryAuth.keys || {})
-  };
+  const keysCache = new Map();
 
   const keyStore = {
     async get(type, ids) {
       const result = {};
+      const missing = [];
 
       for (const id of ids) {
         const cacheKey = `${type}:${id}`;
 
-        if (
-          Object.prototype.hasOwnProperty.call(
-            keysCache,
-            cacheKey
-          )
-        ) {
-          result[id] = keysCache[cacheKey];
-          continue;
+        if (keysCache.has(cacheKey)) {
+          result[id] = keysCache.get(cacheKey);
+        } else {
+          missing.push({
+            id,
+            key: cacheKey
+          });
         }
+      }
 
-        const remote = await readAuthTableValue(
-          profile,
-          cacheKey
+      if (missing.length) {
+        const keyNames = missing.map(
+          item => item.key
         );
 
-        const parsed = deserializeAuth(remote);
+        const { data, error } = await supabase
+          .from('whatsapp_auth_store')
+          .select('key,value')
+          .eq('profile', profile)
+          .in('key', keyNames);
 
-        if (parsed !== null && parsed !== undefined) {
-          keysCache[cacheKey] = parsed;
-          result[id] = parsed;
+        if (error) {
+          logger.error(
+            {
+              profile,
+              error: error.message
+            },
+            'Erro ao recuperar chaves criptográficas do WhatsApp.'
+          );
+
+          throw error;
+        }
+
+        const found = new Map();
+
+        for (const row of data || []) {
+          found.set(
+            row.key,
+            unpackAuthValue(row.value)
+          );
+        }
+
+        for (const item of missing) {
+          if (found.has(item.key)) {
+            const value = found.get(item.key);
+
+            if (value !== null && value !== undefined) {
+              keysCache.set(item.key, value);
+              result[item.id] = value;
+            }
+          }
         }
       }
 
@@ -1375,7 +1389,7 @@ async function createSupabaseAuthState(profile) {
     },
 
     async set(dataToSet) {
-      const writes = [];
+      const operations = [];
 
       for (const [type, entries] of Object.entries(
         dataToSet || {}
@@ -1383,56 +1397,47 @@ async function createSupabaseAuthState(profile) {
         for (const [id, value] of Object.entries(
           entries || {}
         )) {
-          const cacheKey = `${type}:${id}`;
+          const key = `${type}:${id}`;
 
           if (value === null || value === undefined) {
-            delete keysCache[cacheKey];
+            keysCache.delete(key);
 
-            writes.push(
-              deleteAuthTableValue(profile, cacheKey)
+            operations.push(
+              deleteWhatsAppAuth(profile, key)
             );
           } else {
-            keysCache[cacheKey] = value;
+            keysCache.set(key, value);
 
-            writes.push(
-              writeAuthTableValue(
-                profile,
-                cacheKey,
-                value
-              )
+            operations.push(
+              writeWhatsAppAuth(profile, key, value)
             );
           }
         }
       }
 
-      await Promise.allSettled(writes);
+      const results = await Promise.allSettled(
+        operations
+      );
 
-      data.whatsappAuth = {
-        creds,
-        keys: keysCache
-      };
+      const failed = results.find(
+        result => result.status === 'rejected'
+      );
 
-      await saveProfile(profile);
+      if (failed) {
+        throw failed.reason;
+      }
     }
   };
 
-  async function persistCreds() {
-    data.whatsappAuth = {
-      creds,
-      keys: keysCache
-    };
-
-    await Promise.allSettled([
-      writeAuthTableValue(
-        profile,
-        'creds',
-        creds
-      ),
-      saveProfile(profile)
-    ]);
+  async function saveCreds() {
+    await writeWhatsAppAuth(
+      profile,
+      'creds',
+      creds
+    );
   }
 
-  const cachedKeyStore =
+  const cachedKeys =
     typeof makeCacheableSignalKeyStore === 'function'
       ? makeCacheableSignalKeyStore(
           keyStore,
@@ -1443,14 +1448,11 @@ async function createSupabaseAuthState(profile) {
   return {
     state: {
       creds,
-      keys: cachedKeyStore
+      keys: cachedKeys
     },
-    saveCreds: persistCreds
+    saveCreds
   };
-}
-
-
-// ======================================================
+}// ======================================================
 // STATUS DO WHATSAPP
 // ======================================================
 
@@ -1481,6 +1483,10 @@ function getStatus(profile) {
 async function clearWhatsAppAuth(profile) {
   const data = getData(profile);
 
+  // Limpa somente a sessão do perfil solicitado.
+  // Não apaga produtos, grupos ou configurações.
+  await deleteAllWhatsAppAuth(profile);
+
   data.whatsappAuth = {
     creds: null,
     keys: {}
@@ -1490,8 +1496,12 @@ async function clearWhatsAppAuth(profile) {
   pairingCache.delete(profile);
   authRegistered.delete(profile);
 
-  await deleteAuthTableValues(profile);
   await saveProfile(profile);
+
+  logger.info(
+    { profile },
+    'Autenticação do WhatsApp removida do armazenamento.'
+  );
 }
 
 
@@ -1504,7 +1514,6 @@ function scheduleWhatsAppReconnect(profile, connectionId) {
 
   if (reconnectTimers.has(profile)) return;
 
-  // Não reconectar se uma conexão mais nova já foi iniciada.
   if (connectionIds.get(profile) !== connectionId) return;
 
   const attempts =
@@ -1722,7 +1731,6 @@ async function startWhatsApp(profile) {
           qr
         } = update;
 
-        // O QR precisa ser processado antes do estado connecting.
         if (qr) {
           try {
             const qrDataUrl = await QRCode.toDataURL(qr, {
@@ -1731,7 +1739,6 @@ async function startWhatsApp(profile) {
               width: 360
             });
 
-            // Confere novamente depois do processamento assíncrono.
             if (!isCurrentConnection(sock)) return;
 
             qrCache.set(profile, qrDataUrl);
@@ -1756,7 +1763,6 @@ async function startWhatsApp(profile) {
         }
 
         if (connection === 'connecting') {
-          // Não deixa connecting apagar o estado qr.
           if (!qrCache.has(profile)) {
             setStatus(profile, 'connecting', {
               message: 'Aguardando conexão com o WhatsApp...'
@@ -1815,12 +1821,22 @@ async function startWhatsApp(profile) {
               message: 'Sessão encerrada. Conecte novamente pelo QR Code.'
             });
 
-            await clearWhatsAppAuth(profile);
+            try {
+              await clearWhatsAppAuth(profile);
 
-            logger.warn(
-              { profile, statusCode },
-              'Autenticação encerrada pelo WhatsApp.'
-            );
+              logger.warn(
+                { profile, statusCode },
+                'Autenticação encerrada pelo WhatsApp.'
+              );
+            } catch (clearError) {
+              logger.error(
+                {
+                  profile,
+                  error: clearError.message
+                },
+                'Não foi possível limpar a autenticação antiga.'
+              );
+            }
 
             return;
           }
@@ -1879,7 +1895,6 @@ async function startWhatsApp(profile) {
       throw error;
 
     } finally {
-      // Só remove a promessa que pertence a esta inicialização.
       if (socketStarts.get(profile) === startPromise) {
         socketStarts.delete(profile);
       }
@@ -2344,6 +2359,7 @@ async function fetchShopeeOffers(
     });
   });
 }
+
 
 // ======================================================
 // PROCESSAMENTO DA FILA DE OFERTAS
@@ -3188,7 +3204,6 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
 
     await startWhatsApp(profile);
 
-    // Aguarda o socket ficar disponível para o pareamento.
     let sock = sockets.get(profile);
 
     for (let attempt = 0; !sock && attempt < 20; attempt++) {
@@ -3237,7 +3252,6 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
 
-    // Invalida eventos e inicializações anteriores.
     connectionIds.set(
       profile,
       (connectionIds.get(profile) || 0) + 1
@@ -3998,18 +4012,41 @@ async function initializeApp() {
     try {
       await loadProfile(profile);
 
-      const data = getData(profile);
+      // Verifica a sessão diretamente na nova tabela
+      // whatsapp_auth_store do Supabase.
+      try {
+        const hasSavedSession = await hasWhatsAppAuth(profile);
 
-      if (data.whatsappAuth?.creds) {
-        startWhatsApp(profile).catch(error => {
-          logger.error(
-            {
-              profile,
-              error: error.message
-            },
-            'Erro ao iniciar WhatsApp automaticamente.'
+        if (hasSavedSession) {
+          logger.info(
+            { profile },
+            'Sessão encontrada no Supabase. Iniciando WhatsApp.'
           );
-        });
+
+          startWhatsApp(profile).catch(error => {
+            logger.error(
+              {
+                profile,
+                error: error.message
+              },
+              'Erro ao iniciar WhatsApp automaticamente.'
+            );
+          });
+        } else {
+          logger.info(
+            { profile },
+            'Nenhuma sessão registrada no Supabase. Aguardando QR Code.'
+          );
+        }
+
+      } catch (authError) {
+        logger.error(
+          {
+            profile,
+            error: authError.message
+          },
+          'Não foi possível verificar a sessão salva no Supabase.'
+        );
       }
 
     } catch (error) {
@@ -4073,7 +4110,6 @@ async function shutdown(signal) {
     reconnectTimers.delete(profile);
   }
 
-  // Invalida os eventos de todos os sockets antes de encerrá-los.
   for (const profile of PROFILE_IDS) {
     connectionIds.set(
       profile,
