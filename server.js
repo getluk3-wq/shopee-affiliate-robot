@@ -1,3 +1,4 @@
+
 'use strict';
 
 const express = require('express');
@@ -99,6 +100,10 @@ const sockets = new Map();
 const socketStarts = new Map();
 const reconnectTimers = new Map();
 const reconnectAttempts = new Map();
+
+// Identifica a geração atual de cada conexão.
+// Eventos de sockets antigos serão ignorados.
+const connectionIds = new Map();
 
 const connectionStatus = new Map();
 const qrCache = new Map();
@@ -321,18 +326,14 @@ function defaultProfileData() {
       intervalMinutes: 30,
       intervalSeconds: 1800,
       maxProducts: 10,
-
       destinationIds: [],
-
       groupSelectionMode: false,
       groupIds: [],
       groupNiches: {},
       groupNames: {},
-
       startTime: '',
       endTime: '',
       scheduleTimes: [],
-
       lastRunAt: null,
       lastSentAt: null,
       lastError: null
@@ -349,7 +350,6 @@ function defaultProfileData() {
     },
 
     shopeeCredentials: null,
-
     updatedAt: new Date().toISOString()
   };
 }
@@ -484,15 +484,13 @@ function safeJson(value, fallback = null) {
 
 function mergeProfileData(value) {
   const defaults = defaultProfileData();
-
   const parsed = safeJson(value, {});
 
   if (!parsed || typeof parsed !== 'object') {
     return defaults;
   }
 
-  const oldAutomation =
-    parsed.automation || {};
+  const oldAutomation = parsed.automation || {};
 
   const intervalSeconds = Number(
     oldAutomation.intervalSeconds
@@ -509,7 +507,6 @@ function mergeProfileData(value) {
     intervalSeconds > 0
   ) {
     finalSeconds = intervalSeconds;
-
   } else if (
     Number.isFinite(intervalMinutes) &&
     intervalMinutes > 0
@@ -528,8 +525,7 @@ function mergeProfileData(value) {
     false
   );
 
-  const whatsappAuth =
-    parsed.whatsappAuth || {};
+  const whatsappAuth = parsed.whatsappAuth || {};
 
   return {
     ...defaults,
@@ -661,7 +657,6 @@ async function findProfileRow(profile) {
             dataColumn
           };
         }
-
       } catch (_) {}
     }
   }
@@ -721,7 +716,6 @@ async function loadProfile(profile) {
           return storeCache[profile];
         }
       }
-
     } catch (error) {
       logger.warn(
         {
@@ -749,7 +743,6 @@ async function saveProfile(profile) {
   const data = getData(profile);
 
   data.updatedAt = new Date().toISOString();
-
   storeCache[profile] = data;
 
   const filePath = path.join(
@@ -763,7 +756,6 @@ async function saveProfile(profile) {
       JSON.stringify(data, null, 2),
       'utf8'
     );
-
   } catch (error) {
     logger.error(
       {
@@ -830,7 +822,6 @@ async function saveProfile(profile) {
           .insert(payload);
 
         if (!error) return true;
-
       } catch (_) {}
     }
   }
@@ -975,6 +966,7 @@ function getAutomationTargets(data) {
         ...(destination || {}),
         id: groupId,
         groupId,
+
         name:
           getMapValueByGroupId(
             automation.groupNames,
@@ -994,7 +986,6 @@ function getAutomationTargets(data) {
         active: true
       };
     });
-
   }
 
   const selected = Array.isArray(
@@ -1005,7 +996,6 @@ function getAutomationTargets(data) {
 
   return data.destinations.filter(destination => {
     if (destination.active === false) return false;
-
     if (!selected.length) return false;
 
     return selected.some(id =>
@@ -1078,20 +1068,9 @@ function decryptObject(payload) {
   if (!key) return null;
 
   try {
-    const iv = Buffer.from(
-      payload.iv,
-      'base64'
-    );
-
-    const tag = Buffer.from(
-      payload.tag,
-      'base64'
-    );
-
-    const encrypted = Buffer.from(
-      payload.data,
-      'base64'
-    );
+    const iv = Buffer.from(payload.iv, 'base64');
+    const tag = Buffer.from(payload.tag, 'base64');
+    const encrypted = Buffer.from(payload.data, 'base64');
 
     const decipher = crypto.createDecipheriv(
       'aes-256-gcm',
@@ -1109,7 +1088,6 @@ function decryptObject(payload) {
     return JSON.parse(
       decrypted.toString('utf8')
     );
-
   } catch (error) {
     logger.warn(
       { error: error.message },
@@ -1140,7 +1118,6 @@ function deserializeAuth(value) {
       value,
       BufferJSON.reviver
     );
-
   } catch (_) {
     return null;
   }
@@ -1190,7 +1167,6 @@ async function readAuthTableValue(profile, keyName) {
           if (data) {
             return data[valueColumn];
           }
-
         } catch (_) {}
       }
     }
@@ -1250,7 +1226,6 @@ async function writeAuthTableValue(
               .eq(keyColumn, keyName);
 
             if (!error) return true;
-
           } else {
             const { error } = await supabase
               .from('robo_whatsapp_chaves')
@@ -1263,7 +1238,6 @@ async function writeAuthTableValue(
 
             if (!error) return true;
           }
-
         } catch (_) {}
       }
     }
@@ -1289,7 +1263,6 @@ async function deleteAuthTableValues(profile) {
         .eq(profileColumn, profile);
 
       if (!error) return true;
-
     } catch (_) {}
   }
 
@@ -1324,7 +1297,6 @@ async function deleteAuthTableValue(
           .eq(keyColumn, keyName);
 
         if (!error) return true;
-
       } catch (_) {}
     }
   }
@@ -1419,7 +1391,6 @@ async function createSupabaseAuthState(profile) {
             writes.push(
               deleteAuthTableValue(profile, cacheKey)
             );
-
           } else {
             keysCache[cacheKey] = value;
 
@@ -1525,6 +1496,59 @@ async function clearWhatsAppAuth(profile) {
 
 
 // ======================================================
+// AGENDAMENTO DA RECONEXÃO
+// ======================================================
+
+function scheduleWhatsAppReconnect(profile, connectionId) {
+  if (!WHATSAPP_AUTO_RECONNECT) return;
+
+  if (reconnectTimers.has(profile)) return;
+
+  // Não reconectar se uma conexão mais nova já foi iniciada.
+  if (connectionIds.get(profile) !== connectionId) return;
+
+  const attempts =
+    (reconnectAttempts.get(profile) || 0) + 1;
+
+  reconnectAttempts.set(profile, attempts);
+
+  const delay = Math.min(
+    60000,
+    3000 * Math.pow(2, Math.min(attempts - 1, 4))
+  );
+
+  logger.info(
+    {
+      profile,
+      attempts,
+      delay
+    },
+    'Reconexão automática agendada.'
+  );
+
+  const timer = setTimeout(() => {
+    reconnectTimers.delete(profile);
+
+    if (connectionIds.get(profile) !== connectionId) {
+      return;
+    }
+
+    startWhatsApp(profile).catch(error => {
+      logger.error(
+        {
+          profile,
+          error: error.message
+        },
+        'Falha na reconexão automática.'
+      );
+    });
+  }, delay);
+
+  reconnectTimers.set(profile, timer);
+}
+
+
+// ======================================================
 // CONEXÃO WHATSAPP - BAILEYS
 // ======================================================
 
@@ -1533,231 +1557,338 @@ async function startWhatsApp(profile) {
     throw new Error('Perfil inválido.');
   }
 
-  if (sockets.has(profile)) {
-    return {
-      ok: true,
-      status: getStatus(profile)
-    };
+  const existingSocket = sockets.get(profile);
+
+  if (existingSocket) {
+    const currentStatus = getStatus(profile).status;
+
+    if (
+      currentStatus === 'connected' ||
+      currentStatus === 'qr' ||
+      currentStatus === 'connecting'
+    ) {
+      return {
+        ok: true,
+        status: getStatus(profile),
+        qr: qrCache.get(profile) || null
+      };
+    }
+
+    sockets.delete(profile);
   }
 
   if (socketStarts.has(profile)) {
     return socketStarts.get(profile);
   }
 
-  const startPromise = (async () => {
-    await loadProfile(profile);
+  const connectionId =
+    (connectionIds.get(profile) || 0) + 1;
 
-    setStatus(profile, 'connecting');
+  connectionIds.set(profile, connectionId);
 
-    const auth = await createSupabaseAuthState(
-      profile
+  const pendingTimer = reconnectTimers.get(profile);
+
+  if (pendingTimer) {
+    clearTimeout(pendingTimer);
+    reconnectTimers.delete(profile);
+  }
+
+  const isCurrentConnection = sock => {
+    return (
+      connectionIds.get(profile) === connectionId &&
+      (!sock || sockets.get(profile) === sock)
     );
+  };
 
-    let version;
-
+  const startPromise = (async () => {
     try {
-      const latest = await fetchLatestBaileysVersion();
-      version = latest.version;
-    } catch (error) {
-      logger.warn(
-        {
-          error: error.message
-        },
-        'Não foi possível consultar a versão mais recente do WhatsApp.'
+      await loadProfile(profile);
+
+      if (!isCurrentConnection()) {
+        throw new Error(
+          'Inicialização cancelada por uma conexão mais recente.'
+        );
+      }
+
+      qrCache.delete(profile);
+      pairingCache.delete(profile);
+
+      setStatus(profile, 'connecting', {
+        message: 'Iniciando conexão com o WhatsApp...'
+      });
+
+      logger.info(
+        { profile, connectionId },
+        'Iniciando conexão WhatsApp.'
       );
-    }
 
-    const socketOptions = {
-      auth: auth.state,
+      const auth = await createSupabaseAuthState(profile);
 
-      logger: pino({
-        level: 'silent'
-      }),
+      if (!isCurrentConnection()) {
+        throw new Error(
+          'Inicialização cancelada antes de criar o socket.'
+        );
+      }
 
-      printQRInTerminal: false,
+      let version;
 
-      browser:
-        typeof Browsers?.macOS === 'function'
-          ? Browsers.macOS('Chrome')
-          : [
-              'MEDEIROS DIGITAL',
-              'Chrome',
-              '1.0.0'
-            ],
-
-      connectTimeoutMs: 60000,
-      defaultQueryTimeoutMs: 60000,
-      keepAliveIntervalMs: 25000,
-
-      markOnlineOnConnect: false,
-      syncFullHistory: false,
-      generateHighQualityLinkPreview: true
-    };
-
-    if (version) {
-      socketOptions.version = version;
-    }
-
-    const sock = makeWASocket(socketOptions);
-
-    sockets.set(profile, sock);
-
-    sock.ev.on('creds.update', async () => {
       try {
-        await auth.saveCreds();
+        const latest = await fetchLatestBaileysVersion();
+        version = latest.version;
+
+        logger.info(
+          { profile, version },
+          'Versão do WhatsApp obtida.'
+        );
       } catch (error) {
-        logger.error(
+        logger.warn(
           {
             profile,
             error: error.message
           },
-          'Erro ao salvar credenciais do WhatsApp'
+          'Não foi possível consultar a versão mais recente do WhatsApp.'
         );
       }
-    });
 
-    sock.ev.on('connection.update', async update => {
-      const {
-        connection,
-        lastDisconnect,
-        qr
-      } = update;
+      if (!isCurrentConnection()) {
+        throw new Error(
+          'Inicialização cancelada antes de abrir o socket.'
+        );
+      }
 
-      if (qr) {
+      const socketOptions = {
+        auth: auth.state,
+
+        logger: pino({
+          level: 'silent'
+        }),
+
+        printQRInTerminal: false,
+
+        browser:
+          typeof Browsers?.macOS === 'function'
+            ? Browsers.macOS('Chrome')
+            : [
+                'MEDEIROS DIGITAL',
+                'Chrome',
+                '1.0.0'
+              ],
+
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 60000,
+        keepAliveIntervalMs: 25000,
+
+        markOnlineOnConnect: false,
+        syncFullHistory: false,
+        generateHighQualityLinkPreview: true
+      };
+
+      if (version) {
+        socketOptions.version = version;
+      }
+
+      const sock = makeWASocket(socketOptions);
+
+      sockets.set(profile, sock);
+
+      sock.ev.on('creds.update', async () => {
+        if (!isCurrentConnection(sock)) return;
+
         try {
-          const qrDataUrl = await QRCode.toDataURL(qr);
-
-          qrCache.set(profile, qrDataUrl);
-
-          setStatus(profile, 'qr', {
-            message: 'Escaneie o QR Code pelo WhatsApp.'
-          });
-
+          await auth.saveCreds();
         } catch (error) {
           logger.error(
             {
               profile,
               error: error.message
             },
-            'Erro ao gerar QR Code'
+            'Erro ao salvar credenciais do WhatsApp.'
           );
         }
-      }
+      });
 
-      if (connection === 'connecting') {
-        setStatus(profile, 'connecting');
-      }
-
-      if (connection === 'open') {
-        qrCache.delete(profile);
-        pairingCache.delete(profile);
-
-        reconnectAttempts.set(profile, 0);
-        authRegistered.set(profile, true);
-
-        setStatus(profile, 'connected');
-
-        logger.info(
-          { profile },
-          'WhatsApp conectado.'
-        );
-      }
-
-      if (connection === 'close') {
-        const currentSocket = sockets.get(profile);
-
-        if (currentSocket === sock) {
-          sockets.delete(profile);
-        }
-
-        qrCache.delete(profile);
-
-        const statusCode =
-          lastDisconnect?.error?.output?.statusCode ||
-          lastDisconnect?.error?.statusCode ||
-          null;
-
-        const loggedOut =
-          statusCode === DisconnectReason.loggedOut ||
-          statusCode === 401;
-
-        if (loggedOut) {
-          setStatus(profile, 'logged_out', {
-            reason: statusCode,
-            message: 'WhatsApp desconectado. É necessário conectar novamente.'
-          });
-
-          await clearWhatsAppAuth(profile);
-
-          logger.warn(
-            { profile, statusCode },
-            'Sessão do WhatsApp encerrada.'
+      sock.ev.on('connection.update', async update => {
+        if (!isCurrentConnection(sock)) {
+          logger.debug(
+            { profile, connectionId },
+            'Evento antigo do WhatsApp ignorado.'
           );
-
           return;
         }
 
-        setStatus(profile, 'disconnected', {
-          reason: statusCode,
-          message: 'Conexão do WhatsApp encerrada.'
-        });
+        const {
+          connection,
+          lastDisconnect,
+          qr
+        } = update;
 
-        logger.warn(
-          {
-            profile,
-            statusCode
-          },
-          'WhatsApp desconectado.'
-        );
-
-        if (
-          WHATSAPP_AUTO_RECONNECT &&
-          !reconnectTimers.has(profile)
-        ) {
-          const attempts =
-            (reconnectAttempts.get(profile) || 0) + 1;
-
-          reconnectAttempts.set(profile, attempts);
-
-          const delay = Math.min(
-            60000,
-            3000 * Math.pow(2, Math.min(attempts - 1, 4))
-          );
-
-          const timer = setTimeout(() => {
-            reconnectTimers.delete(profile);
-
-            startWhatsApp(profile).catch(error => {
-              logger.error(
-                {
-                  profile,
-                  error: error.message
-                },
-                'Falha na reconexão automática'
-              );
+        // O QR precisa ser processado antes do estado connecting.
+        if (qr) {
+          try {
+            const qrDataUrl = await QRCode.toDataURL(qr, {
+              errorCorrectionLevel: 'M',
+              margin: 2,
+              width: 360
             });
 
-          }, delay);
+            // Confere novamente depois do processamento assíncrono.
+            if (!isCurrentConnection(sock)) return;
 
-          reconnectTimers.set(profile, timer);
+            qrCache.set(profile, qrDataUrl);
+
+            setStatus(profile, 'qr', {
+              message: 'Escaneie o QR Code pelo WhatsApp.'
+            });
+
+            logger.info(
+              { profile, connectionId },
+              'QR Code recebido e gerado com sucesso.'
+            );
+          } catch (error) {
+            logger.error(
+              {
+                profile,
+                error: error.message
+              },
+              'Erro ao gerar QR Code.'
+            );
+          }
         }
-      }
-    });
 
-    return {
-      ok: true,
-      status: getStatus(profile)
-    };
+        if (connection === 'connecting') {
+          // Não deixa connecting apagar o estado qr.
+          if (!qrCache.has(profile)) {
+            setStatus(profile, 'connecting', {
+              message: 'Aguardando conexão com o WhatsApp...'
+            });
+          }
+        }
+
+        if (connection === 'open') {
+          if (!isCurrentConnection(sock)) return;
+
+          qrCache.delete(profile);
+          pairingCache.delete(profile);
+
+          reconnectAttempts.set(profile, 0);
+          authRegistered.set(profile, true);
+
+          setStatus(profile, 'connected', {
+            message: 'WhatsApp conectado com sucesso.'
+          });
+
+          logger.info(
+            { profile, connectionId },
+            'WhatsApp conectado.'
+          );
+        }
+
+        if (connection === 'close') {
+          if (!isCurrentConnection(sock)) return;
+
+          sockets.delete(profile);
+          qrCache.delete(profile);
+          pairingCache.delete(profile);
+
+          const statusCode =
+            lastDisconnect?.error?.output?.statusCode ||
+            lastDisconnect?.error?.statusCode ||
+            null;
+
+          const loggedOut =
+            statusCode === DisconnectReason.loggedOut ||
+            statusCode === 401;
+
+          logger.warn(
+            {
+              profile,
+              connectionId,
+              statusCode,
+              error: lastDisconnect?.error?.message || null
+            },
+            'Conexão WhatsApp encerrada.'
+          );
+
+          if (loggedOut) {
+            setStatus(profile, 'logged_out', {
+              reason: statusCode,
+              message: 'Sessão encerrada. Conecte novamente pelo QR Code.'
+            });
+
+            await clearWhatsAppAuth(profile);
+
+            logger.warn(
+              { profile, statusCode },
+              'Autenticação encerrada pelo WhatsApp.'
+            );
+
+            return;
+          }
+
+          setStatus(profile, 'disconnected', {
+            reason: statusCode,
+            message: 'Conexão do WhatsApp encerrada.'
+          });
+
+          scheduleWhatsAppReconnect(
+            profile,
+            connectionId
+          );
+        }
+      });
+
+      return {
+        ok: true,
+        status: getStatus(profile),
+        qr: qrCache.get(profile) || null
+      };
+
+    } catch (error) {
+      if (connectionIds.get(profile) === connectionId) {
+        const failedSocket = sockets.get(profile);
+
+        if (failedSocket) {
+          sockets.delete(profile);
+
+          try {
+            failedSocket.end(
+              new Error('Falha ao iniciar conexão.')
+            );
+          } catch (_) {
+            try {
+              failedSocket.ws?.close();
+            } catch (_) {}
+          }
+        }
+
+        setStatus(profile, 'disconnected', {
+          message: 'Falha ao iniciar conexão.',
+          reason: error.message
+        });
+      }
+
+      logger.error(
+        {
+          profile,
+          connectionId,
+          error: error.message
+        },
+        'Erro ao iniciar WhatsApp.'
+      );
+
+      throw error;
+
+    } finally {
+      // Só remove a promessa que pertence a esta inicialização.
+      if (socketStarts.get(profile) === startPromise) {
+        socketStarts.delete(profile);
+      }
+    }
   })();
 
   socketStarts.set(profile, startPromise);
 
-  try {
-    return await startPromise;
-
-  } finally {
-    socketStarts.delete(profile);
-  }
+  return startPromise;
 }
 
 
@@ -1942,7 +2073,6 @@ async function sendToDestination(
   }
 
   const item = normalizeProduct(product);
-
   const caption = buildOfferMessage(item);
 
   let result;
@@ -1961,7 +2091,6 @@ async function sendToDestination(
           caption
         }
       );
-
     } catch (error) {
       logger.warn(
         {
@@ -1979,7 +2108,6 @@ async function sendToDestination(
         }
       );
     }
-
   } else {
     result = await sock.sendMessage(
       jid,
@@ -1999,7 +2127,10 @@ async function sendToDestination(
   );
 
   return result;
-}// ======================================================
+}
+
+
+// ======================================================
 // CREDENCIAIS DA SHOPEE
 // ======================================================
 
@@ -2187,13 +2318,9 @@ async function fetchShopeeOffers(
 
     return normalizeProduct({
       id: item.itemId,
-
       productName: item.productName,
-
       name: item.productName,
-
       price,
-
       oldPrice: '',
 
       discount:
@@ -2210,18 +2337,13 @@ async function fetchShopeeOffers(
         '',
 
       category: item.categoryName,
-
       description: '',
-
       sales: item.sales,
-
       rating: item.ratingStar,
-
       commissionRate: item.commissionRate
     });
   });
 }
-
 
 // ======================================================
 // PROCESSAMENTO DA FILA DE OFERTAS
@@ -2251,7 +2373,6 @@ async function processQueue(profile) {
   );
 
   const targets = getAutomationTargets(data);
-
   const results = [];
 
   try {
@@ -2289,7 +2410,6 @@ async function processQueue(profile) {
           status: 'accepted',
           messageId: sent?.key?.id || null
         });
-
       } catch (error) {
         results.push({
           destination: destination.name || destination.id,
@@ -2312,9 +2432,7 @@ async function processQueue(profile) {
     if (accepted.length > 0) {
       current.status = 'sent';
       current.sentAt = new Date().toISOString();
-
       current.results = results;
-
       current.product = product;
 
       const key = String(
@@ -2645,10 +2763,8 @@ async function runAutomation(profile) {
 
       if (result.status === 'sent') {
         sent++;
-
       } else if (result.status === 'error') {
         failed++;
-
       } else if (result.status === 'skipped') {
         skipped++;
       }
@@ -2743,9 +2859,7 @@ async function automationSchedulerTick() {
       const automation = data.automation || {};
 
       if (!isAutomationActive(automation)) continue;
-
       if (!isInsideAutomationWindow(automation)) continue;
-
       if (automationLocks.has(profile)) continue;
 
       if (getStatus(profile).status !== 'connected') {
@@ -2772,7 +2886,6 @@ async function automationSchedulerTick() {
           automation.lastScheduleMinute = minuteKey;
 
           await saveProfile(profile);
-
           await runAutomation(profile);
         }
 
@@ -2812,7 +2925,6 @@ async function automationSchedulerTick() {
 app.get('/health', (req, res) => {
   res.json({
     ok: true,
-
     service: 'MEDEIROS DIGITAL',
 
     whatsapp: PROFILE_IDS.map(profile => ({
@@ -2863,7 +2975,6 @@ app.get('/api/status', (req, res) => {
 app.get('/api/data', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
-
     const data = await loadProfile(profile);
 
     res.json({
@@ -2883,7 +2994,6 @@ app.get('/api/data', async (req, res) => {
 app.post('/api/data', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
-
     const current = getData(profile);
 
     const incoming =
@@ -2926,9 +3036,7 @@ app.post('/api/data', async (req, res) => {
 
 app.get('/api/automation', (req, res) => {
   const profile = profileIdFrom(req);
-
-  const automation =
-    getData(profile).automation;
+  const automation = getData(profile).automation;
 
   res.json({
     ok: true,
@@ -3010,7 +3118,6 @@ app.post('/api/automation', async (req, res) => {
 
 app.post('/api/automation/run', async (req, res) => {
   const profile = profileIdFrom(req);
-
   const result = await runAutomation(profile);
 
   res.status(result.ok ? 200 : 400).json(result);
@@ -3081,7 +3188,13 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
 
     await startWhatsApp(profile);
 
-    const sock = sockets.get(profile);
+    // Aguarda o socket ficar disponível para o pareamento.
+    let sock = sockets.get(profile);
+
+    for (let attempt = 0; !sock && attempt < 20; attempt++) {
+      await sleep(500);
+      sock = sockets.get(profile);
+    }
 
     if (!sock) {
       throw new Error(
@@ -3115,26 +3228,20 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
   }
 });
 
+
+// ======================================================
+// DESCONECTAR WHATSAPP
+// ======================================================
+
 app.post('/api/whatsapp/disconnect', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
 
-    const sock = sockets.get(profile);
-
-    if (sock) {
-      sockets.delete(profile);
-
-      try {
-        sock.end(
-          new Error('Desconexão solicitada pelo painel.')
-        );
-
-      } catch (_) {
-        try {
-          sock.ws?.close();
-        } catch (_) {}
-      }
-    }
+    // Invalida eventos e inicializações anteriores.
+    connectionIds.set(
+      profile,
+      (connectionIds.get(profile) || 0) + 1
+    );
 
     const timer = reconnectTimers.get(profile);
 
@@ -3143,12 +3250,29 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
       reconnectTimers.delete(profile);
     }
 
-    reconnectAttempts.delete(profile);
+    const sock = sockets.get(profile);
 
+    sockets.delete(profile);
+
+    if (sock) {
+      try {
+        sock.end(
+          new Error('Desconexão solicitada pelo painel.')
+        );
+      } catch (_) {
+        try {
+          sock.ws?.close();
+        } catch (_) {}
+      }
+    }
+
+    reconnectAttempts.delete(profile);
     qrCache.delete(profile);
     pairingCache.delete(profile);
 
-    setStatus(profile, 'disconnected');
+    setStatus(profile, 'disconnected', {
+      message: 'WhatsApp desconectado pelo painel.'
+    });
 
     res.json({
       ok: true,
@@ -3162,6 +3286,11 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
     });
   }
 });
+
+
+// ======================================================
+// ENVIAR MENSAGEM WHATSAPP
+// ======================================================
 
 app.post('/api/whatsapp/send', async (req, res) => {
   try {
@@ -3200,10 +3329,14 @@ app.post('/api/whatsapp/send', async (req, res) => {
   }
 });
 
+
+// ======================================================
+// LISTAR GRUPOS WHATSAPP
+// ======================================================
+
 app.get('/api/whatsapp/groups', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
-
     const sock = sockets.get(profile);
 
     if (
@@ -3296,9 +3429,7 @@ app.post('/api/niches/classify', (req, res) => {
 
 app.get('/api/destinations', (req, res) => {
   const profile = profileIdFrom(req);
-
-  const destinations =
-    getData(profile).destinations;
+  const destinations = getData(profile).destinations;
 
   res.json({
     ok: true,
@@ -3309,7 +3440,6 @@ app.get('/api/destinations', (req, res) => {
 app.post('/api/destinations', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
-
     const data = getData(profile);
 
     const incoming =
@@ -3351,7 +3481,6 @@ app.post('/api/destinations', async (req, res) => {
       ),
 
       active: incoming.active !== false,
-
       source: incoming.source || 'manual'
     };
 
@@ -3372,7 +3501,6 @@ app.post('/api/destinations', async (req, res) => {
 
     if (existing >= 0) {
       data.destinations[existing] = destination;
-
     } else {
       data.destinations.push(destination);
     }
@@ -3396,7 +3524,6 @@ app.post('/api/destinations', async (req, res) => {
 app.post('/api/destinations/update', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
-
     const data = getData(profile);
 
     const incoming =
@@ -3442,7 +3569,6 @@ app.post('/api/destinations/update', async (req, res) => {
 app.patch('/api/destinations/:id', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
-
     const data = getData(profile);
 
     const index = data.destinations.findIndex(
@@ -3482,7 +3608,6 @@ app.patch('/api/destinations/:id', async (req, res) => {
 app.delete('/api/destinations/:id', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
-
     const data = getData(profile);
 
     data.destinations = data.destinations.filter(
@@ -3522,7 +3647,6 @@ app.get('/api/products', (req, res) => {
 app.post('/api/products', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
-
     const data = getData(profile);
 
     const incoming =
@@ -3533,7 +3657,6 @@ app.post('/api/products', async (req, res) => {
     const product = normalizeProduct(incoming);
 
     data.products.unshift(product);
-
     data.products = data.products.slice(0, 500);
 
     await saveProfile(profile);
@@ -3555,7 +3678,6 @@ app.post('/api/products', async (req, res) => {
 app.delete('/api/products/:id', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
-
     const data = getData(profile);
 
     data.products = data.products.filter(
@@ -3595,7 +3717,6 @@ app.get('/api/queue', (req, res) => {
 app.post('/api/queue', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
-
     const data = getData(profile);
 
     const incoming =
@@ -3644,7 +3765,6 @@ app.post('/api/queue/process', async (req, res) => {
       processed < 100
     ) {
       await processQueue(profile);
-
       processed++;
     }
 
@@ -3951,6 +4071,14 @@ async function shutdown(signal) {
   for (const [profile, timer] of reconnectTimers.entries()) {
     clearTimeout(timer);
     reconnectTimers.delete(profile);
+  }
+
+  // Invalida os eventos de todos os sockets antes de encerrá-los.
+  for (const profile of PROFILE_IDS) {
+    connectionIds.set(
+      profile,
+      (connectionIds.get(profile) || 0) + 1
+    );
   }
 
   for (const [profile, sock] of sockets.entries()) {
