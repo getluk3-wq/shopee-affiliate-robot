@@ -90,6 +90,66 @@ app.use((req, res, next) => {
   next();
 });
 
+// ======================================================
+// AUTENTICAÇÃO DAS ROTAS ADMINISTRATIVAS
+// ======================================================
+
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '');
+
+const authAttempts = new Map();
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_MAX_ATTEMPTS = 30;
+
+function safeSecretCompare(received, expected) {
+  const receivedBuffer = Buffer.from(String(received || ''), 'utf8');
+  const expectedBuffer = Buffer.from(String(expected || ''), 'utf8');
+
+  if (!receivedBuffer.length || receivedBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(receivedBuffer, expectedBuffer);
+}
+
+app.use('/api', (req, res, next) => {
+  if (!ADMIN_PASSWORD) {
+    logger.error('ADMIN_PASSWORD não configurada; rotas administrativas bloqueadas.');
+    return res.status(503).json({
+      ok: false,
+      message: 'Painel indisponível: configure ADMIN_PASSWORD nas variáveis do servidor.'
+    });
+  }
+
+  const now = Date.now();
+  const ip = String(req.ip || req.socket?.remoteAddress || 'unknown');
+  let attempt = authAttempts.get(ip);
+
+  if (!attempt || now - attempt.startedAt > AUTH_WINDOW_MS) {
+    attempt = { startedAt: now, count: 0 };
+    authAttempts.set(ip, attempt);
+  }
+
+  if (attempt.count >= AUTH_MAX_ATTEMPTS) {
+    return res.status(429).json({
+      ok: false,
+      message: 'Muitas tentativas. Aguarde alguns minutos e tente novamente.'
+    });
+  }
+
+  const supplied = req.get('x-admin-password') || '';
+
+  if (!safeSecretCompare(supplied, ADMIN_PASSWORD)) {
+    attempt.count += 1;
+    return res.status(401).json({
+      ok: false,
+      message: 'Senha administrativa inválida.'
+    });
+  }
+
+  authAttempts.delete(ip);
+  next();
+});
+
 
 // ======================================================
 // MEMÓRIA DO SERVIDOR
@@ -108,6 +168,7 @@ const pairingCache = new Map();
 const authRegistered = new Map();
 
 const automationLocks = new Set();
+const queueLocks = new Set();
 
 const storeCache = Object.fromEntries(
   PROFILE_IDS.map(profile => [
@@ -1108,10 +1169,43 @@ function authCacheKey(profile, key) {
   return `${profile}:${key}`;
 }
 
+function whatsappAuthEncryptionKey() {
+  const secret =
+    process.env.WHATSAPP_AUTH_ENCRYPTION_KEY ||
+    process.env.APP_ENCRYPTION_KEY ||
+    '';
+
+  if (!secret) {
+    throw new Error(
+      'Configure WHATSAPP_AUTH_ENCRYPTION_KEY ou APP_ENCRYPTION_KEY para proteger as sessões do WhatsApp.'
+    );
+  }
+
+  return crypto
+    .createHash('sha256')
+    .update(secret)
+    .digest();
+}
+
 function packAuthValue(value) {
-  return JSON.parse(
-    JSON.stringify(value, BufferJSON.replacer)
-  );
+  const serialized = JSON.stringify(value, BufferJSON.replacer);
+  const key = whatsappAuthEncryptionKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+
+  const encrypted = Buffer.concat([
+    cipher.update(serialized, 'utf8'),
+    cipher.final()
+  ]);
+
+  return {
+    __encrypted: true,
+    version: 1,
+    algorithm: 'aes-256-gcm',
+    iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+    data: encrypted.toString('base64')
+  };
 }
 
 function unpackAuthValue(value) {
@@ -1128,18 +1222,45 @@ function unpackAuthValue(value) {
       }
     }
 
-    return JSON.parse(
-      JSON.stringify(value),
-      BufferJSON.reviver
+    // Compatibilidade com registros antigos que ainda estão em JSON puro.
+    if (!value || value.__encrypted !== true) {
+      return JSON.parse(
+        JSON.stringify(value),
+        BufferJSON.reviver
+      );
+    }
+
+    const key = whatsappAuthEncryptionKey();
+    const iv = Buffer.from(value.iv, 'base64');
+    const tag = Buffer.from(value.tag, 'base64');
+    const encrypted = Buffer.from(value.data, 'base64');
+
+    if (iv.length !== 12 || tag.length !== 16 || !encrypted.length) {
+      throw new Error('Envelope criptográfico inválido.');
+    }
+
+    const decipher = crypto.createDecipheriv(
+      'aes-256-gcm',
+      key,
+      iv
     );
+
+    decipher.setAuthTag(tag);
+
+    const decrypted = Buffer.concat([
+      decipher.update(encrypted),
+      decipher.final()
+    ]).toString('utf8');
+
+    return JSON.parse(decrypted, BufferJSON.reviver);
 
   } catch (error) {
     logger.error(
       { error: error.message },
-      'Erro ao recuperar dado de autenticação.'
+      'Erro ao recuperar dado de autenticação do WhatsApp.'
     );
 
-    return null;
+    throw error;
   }
 }
 
@@ -1942,6 +2063,13 @@ function publicDestination(destination) {
 function normalizeProduct(product) {
   const item = product || {};
 
+  const priceMin = item.priceMin ??
+    item.price ??
+    item.productPrice ??
+    '';
+
+  const priceMax = item.priceMax ?? '';
+
   const price = item.price ??
     item.productPrice ??
     item.priceMin ??
@@ -1954,12 +2082,20 @@ function normalizeProduct(product) {
 
   const discount = item.discount ??
     item.discountRate ??
+    item.priceDiscountRate ??
+    '';
+
+  const productLink = item.offerLink ||
+    item.productLink ||
+    item.link ||
+    item.url ||
     '';
 
   return {
     id: String(
       item.id ||
       item.productId ||
+      item.itemId ||
       crypto.randomUUID()
     ),
 
@@ -1977,13 +2113,15 @@ function normalizeProduct(product) {
       'Produto Shopee'
     ),
 
-    productLink: String(
-      item.productLink ||
-      item.link ||
-      item.url ||
-      item.offerLink ||
-      ''
+    title: String(
+      item.title ||
+      item.productName ||
+      item.name ||
+      'Produto Shopee'
     ),
+
+    productLink: String(productLink),
+    offerLink: String(item.offerLink || productLink),
 
     imageUrl: String(
       item.imageUrl ||
@@ -1993,8 +2131,23 @@ function normalizeProduct(product) {
     ),
 
     price: String(price),
+    priceMin: String(priceMin),
+    priceMax: String(priceMax),
     oldPrice: String(oldPrice),
     discount: String(discount),
+
+    commissionRate: String(
+      item.commissionRate ??
+      item.commission ??
+      ''
+    ),
+
+    sales: Number(item.sales || item.sold || 0),
+    ratingStar: Number(
+      item.ratingStar ??
+      item.rating ??
+      0
+    ),
 
     category: String(
       item.category ||
@@ -2002,17 +2155,13 @@ function normalizeProduct(product) {
       ''
     ),
 
-    description: String(
-      item.description ||
-      ''
-    ),
+    description: String(item.description || ''),
 
     createdAt:
       item.createdAt ||
       new Date().toISOString()
   };
 }
-
 
 // ======================================================
 // TEXTO DA OFERTA
@@ -2050,7 +2199,6 @@ function buildOfferMessage(product) {
 
   return lines.join('\n');
 }
-
 
 // ======================================================
 // ENVIO PARA UM DESTINO WHATSAPP
@@ -2274,12 +2422,20 @@ async function shopeeGraphQL(
 
 async function fetchShopeeOffers(
   profile,
-  limit = 10
+  limit = 10,
+  keyword = ''
 ) {
   const safeLimit = Math.max(
     1,
     Math.min(50, Number(limit) || 10)
   );
+
+  const normalizedKeyword = normalizeText(keyword);
+  // A API oficial não oferece aqui um filtro de palavra-chave confirmado.
+  // Buscamos um lote limitado e filtramos localmente sem alterar o schema GraphQL.
+  const fetchLimit = normalizedKeyword
+    ? Math.max(safeLimit, 50)
+    : safeLimit;
 
   const query = `
     query ProductOffer($limit: Int!) {
@@ -2311,7 +2467,7 @@ async function fetchShopeeOffers(
     profile,
     query,
     {
-      limit: safeLimit
+      limit: fetchLimit
     }
   );
 
@@ -2324,40 +2480,45 @@ async function fetchShopeeOffers(
     return [];
   }
 
-  return nodes.map(item => {
-    const price = item.priceMin ??
-      item.priceMax ??
-      '';
-
+  const normalized = nodes.map(item => {
     const discount = item.priceDiscountRate;
 
     return normalizeProduct({
       id: item.itemId,
+      itemId: item.itemId,
       productName: item.productName,
       name: item.productName,
-      price,
-      oldPrice: '',
-
+      priceMin: item.priceMin,
+      priceMax: item.priceMax,
+      price: item.priceMin ?? item.priceMax ?? '',
+      oldPrice: item.priceBeforeDiscount ?? '',
       discount:
-        discount !== undefined &&
-        discount !== null
+        discount !== undefined && discount !== null
           ? `${discount}% OFF`
           : '',
-
+      priceDiscountRate: discount,
       imageUrl: item.imageUrl,
-
-      productLink:
-        item.offerLink ||
-        item.productLink ||
-        '',
-
+      productLink: item.productLink || '',
+      offerLink: item.offerLink || '',
       category: item.categoryName,
       description: '',
       sales: item.sales,
-      rating: item.ratingStar,
+      ratingStar: item.ratingStar,
       commissionRate: item.commissionRate
     });
   });
+
+  const filtered = normalizedKeyword
+    ? normalized.filter(item =>
+        normalizeText([
+          item.productName,
+          item.category,
+          item.description
+        ].join(' ')).includes(normalizedKeyword)
+      )
+    : normalized;
+
+  return filtered.slice(0, safeLimit);
 }
 
 
@@ -2365,7 +2526,7 @@ async function fetchShopeeOffers(
 // PROCESSAMENTO DA FILA DE OFERTAS
 // ======================================================
 
-async function processQueue(profile) {
+async function processQueueUnlocked(profile) {
   const data = getData(profile);
 
   const current = data.queue.find(
@@ -2382,8 +2543,6 @@ async function processQueue(profile) {
   current.status = 'processing';
   current.startedAt = new Date().toISOString();
 
-  await saveProfile(profile);
-
   const product = normalizeProduct(
     current.product || current
   );
@@ -2392,6 +2551,8 @@ async function processQueue(profile) {
   const results = [];
 
   try {
+    await saveProfile(profile);
+
     if (!targets.length) {
       throw new Error(
         'Nenhum grupo ou destino está selecionado.'
@@ -2501,7 +2662,18 @@ async function processQueue(profile) {
     current.error = error.message;
     current.finishedAt = new Date().toISOString();
 
-    await saveProfile(profile);
+    try {
+      await saveProfile(profile);
+    } catch (saveError) {
+      logger.error(
+        {
+          profile,
+          error: saveError.message,
+          queueItemId: current.id
+        },
+        'Não foi possível persistir o erro da fila.'
+      );
+    }
 
     return {
       ok: false,
@@ -2509,6 +2681,24 @@ async function processQueue(profile) {
       message: error.message,
       results
     };
+  }
+}
+
+async function processQueue(profile) {
+  if (queueLocks.has(profile)) {
+    return {
+      ok: false,
+      status: 'busy',
+      message: 'A fila deste perfil já está sendo processada.'
+    };
+  }
+
+  queueLocks.add(profile);
+
+  try {
+    return await processQueueUnlocked(profile);
+  } finally {
+    queueLocks.delete(profile);
   }
 }
 
@@ -2774,6 +2964,10 @@ async function runAutomation(profile) {
       if (!current) break;
 
       const result = await processQueue(profile);
+
+      if (result.status === 'busy') {
+        break;
+      }
 
       processed++;
 
@@ -3778,7 +3972,12 @@ app.post('/api/queue/process', async (req, res) => {
       ) &&
       processed < 100
     ) {
-      await processQueue(profile);
+      const result = await processQueue(profile);
+
+      if (result.status === 'busy') {
+        break;
+      }
+
       processed++;
     }
 
@@ -3876,9 +4075,12 @@ app.get('/api/shopee/products', async (req, res) => {
       req.query.limit || 10
     );
 
+    const keyword = String(req.query.keyword || '').trim().slice(0, 120);
+
     const products = await fetchShopeeOffers(
       profile,
-      limit
+      limit,
+      keyword
     );
 
     res.json({
