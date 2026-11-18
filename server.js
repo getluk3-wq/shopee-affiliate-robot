@@ -2149,11 +2149,7 @@ function normalizeProduct(product) {
       0
     ),
 
-    category: String(
-      item.category ||
-      item.categoryName ||
-      ''
-    ),
+    category: String(item.category || ''),
 
     description: String(item.description || ''),
 
@@ -2203,7 +2199,6 @@ function buildOfferMessage(product) {
 // ======================================================
 // ENVIO PARA UM DESTINO WHATSAPP
 // ======================================================
-
 async function sendToDestination(
   profile,
   destination,
@@ -2457,7 +2452,6 @@ async function fetchShopeeOffers(
           sales
           ratingStar
           commissionRate
-          categoryName
         }
       }
     }
@@ -2500,7 +2494,8 @@ async function fetchShopeeOffers(
       imageUrl: item.imageUrl,
       productLink: item.productLink || '',
       offerLink: item.offerLink || '',
-      category: item.categoryName,
+      // ProductOfferV2 não fornece uma categoria textual neste retorno.
+      category: '',
       description: '',
       sales: item.sales,
       ratingStar: item.ratingStar,
