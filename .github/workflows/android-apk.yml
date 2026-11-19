@@ -5,10 +5,9 @@ on:
   push:
     paths:
       - '.github/workflows/android-apk.yml'
-      - 'download/**'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -72,6 +71,18 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug
+
+      - name: Publicar APK no site permanente
+        run: |
+          mkdir -p download
+          cp android-wrapper/android/app/build/outputs/apk/debug/app-debug.apk download/Medeiros-Divulgacao.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add download/Medeiros-Divulgacao.apk
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish Medeiros Divulgação Android APK"
+            git push
+          fi
 
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
