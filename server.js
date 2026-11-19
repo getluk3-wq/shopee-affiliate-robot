@@ -2560,7 +2560,8 @@ async function shopeeGraphQL(
 async function fetchShopeeOffers(
   profile,
   limit = 10,
-  keyword = ''
+  keyword = '',
+  page = 1
 ) {
   const safeLimit = Math.max(
     1,
@@ -2571,16 +2572,22 @@ async function fetchShopeeOffers(
     keyword || ''
   ).trim();
 
+  const safePage = Math.max(
+    1,
+    Math.min(20, Math.floor(Number(page) || 1))
+  );
+
   const query = `
     query ProductOffer(
       $limit: Int!,
-      $keyword: String
+      $keyword: String,
+      $page: Int!
     ) {
       productOfferV2(
         keyword: $keyword,
         listType: 0,
         sortType: 2,
-        page: 1,
+        page: $page,
         limit: $limit
       ) {
         nodes {
@@ -2605,7 +2612,8 @@ async function fetchShopeeOffers(
     query,
     {
       limit: safeLimit,
-      keyword: safeKeyword || null
+      keyword: safeKeyword || null,
+      page: safePage
     }
   );
 
@@ -2696,20 +2704,33 @@ async function fetchShopeeOffersForNiches(
 
   const totalLimit = Math.max(1, Math.min(50, Number(limit) || 10));
   const selectedNiches = niches.slice(0, totalLimit);
-  const basePerNiche = Math.floor(totalLimit / selectedNiches.length);
-  const remainder = totalLimit % selectedNiches.length;
   const merged = new Map();
   const nicheErrors = [];
+  const data = getData(profile);
 
-  for (let index = 0; index < selectedNiches.length; index++) {
-    const nicheId = selectedNiches[index];
+  if (!data.automation || typeof data.automation !== 'object') {
+    data.automation = {};
+  }
+
+  if (
+    !data.automation.nicheSearchPages ||
+    typeof data.automation.nicheSearchPages !== 'object'
+  ) {
+    data.automation.nicheSearchPages = {};
+  }
+
+  // Busca uma quantidade maior por nicho e alterna as páginas da API.
+  // Assim, a automação não fica presa repetindo sempre os mesmos primeiros produtos.
+  const nicheLimit = Math.max(20, Math.min(50, totalLimit * 2));
+
+  for (const nicheId of selectedNiches) {
     const keyword = NICHE_SEARCH_KEYWORDS[nicheId];
 
     if (!keyword) continue;
 
-    const nicheLimit = Math.max(
+    const page = Math.max(
       1,
-      basePerNiche + (index < remainder ? 1 : 0)
+      Math.min(5, Number(data.automation.nicheSearchPages[nicheId]) || 1)
     );
 
     let offers = [];
@@ -2720,8 +2741,12 @@ async function fetchShopeeOffersForNiches(
       offers = await fetchShopeeOffers(
         profile,
         nicheLimit,
-        keyword
+        keyword,
+        page
       );
+
+      data.automation.nicheSearchPages[nicheId] =
+        page >= 5 ? 1 : page + 1;
     } catch (error) {
       nicheErrors.push({ nicheId, message: error.message });
 
@@ -2774,6 +2799,8 @@ async function fetchShopeeOffersForNiches(
         profile,
         nicheId,
         keyword,
+        page,
+        requestedLimit: nicheLimit,
         offersReturned: offers.length,
         acceptedForNiche,
         rejectedForNiche
@@ -3200,13 +3227,23 @@ async function runAutomation(profile) {
 
     const hasAllNichesDestination = selectedNiches.includes('all');
 
+    const allNichesPage = Math.max(
+      1,
+      Math.min(5, Number(automation.searchPage) || 1)
+    );
+
     const products = hasAllNichesDestination
-      ? await fetchShopeeOffers(profile, maxProducts)
+      ? await fetchShopeeOffers(profile, maxProducts, '', allNichesPage)
       : await fetchShopeeOffersForNiches(
           profile,
           maxProducts,
           selectedNiches
         );
+
+    if (hasAllNichesDestination) {
+      automation.searchPage =
+        allNichesPage >= 5 ? 1 : allNichesPage + 1;
+    }
 
     logger.info(
       {
