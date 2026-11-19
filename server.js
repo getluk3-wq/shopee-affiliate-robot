@@ -3753,7 +3753,7 @@ function isValidProfilePassword(profile, value) {
 }
 
 app.use((req, res, next) => {
-  if (req.path === '/health') return next();
+  if (req.path === '/health' || (req.method === 'GET' && req.path === '/')) return next();
 
   const suppliedPassword = req.headers['x-admin-password'];
   const admin = isValidAdminPassword(suppliedPassword);
