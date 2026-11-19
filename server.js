@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const capacete = require('capacete');
+const helmet = require('helmet');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -13,22 +13,22 @@ const baileys = require('@whiskeysockets/baileys');
 const makeWASocket = baileys.default;
 
 const {
-  Motivo da desconexão,
+  DisconnectReason,
   BufferJSON,
   initAuthCreds,
   makeCacheableSignalKeyStore,
-  Navegadores,
-  buscarVersãoMaisRecenteDoBailey
+  Browsers,
+  fetchLatestBaileysVersion
 } = baileys;
 
 
-// =====================================================
+// ======================================================
 // CONFIGURAÇÕES PRINCIPAIS
-// =====================================================
+// ======================================================
 
 const app = express();
 
-const PORTA = Número(process.env.PORTA || 3000);
+const PORT = Number(process.env.PORT || 3000);
 
 const DATA_DIR =
   process.env.DATA_DIR ||
@@ -39,8 +39,6 @@ const PROFILE_IDS = ['rafael', 'usuario2'];
 const SUPABASE_URL =
   process.env.SUPABASE_URL || '';
 
-// A autenticação do WhatsApp exige uma chave de serviço.
-// Não utilize SUPABASE_ANON_KEY como alternativa.
 const SUPABASE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
@@ -52,21 +50,21 @@ const WHATSAPP_AUTO_RECONNECT =
   process.env.WHATSAPP_AUTO_RECONNECT !== 'false';
 
 const logger = pino({
-  nível: process.env.LOG_LEVEL || 'info'
+  level: process.env.LOG_LEVEL || 'info'
 });
 
 const supabase =
-  SUPABASE_URL e SUPABASE_KEY
-    ? criarCliente(SUPABASE_URL, SUPABASE_KEY, {
+  SUPABASE_URL && SUPABASE_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_KEY, {
         auth: {
           persistSession: false,
           autoRefreshToken: false
         }
       })
-    : nulo;
+    : null;
 
 fs.mkdirSync(DATA_DIR, {
-  recursivo: verdadeiro
+  recursive: true
 });
 
 app.disable('x-powered-by');
@@ -77,122 +75,61 @@ app.use(helmet({
 }));
 
 app.use(express.json({
-  limite: '5mb'
+  limit: '5mb'
 }));
 
 app.use(express.urlencoded({
-  estendido: verdadeiro,
-  limite: '5mb'
+  extended: true,
+  limit: '5mb'
 }));
 
 app.use((req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
-  próximo();
-});
-
-// =====================================================
-// AUTENTICAÇÃO DAS ROTAS ADMINISTRATIVAS
-// =====================================================
-
-const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '');
-
-const authAttempts = new Map();
-const AUTH_WINDOW_MS = 15 * 60 * 1000;
-const AUTH_MAX_ATTEMPTS = 30;
-
-função safeSecretCompare(recebido, esperado) {
-  const receivedBuffer = Buffer.from(String(received || ''), 'utf8');
-  const expectedBuffer = Buffer.from(String(expected || ''), 'utf8');
-
-  se (!receivedBuffer.length || receivedBuffer.length !== expectedBuffer.length) {
-    retornar falso;
-  }
-
-  return crypto.timingSafeEqual(recebidoBuffer, esperadoBuffer);
-}
-
-app.use('/api', (req, res, next) => {
-  if (!ADMIN_PASSWORD) {
-    logger.error('ADMIN_PASSWORD não configurado; rotas administrativas bloqueadas.');
-    return res.status(503).json({
-      ok: false,
-      mensagem: 'Painel indisponível: configure ADMIN_PASSWORD nas variáveis ​​do servidor.'
-    });
-  }
-
-  const now = Date.now();
-  const ip = String(req.ip || req.socket?.remoteAddress || 'unknown');
-  let attempt = authAttempts.get(ip);
-
-  se (!tentativa || agora - tentativa.iniciadaEm > AUTH_WINDOW_MS) {
-    tentativa = { iniciadaEm: agora, contagem: 0 };
-    authAttempts.set(ip, tentativa);
-  }
-
-  se (attempt.count >= AUTH_MAX_ATTEMPTS) {
-    return res.status(429).json({
-      ok: false,
-      mensagem: 'Muitas tentativas. Aguarde alguns minutos e tente novamente.'
-    });
-  }
-
-  const fornecido = req.get('x-admin-password') || '';
-
-  se (!safeSecretCompare(fornecido, ADMIN_PASSWORD)) {
-    contagem de tentativas += 1;
-    return res.status(401).json({
-      ok: false,
-      mensagem: 'Senha administrativa inválida.'
-    });
-  }
-
-  authAttempts.delete(ip);
-  próximo();
+  next();
 });
 
 
-// =====================================================
+// ======================================================
 // MEMÓRIA DO SERVIDOR
-// =====================================================
+// ======================================================
 
-const sockets = novo Map();
-const socketStarts = novo Map();
-const reconnectTimers = novo Map();
+const sockets = new Map();
+const socketStarts = new Map();
+const reconnectTimers = new Map();
 const reconnectAttempts = new Map();
 
-const connectionIds = novo Map();
+const connectionIds = new Map();
 
 const connectionStatus = new Map();
-const qrCache = novo Map();
+const qrCache = new Map();
 const pairingCache = new Map();
-const authRegistered = novo Map();
+const authRegistered = new Map();
 
-const automationLocks = novo Set();
-const queueLocks = novo Set();
+const automationLocks = new Set();
 
 const storeCache = Object.fromEntries(
   PROFILE_IDS.map(profile => [
-    perfil,
-    nulo
+    profile,
+    null
   ])
 );
 
 
-// =====================================================
+// ======================================================
 // NICHOS E CATEGORIAS
-// =====================================================
+// ======================================================
 
-const NICHO_DEFINITIONS = [
+const NICHE_DEFINITIONS = [
   {
-    id: 'elétricos',
-    rótulo: 'Eletrônicos e tecnologia',
+    id: 'eletricos',
+    label: 'Eletrônicos e tecnologia',
     aliases: [
-      'eletrônico',
-      'eletrônicos',
+      'eletronico',
+      'eletronicos',
       'tecnologia',
       'celular',
       'fone',
-      'informática',
+      'informatica',
       'computador',
       'gadget',
       'tv',
@@ -201,34 +138,34 @@ const NICHO_DEFINITIONS = [
   },
   {
     id: 'perfumaria',
-    rótulo: 'Perfumes',
+    label: 'Perfumes',
     aliases: [
       'perfume',
       'perfumaria',
-      'colônia',
-      'deso parfum',
+      'colonia',
+      'deo parfum',
       'body splash',
-      'fragrância'
+      'fragrancia'
     ]
   },
   {
     id: 'beleza',
-    rótulo: 'Beleza e maquiagem',
+    label: 'Beleza e maquiagem',
     aliases: [
       'beleza',
       'maquiagem',
-      'fazer',
+      'make',
       'batom',
       'base',
-      'cuidados com a pele',
+      'skincare',
       'cabelo',
       'unha',
-      'cosmético'
+      'cosmetico'
     ]
   },
   {
     id: 'moda_feminina',
-    rótulo: 'Moda feminina',
+    label: 'Moda feminina',
     aliases: [
       'moda feminina',
       'feminino',
@@ -237,28 +174,28 @@ const NICHO_DEFINITIONS = [
       'blusa feminina',
       'saia',
       'lingerie',
-      'recortado'
+      'cropped'
     ]
   },
   {
     id: 'moda_masculina',
-    rótulo: 'Moda feminina',
+    label: 'Moda masculina',
     aliases: [
       'moda masculina',
       'masculino',
-      'masculino',
+      'masculina',
       'camiseta masculina',
       'cueca',
-      'bermudas masculinas'
+      'bermuda masculina'
     ]
   },
   {
     id: 'moda_infantil',
-    rótulo: 'Moda infantil',
+    label: 'Moda infantil',
     aliases: [
       'infantil',
       'crianca',
-      'bebê',
+      'bebe',
       'menino',
       'menina',
       'roupa infantil'
@@ -266,12 +203,12 @@ const NICHO_DEFINITIONS = [
   },
   {
     id: 'calcados',
-    rótulo: 'Calçados',
+    label: 'Calçados',
     aliases: [
       'calcado',
       'calcados',
       'sapato',
-      'tênis',
+      'tenis',
       'sandalia',
       'chinelo',
       'bota'
@@ -279,11 +216,11 @@ const NICHO_DEFINITIONS = [
   },
   {
     id: 'casa',
-    rótulo: 'Casa e utilidades',
+    label: 'Casa e utilidades',
     aliases: [
       'casa',
       'utilidades',
-      'organização',
+      'organizacao',
       'organizador',
       'limpeza',
       'banheiro',
@@ -292,12 +229,12 @@ const NICHO_DEFINITIONS = [
   },
   {
     id: 'cozinha',
-    rótulo: 'Cozinha',
+    label: 'Cozinha',
     aliases: [
       'cozinha',
       'panela',
       'frigideira',
-      'fritadeira a ar',
+      'air fryer',
       'airfryer',
       'talher',
       'garrafa',
@@ -305,26 +242,26 @@ const NICHO_DEFINITIONS = [
     ]
   },
   {
-    id: 'decoração',
-    rótulo: 'Decoração',
+    id: 'decoracao',
+    label: 'Decoração',
     aliases: [
-      'decoração',
+      'decoracao',
       'decorativo',
       'quadro',
       'vaso',
       'tapete',
       'cortina',
-      'luminária'
+      'luminaria'
     ]
   },
   {
     id: 'fitness',
-    Rótulo: 'Fitness e esportes',
+    label: 'Fitness e esportes',
     aliases: [
       'fitness',
       'academia',
       'esporte',
-      'trem',
+      'treino',
       'halter',
       'suplemento',
       'legging fitness'
@@ -332,20 +269,20 @@ const NICHO_DEFINITIONS = [
   },
   {
     id: 'pet',
-    rótulo: 'Pet shop',
+    label: 'Pet shop',
     aliases: [
-      'animal de estimação',
+      'pet',
       'cachorro',
       'gato',
       'cao',
-      'racão',
+      'racao',
       'coleira',
-      'animal de estimação brinquedo'
+      'brinquedo pet'
     ]
   },
   {
     id: 'brinquedos',
-    rótulo: 'Brinquedos',
+    label: 'Brinquedos',
     aliases: [
       'brinquedo',
       'brinquedos',
@@ -357,32 +294,32 @@ const NICHO_DEFINITIONS = [
   },
   {
     id: 'acessorios',
-    rótulo: 'Acessórios e bolsas',
+    label: 'Acessórios e bolsas',
     aliases: [
       'acessorio',
-      'acessórios',
+      'acessorios',
       'bolsa',
       'carteira',
       'relogio',
-      'óculos',
+      'oculos',
       'bijuteria',
-      'alegria'
+      'joia'
     ]
   }
 ];
 
 
-// =====================================================
+// ======================================================
 // DADOS PADRÃO DOS PERFIS
-// =====================================================
+// ======================================================
 
-função defaultProfileData() {
-  retornar {
-    automação: {
-      ativado: falso,
-      ativo: falso,
-      Intervalo de minutos: 30
-      intervaloSegundos: 1800,
+function defaultProfileData() {
+  return {
+    automation: {
+      enabled: false,
+      active: false,
+      intervalMinutes: 30,
+      intervalSeconds: 1800,
       maxProducts: 10,
       destinationIds: [],
       groupSelectionMode: false,
@@ -393,61 +330,61 @@ função defaultProfileData() {
       endTime: '',
       scheduleTimes: [],
       lastRunAt: null,
-      últimoEnviadoEm: nulo,
-      últimoErro: nulo
+      lastSentAt: null,
+      lastError: null
     },
 
-    destinos: [],
-    produtos: [],
-    fila: [],
+    destinations: [],
+    products: [],
+    queue: [],
     sentProducts: {},
 
     whatsappAuth: {
-      credenciais: nulas,
-      chaves: {}
+      creds: null,
+      keys: {}
     },
 
-    shopeeCredentials: nulo,
+    shopeeCredentials: null,
     updatedAt: new Date().toISOString()
   };
 }
 
 
-// =====================================================
+// ======================================================
 // FUNÇÕES UTILITÁRIAS
-// =====================================================
+// ======================================================
 
-função sleep(ms) {
-  retornar nova Promise(resolve => {
+function sleep(ms) {
+  return new Promise(resolve => {
     setTimeout(resolve, ms);
   });
 }
 
-função normalizeText(valor) {
-  retornar String(valor || '')
+function normalizeText(value) {
+  return String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
 }
 
-função normalizeGroupId(valor) {
-  retornar String(valor || '')
+function normalizeGroupId(value) {
+  return String(value || '')
     .trim()
     .toLowerCase();
 }
 
-função normalizeWhatsAppJid(valor) {
+function normalizeWhatsAppJid(value) {
   let raw = String(value || '')
     .trim()
     .replace(/\s+/g, '');
 
-  se (!raw) retorne '';
+  if (!raw) return '';
 
   if (raw.includes('@')) {
     const at = raw.lastIndexOf('@');
 
-    retornar (
+    return (
       raw.slice(0, at) +
       '@' +
       raw.slice(at + 1).toLowerCase()
@@ -460,41 +397,39 @@ função normalizeWhatsAppJid(valor) {
 
   let digits = raw.replace(/\D/g, '');
 
-  se (
-    dígitos.comprimento === 10 ||
+  if (
+    digits.length === 10 ||
     digits.length === 11
   ) {
-    dígitos = `55${dígitos}`;
+    digits = `55${digits}`;
   }
 
-  se (
-    dígitos.comprimento >= 12 &&
+  if (
+    digits.length >= 12 &&
     digits.length <= 15
   ) {
-    retornar `${digits}@s.whatsapp.net`;
+    return `${digits}@s.whatsapp.net`;
   }
 
-  retornar '';
-}
-
-função obterValorDoMapaPorIDDoGrupo(mapa, idDoGrupo) {
-  se (!map || typeof map !== 'object') {
-    retornar indefinido;
+  return '';
+}function getMapValueByGroupId(map, groupId) {
+  if (!map || typeof map !== 'object') {
+    return undefined;
   }
 
   const target = normalizeGroupId(groupId);
 
-  para (constante [chave, valor] de Object.entries(map)) {
-    se (normalizarGroupId(chave) === alvo) {
-      valor de retorno;
+  for (const [key, value] of Object.entries(map)) {
+    if (normalizeGroupId(key) === target) {
+      return value;
     }
   }
 
-  retornar indefinido;
+  return undefined;
 }
 
-função profileIdFrom(req) {
-  const solicitado =
+function profileIdFrom(req) {
+  const requested =
     req.headers['x-profile'] ||
     req.query?.profile ||
     req.body?.profile ||
@@ -503,11 +438,11 @@ função profileIdFrom(req) {
   const profile = String(requested).trim();
 
   return PROFILE_IDS.includes(profile)
-    ? perfil
+    ? profile
     : 'rafael';
 }
 
-função getData(profile) {
+function getData(profile) {
   if (!PROFILE_IDS.includes(profile)) {
     throw new Error('Perfil inválido.');
   }
@@ -519,84 +454,84 @@ função getData(profile) {
   return storeCache[profile];
 }
 
-função safeJson(valor, fallback = null) {
-  se (valor === indefinido || valor === nulo) {
-    retornar fallback;
+function safeJson(value, fallback = null) {
+  if (value === undefined || value === null) {
+    return fallback;
   }
 
-  se (tipo de valor === 'string') {
-    tente {
+  if (typeof value === 'string') {
+    try {
       return JSON.parse(value);
-    } pegar (_) {
-      retornar fallback;
+    } catch (_) {
+      return fallback;
     }
   }
 
-  valor de retorno;
+  return value;
 }
 
 
-// =====================================================
+// ======================================================
 // NORMALIZAÇÃO DOS DADOS
-// =====================================================
+// ======================================================
 
-função mergeProfileData(value) {
+function mergeProfileData(value) {
   const defaults = defaultProfileData();
   const parsed = safeJson(value, {});
 
-  se (!analisado || tipo de analisado !== 'objeto') {
-    retornar valores padrão;
+  if (!parsed || typeof parsed !== 'object') {
+    return defaults;
   }
 
   const oldAutomation = parsed.automation || {};
 
-  const intervaloSegundos = Número(
+  const intervalSeconds = Number(
     oldAutomation.intervalSeconds
   );
 
-  const intervaloMinutos = Número(
+  const intervalMinutes = Number(
     oldAutomation.intervalMinutes
   );
 
-  seja finalSeconds = 1800;
+  let finalSeconds = 1800;
 
-  se (
+  if (
     Number.isFinite(intervalSeconds) &&
-    intervaloSegundos > 0
+    intervalSeconds > 0
   ) {
-    segundosFinal = segundosIntervalo;
-  } senão se (
+    finalSeconds = intervalSeconds;
+  } else if (
     Number.isFinite(intervalMinutes) &&
-    intervaloMinutos > 0
+    intervalMinutes > 0
   ) {
-    segundosFinal = minutosIntervalo * 60;
+    finalSeconds = intervalMinutes * 60;
   }
 
-  segundosFinal = Math.max(
+  finalSeconds = Math.max(
     10,
     Math.min(86400, Math.round(finalSeconds))
   );
 
-  const ativo = Booleano(
+  const active = Boolean(
     oldAutomation.active ??
     oldAutomation.enabled ??
-    falso
+    false
   );
 
   const whatsappAuth = parsed.whatsappAuth || {};
 
-  retornar {
-    ...padrões,
-    ...analisado,
+  return {
+    ...defaults,
+    ...parsed,
 
-    automação: {
+    automation: {
       ...defaults.automation,
-      ...Automação antiga,
+      ...oldAutomation,
 
-      habilitado: ativo,
-      ativo,
+      enabled: active,
+      active,
 
-      intervaloSegundos: finalSegundos,
+      intervalSeconds: finalSeconds,
 
       intervalMinutes: Math.max(
         1,
@@ -607,7 +542,7 @@ função mergeProfileData(value) {
         1,
         Math.min(
           50,
-          Número(oldAutomation.maxProducts) || 10
+          Number(oldAutomation.maxProducts) || 10
         )
       ),
 
@@ -642,27 +577,27 @@ função mergeProfileData(value) {
         : []
     },
 
-    destinos: Array.isArray(parsed.destinations)
+    destinations: Array.isArray(parsed.destinations)
       ? parsed.destinations
       : [],
 
-    produtos: Array.isArray(produtos analisados)
-      ? produtos analisados
+    products: Array.isArray(parsed.products)
+      ? parsed.products
       : [],
 
-    fila: Array.isArray(fila analisada)
-      ? fila.analisada
+    queue: Array.isArray(parsed.queue)
+      ? parsed.queue
       : [],
 
-    Produtos enviados:
-      Produtos enviados analisados ​​e
+    sentProducts:
+      parsed.sentProducts &&
       typeof parsed.sentProducts === 'object'
-        ? analisado.produtos enviados
+        ? parsed.sentProducts
         : {},
 
     whatsappAuth: {
-      credenciais: whatsappAuth.creds || nulo,
-      teclas:
+      creds: whatsappAuth.creds || null,
+      keys:
         whatsappAuth.keys &&
         typeof whatsappAuth.keys === 'object'
           ? whatsappAuth.keys
@@ -674,111 +609,111 @@ função mergeProfileData(value) {
 }
 
 
-// =====================================================
+// ======================================================
 // SUPABASE: LOCALIZAÇÃO DOS REGISTROS
-// =====================================================
+// ======================================================
 
-função assíncrona findProfileRow(profile) {
-  se (!supabase) retornar nulo;
+async function findProfileRow(profile) {
+  if (!supabase) return null;
 
   const profileColumns = [
     'perfil',
-    'perfil',
+    'profile',
     'profile_id',
     'id'
   ];
 
   const dataColumns = [
     'dados',
-    'dados',
+    'data',
     'config',
-    'configurações',
-    'conteúdo',
+    'settings',
+    'conteudo',
     'payload'
   ];
 
-  para (const profileColumn de profileColumns) {
-    para (const dataColumns de dataColumns) {
-      tente {
+  for (const profileColumn of profileColumns) {
+    for (const dataColumn of dataColumns) {
+      try {
         const { data, error } = await supabase
           .from('robo_perfis')
           .select('*')
           .eq(profileColumn, profile)
           .maybeSingle();
 
-        Se (erro) continuar;
+        if (error) continue;
 
-        if (dados) {
-          retornar {
-            linha: dados,
-            colunaDePerfil,
-            colunaDeDados
+        if (data) {
+          return {
+            row: data,
+            profileColumn,
+            dataColumn
           };
         }
-      } pegar (_) {}
+      } catch (_) {}
     }
   }
 
-  retornar nulo;
+  return null;
 }
 
 
-// =====================================================
+// ======================================================
 // CARREGAR PERFIL
-// =====================================================
+// ======================================================
 
-função assíncrona carregarPerfil(perfil) {
+async function loadProfile(profile) {
   if (!PROFILE_IDS.includes(profile)) {
     throw new Error('Perfil inválido.');
   }
 
   let localData = null;
 
-  const caminhoArquivo = caminho.join(
+  const filePath = path.join(
     DATA_DIR,
     `${profile}.json`
   );
 
-  tente {
+  try {
     if (fs.existsSync(filePath)) {
       localData = safeJson(
         fs.readFileSync(filePath, 'utf8'),
-        nulo
+        null
       );
     }
-  } catch (erro) {
+  } catch (error) {
     logger.error(
       {
-        perfil,
-        erro: mensagem de erro
+        profile,
+        error: error.message
       },
       'Erro ao ler arquivo local do perfil'
     );
   }
 
   if (supabase) {
-    tente {
-      const encontrado = await findProfileRow(profile);
+    try {
+      const found = await findProfileRow(profile);
 
       if (found?.row) {
         const remoteData = safeJson(
           found.row[found.dataColumn],
-          nulo
+          null
         );
 
         if (remoteData) {
           storeCache[profile] = mergeProfileData(
-            Dados remotos
+            remoteData
           );
 
           return storeCache[profile];
         }
       }
-    } catch (erro) {
+    } catch (error) {
       logger.warn(
         {
-          perfil,
-          erro: mensagem de erro
+          profile,
+          error: error.message
         },
         'Não foi possível carregar perfil do Supabase'
       );
@@ -793,60 +728,60 @@ função assíncrona carregarPerfil(perfil) {
 }
 
 
-// =====================================================
+// ======================================================
 // SALVAR PERFIL
-// =====================================================
+// ======================================================
 
-função assíncrona salvarPerfil(perfil) {
+async function saveProfile(profile) {
   const data = getData(profile);
 
   data.updatedAt = new Date().toISOString();
   storeCache[profile] = data;
 
-  const caminhoArquivo = caminho.join(
+  const filePath = path.join(
     DATA_DIR,
     `${profile}.json`
   );
 
-  tente {
+  try {
     fs.writeFileSync(
       filePath,
       JSON.stringify(data, null, 2),
       'utf8'
     );
-  } catch (erro) {
+  } catch (error) {
     logger.error(
       {
-        perfil,
-        erro: mensagem de erro
+        profile,
+        error: error.message
       },
       'Erro ao salvar arquivo local'
     );
   }
 
-  se (!supabase) retornar verdadeiro;
+  if (!supabase) return true;
 
   const profileColumns = [
     'perfil',
-    'perfil',
+    'profile',
     'profile_id',
     'id'
   ];
 
   const dataColumns = [
     'dados',
-    'dados',
+    'data',
     'config',
-    'configurações',
-    'conteúdo',
+    'settings',
+    'conteudo',
     'payload'
   ];
 
   const existing = await findProfileRow(profile);
 
-  se (existente) {
+  if (existing) {
     const payload = {
-      [existing.dataColumn]: dados,
+      [existing.dataColumn]: data,
       updated_at: new Date().toISOString()
     };
 
@@ -855,23 +790,19 @@ função assíncrona salvarPerfil(perfil) {
       .update(payload)
       .eq(existing.profileColumn, profile);
 
-    se (!erro) retorne verdadeiro;
-
-    logger.warn(
-      {
-        perfil,
-        erro: mensagem de erro
+    if (!error) return true;        profile,
+        error: error.message
       },
       'Falha ao atualizar perfil no Supabase'
     );
   }
 
-  para (const profileColumn de profileColumns) {
-    para (const dataColumns de dataColumns) {
-      tente {
+  for (const profileColumn of profileColumns) {
+    for (const dataColumn of dataColumns) {
+      try {
         const payload = {
-          [profileColumn]: perfil,
-          [dataColumn]: dados,
+          [profileColumn]: profile,
+          [dataColumn]: data,
           updated_at: new Date().toISOString()
         };
 
@@ -879,59 +810,59 @@ função assíncrona salvarPerfil(perfil) {
           .from('robo_perfis')
           .insert(payload);
 
-        se (!erro) retorne verdadeiro;
-      } pegar (_) {}
+        if (!error) return true;
+      } catch (_) {}
     }
   }
 
   logger.warn(
-    { perfil },
+    { profile },
     'Perfil salvo localmente; Supabase não confirmou gravação.'
   );
 
-  retornar verdadeiro;
+  return true;
 }
 
 
-// =====================================================
+// ======================================================
 // CLASSIFICAÇÃO DE GRUPOS E PRODUTOS
-// =====================================================
+// ======================================================
 
-função classifyGroupNiche(nome) {
-  const normalizado = normalizarTexto(nome);
+function classifyGroupNiche(name) {
+  const normalized = normalizeText(name);
 
-  para (const niche de NICHE_DEFINITIONS) {
-    se (
+  for (const niche of NICHE_DEFINITIONS) {
+    if (
       niche.aliases.some(alias =>
         normalized.includes(normalizeText(alias))
       )
     ) {
-      retornar {
+      return {
         id: niche.id,
-        rótulo: nicho.rótulo
+        label: niche.label
       };
     }
   }
 
-  retornar {
-    id: 'desconhecido',
-    rótulo: 'Não identificado'
+  return {
+    id: 'unknown',
+    label: 'Não identificado'
   };
 }
 
-função classificarNichosDeProduto(produto) {
-  const texto = normalizarTexto([
-    produto?.nomeDoProduto,
-    nome do produto?.nome,
-    produto?.título,
-    produto?.descrição,
-    produto?.categoria
+function classifyProductNiches(product) {
+  const text = normalizeText([
+    product?.productName,
+    product?.name,
+    product?.title,
+    product?.description,
+    product?.category
   ].filter(Boolean).join(' '));
 
   const matches = [];
 
-  para (const niche de NICHE_DEFINITIONS) {
-    se (
+  for (const niche of NICHE_DEFINITIONS) {
+    if (
       niche.aliases.some(alias =>
         text.includes(normalizeText(alias))
       )
@@ -943,68 +874,68 @@ função classificarNichosDeProduto(produto) {
   return [...new Set(matches)];
 }
 
-função destinoMatchesProduct(destino, produto) {
+function destinationMatchesProduct(destination, product) {
   const selected = normalizeText(
-    destino?.nicheId ||
-    destino?.nicho ||
-    'automático'
+    destination?.nicheId ||
+    destination?.niche ||
+    'auto'
   );
 
-  se (
-    ['todos', 'geral', 'todos', 'todas'].inclui(selecionado)
+  if (
+    ['all', 'geral', 'todos', 'todas'].includes(selected)
   ) {
-    retornar {
-      corresponde: verdadeiro,
-      motivo: 'Destino aceita todos os nichos.'
+    return {
+      matches: true,
+      reason: 'Destino aceita todos os nichos.'
     };
   }
 
-  seja destinationNiche = selecionado;
+  let destinationNiche = selected;
 
-  se (
+  if (
     !destinationNiche ||
-    nichoDeDestino === 'automático'
+    destinationNiche === 'auto'
   ) {
-    const classificado = classificarGrupoNicho(
-      destino?.nome ||
-      destino?.assunto ||
+    const classified = classifyGroupNiche(
+      destination?.name ||
+      destination?.subject ||
       ''
     );
 
     destinationNiche = classified.id;
   }
 
-  se (nicho de destino === 'desconhecido') {
-    retornar {
-      corresponde a: falso,
-      motivo: 'Selecione manualmente o nicho deste grupo.'
+  if (destinationNiche === 'unknown') {
+    return {
+      matches: false,
+      reason: 'Selecione manualmente o nicho deste grupo.'
     };
   }
 
   const productNiches = classifyProductNiches(product);
 
   if (!productNiches.length) {
-    retornar {
-      corresponde a: falso,
-      motivo: 'Não foi possível identificar o nicho do produto.'
+    return {
+      matches: false,
+      reason: 'Não foi possível identificar o nicho do produto.'
     };
   }
 
-  retornar {
-    corresponde a: productNiches.includes(destinationNiche),
-    motivo: productNiches.includes(destinationNiche)
+  return {
+    matches: productNiches.includes(destinationNiche),
+    reason: productNiches.includes(destinationNiche)
       ? 'Nicho compatível.'
       : 'Produto não pertence ao nicho deste grupo.'
   };
 }
 
 
-// =====================================================
+// ======================================================
 // DESTINOS DA AUTOMAÇÃO
-// =====================================================
+// ======================================================
 
-função getAutomationTargets(dados) {
-  const automação = dados.automação || {};
+function getAutomationTargets(data) {
+  const automation = data.automation || {};
 
   if (automation.groupSelectionMode) {
     const selectedIds = Array.isArray(
@@ -1013,24 +944,24 @@ função getAutomationTargets(dados) {
       ? automation.groupIds
       : [];
 
-    retornar selectedIds.map(groupId => {
-      const destino = dados.destinos.encontrar(
+    return selectedIds.map(groupId => {
+      const destination = data.destinations.find(
         item =>
           normalizeGroupId(item.groupId || item.id) ===
           normalizeGroupId(groupId)
       );
 
-      retornar {
-        ...(destino || {}),
+      return {
+        ...(destination || {}),
         id: groupId,
         groupId,
 
-        nome:
+        name:
           getMapValueByGroupId(
             automation.groupNames,
             groupId
           ) ||
-          destino?.nome ||
+          destination?.name ||
           groupId,
 
         nicheId:
@@ -1038,10 +969,10 @@ função getAutomationTargets(dados) {
             automation.groupNiches,
             groupId
           ) ||
-          destino?.nicheId ||
+          destination?.nicheId ||
           'auto',
 
-        ativo: verdadeiro
+        active: true
       };
     });
   }
@@ -1052,9 +983,9 @@ função getAutomationTargets(dados) {
     ? automation.destinationIds
     : [];
 
-  retornar dados.destinos.filtrar(destino => {
-    se (destino.ativo === falso) retorne falso;
-    Se (!selected.length) retornar falso;
+  return data.destinations.filter(destination => {
+    if (destination.active === false) return false;
+    if (!selected.length) return false;
 
     return selected.some(id =>
       String(id) === String(destination.id) ||
@@ -1065,30 +996,30 @@ função getAutomationTargets(dados) {
 }
 
 
-// =====================================================
+// ======================================================
 // CRIPTOGRAFIA DAS CREDENCIAIS
-// =====================================================
+// ======================================================
 
-função encryptionKey() {
+function encryptionKey() {
   const secret =
     process.env.SHOPEE_CREDENTIALS_KEY ||
     process.env.APP_ENCRYPTION_KEY ||
     '';
 
-  se (!secret) retorne nulo;
+  if (!secret) return null;
 
-  retornar cripto
+  return crypto
     .createHash('sha256')
     .update(secret)
     .digest();
 }
 
-função criptografarObjeto(valor) {
+function encryptObject(value) {
   const key = encryptionKey();
 
   if (!key) {
-    lançar novo Erro(
-      'Configurar SHOPEE_CREDENTIALS_KEY ou APP_ENCRYPTION_KEY nas variáveis ​​do servidor.'
+    throw new Error(
+      'Configure SHOPEE_CREDENTIALS_KEY ou APP_ENCRYPTION_KEY nas variáveis do servidor.'
     );
   }
 
@@ -1096,178 +1027,118 @@ função criptografarObjeto(valor) {
 
   const cipher = crypto.createCipheriv(
     'aes-256-gcm',
-    chave,
+    key,
     iv
   );
 
   const encrypted = Buffer.concat([
-    cifra.atualizar(
-      JSON.stringify(valor),
+    cipher.update(
+      JSON.stringify(value),
       'utf8'
     ),
-    cifra.final()
+    cipher.final()
   ]);
 
   const authTag = cipher.getAuthTag();
 
-  retornar {
-    algoritmo: 'aes-256-gcm',
+  return {
+    algorithm: 'aes-256-gcm',
     iv: iv.toString('base64'),
     tag: authTag.toString('base64'),
-    dados: encrypted.toString('base64')
+    data: encrypted.toString('base64')
   };
 }
 
-função descriptografarObjeto(carga útil) {
-  Se (!payload) retornar nulo;
+function decryptObject(payload) {
+  if (!payload) return null;
 
   const key = encryptionKey();
 
-  se (!chave) retornar nulo;
+  if (!key) return null;
 
-  tente {
+  try {
     const iv = Buffer.from(payload.iv, 'base64');
     const tag = Buffer.from(payload.tag, 'base64');
     const encrypted = Buffer.from(payload.data, 'base64');
 
     const decipher = crypto.createDecipheriv(
       'aes-256-gcm',
-      chave,
+      key,
       iv
     );
 
-    decifrar.setAuthTag(tag);
+    decipher.setAuthTag(tag);
 
-    const descriptografado = Buffer.concat([
-      decifrar.atualizar(criptografado),
-      decifrar.final()
+    const decrypted = Buffer.concat([
+      decipher.update(encrypted),
+      decipher.final()
     ]);
 
     return JSON.parse(
       decrypted.toString('utf8')
     );
-  } catch (erro) {
+  } catch (error) {
     logger.warn(
-      { erro: mensagem.de.erro },
-      'Não foi possível descrever credenciais.'
+      { error: error.message },
+      'Não foi possível descriptografar credenciais.'
     );
 
-    retornar nulo;
+    return null;
   }
 }
 
 
-// =====================================================
+// ======================================================
 // SUPABASE: ARMAZENAMENTO PERMANENTE DO WHATSAPP
 // Tabela: public.whatsapp_auth_store
-// Colunas: perfil, chave, valor, atualizado_em
-// =====================================================
+// Colunas: profile, key, value, updated_at
+// ======================================================
 
 const authMemoryCache = new Map();
 
-função authCacheKey(profile, key) {
-  retornar `${profile}:${key}`;
+function authCacheKey(profile, key) {
+  return `${profile}:${key}`;
 }
 
-função whatsappAuthEncryptionKey() {
-  const secret =
-    process.env.WHATSAPP_AUTH_ENCRYPTION_KEY ||
-    process.env.APP_ENCRYPTION_KEY ||
-    '';
+function packAuthValue(value) {
+  return JSON.parse(
+    JSON.stringify(value, BufferJSON.replacer)
+  );
+}
 
-  if (!secret) {
-    lançar novo Erro(
-      'Configure WHATSAPP_AUTH_ENCRYPTION_KEY ou APP_ENCRYPTION_KEY para proteger as sessões do WhatsApp.'
-    );
+function unpackAuthValue(value) {
+  if (value === null || value === undefined) {
+    return null;
   }
 
-  retornar cripto
-    .createHash('sha256')
-    .update(secret)
-    .digest();
-}
-
-função packAuthValue(value) {
-  const serializado = JSON.stringify(valor, BufferJSON.replacer);
-  const key = whatsappAuthEncryptionKey();
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-
-  const encrypted = Buffer.concat([
-    cipher.update(serialized, 'utf8'),
-    cifra.final()
-  ]);
-
-  retornar {
-    __encrypted: true,
-    versão: 1,
-    algoritmo: 'aes-256-gcm',
-    iv: iv.toString('base64'),
-    tag: cipher.getAuthTag().toString('base64'),
-    dados: encrypted.toString('base64')
-  };
-}
-
-função unpackAuthValue(value) {
-  se (valor === nulo || valor === indefinido) {
-    retornar nulo;
-  }
-
-  tente {
-    se (tipo de valor === 'string') {
-      tente {
-        valor = JSON.parse(valor);
-      } pegar (_) {
-        retornar nulo;
+  try {
+    if (typeof value === 'string') {
+      try {
+        value = JSON.parse(value);
+      } catch (_) {
+        return null;
       }
     }
 
-    // Compatibilidade com registros antigos que ainda estão em JSON puro.
-    se (!valor || valor.__encrypted !== verdadeiro) {
-      return JSON.parse(
-        JSON.stringify(valor),
-        BufferJSON.reviver
-      );
-    }
-
-    const key = whatsappAuthEncryptionKey();
-    const iv = Buffer.from(value.iv, 'base64');
-    const tag = Buffer.from(value.tag, 'base64');
-    const encrypted = Buffer.from(value.data, 'base64');
-
-    se (iv.length !== 12 || tag.length !== 16 || !encrypted.length) {
-      throw new Error('Envelope criptográfico inválido.');
-    }
-
-    const decipher = crypto.createDecipheriv(
-      'aes-256-gcm',
-      chave,
-      iv
+    return JSON.parse(
+      JSON.stringify(value),
+      BufferJSON.reviver
     );
 
-    decifrar.setAuthTag(tag);
-
-    const descriptografado = Buffer.concat([
-      decifrar.atualizar(criptografado),
-      decifrar.final()
-    ]).toString('utf8');
-
-    return JSON.parse(decrypted, BufferJSON.reviver);
-
-  } catch (erro) {
+  } catch (error) {
     logger.error(
-      { erro: mensagem.de.erro },
-      'Erro ao recuperar dado de autenticação do WhatsApp.'
+      { error: error.message },
+      'Erro ao recuperar dado de autenticação.'
     );
 
-    lançar erro;
+    return null;
   }
 }
 
-função assíncrona lerAutenticaçãoWhatsApp(perfil, chave) {
+async function readWhatsAppAuth(profile, key) {
   if (!supabase) {
-    lançar novo Erro(
-      'Supabase não está configurado. Verifique as variáveis ​​do Render.'
+    throw new Error(
+      'Supabase não configurado. Verifique as variáveis do Render.'
     );
   }
 
@@ -1279,52 +1150,51 @@ função assíncrona lerAutenticaçãoWhatsApp(perfil, chave) {
 
   const { data, error } = await supabase
     .from('whatsapp_auth_store')
-    .select('valor')
+    .select('value')
     .eq('profile', profile)
-    .eq('chave', chave)
+    .eq('key', key)
     .maybeSingle();
 
   if (error) {
     logger.error(
       {
-        perfil,
-        chave,
-        erro: mensagem de erro
+        profile,
+        key,
+        error: error.message
       },
       'Erro ao ler autenticação do Supabase.'
     );
 
-    lançar erro;
+    throw error;
   }
 
-  const valor = dados
+  const value = data
     ? unpackAuthValue(data.value)
-    : nulo;
+    : null;
 
-  se (valor !== nulo && valor !== indefinido) {
+  if (value !== null && value !== undefined) {
     authMemoryCache.set(cacheKey, value);
   }
 
-  valor de retorno;
+  return value;
 }
 
-função assíncrona writeWhatsAppAuth(profile, key, value) {
+async function writeWhatsAppAuth(profile, key, value) {
   if (!supabase) {
-    lançar novo Erro(
-      'Supabase não está configurado. Não é seguro salvar uma sessão somente na memória.'
+    throw new Error(
+      'Supabase não configurado. Não é seguro salvar a sessão somente na memória.'
     );
   }
 
   const cacheKey = authCacheKey(profile, key);
   const storedValue = packAuthValue(value);
 
-  const { error } = await supabase
-    .from('whatsapp_auth_store')
+  const { error } = await supabase     .from('whatsapp_auth_store')
     .upsert(
       {
-        perfil,
-        chave,
-        valor: valor armazenado,
+        profile,
+        key,
+        value: storedValue,
         updated_at: new Date().toISOString()
       },
       {
@@ -1335,107 +1205,107 @@ função assíncrona writeWhatsAppAuth(profile, key, value) {
   if (error) {
     logger.error(
       {
-        perfil,
-        chave,
-        erro: mensagem de erro
+        profile,
+        key,
+        error: error.message
       },
       'Falha ao salvar autenticação no Supabase.'
     );
 
-    lançar erro;
+    throw error;
   }
 
   authMemoryCache.set(cacheKey, value);
 
-  retornar verdadeiro;
+  return true;
 }
 
-função assíncrona excluirAutenticaçãoWhatsApp(perfil, chave) {
+async function deleteWhatsAppAuth(profile, key) {
   if (!supabase) {
-    throw new Error('Supabase não configurada.');
+    throw new Error('Supabase não configurado.');
   }
 
   const { error } = await supabase
     .from('whatsapp_auth_store')
-    .excluir()
+    .delete()
     .eq('profile', profile)
-    .eq('chave', chave);
+    .eq('key', key);
 
   if (error) {
     logger.error(
       {
-        perfil,
-        chave,
-        erro: mensagem de erro
+        profile,
+        key,
+        error: error.message
       },
       'Falha ao excluir chave de autenticação.'
     );
 
-    lançar erro;
+    throw error;
   }
 
   authMemoryCache.delete(
     authCacheKey(profile, key)
   );
 
-  retornar verdadeiro;
+  return true;
 }
 
-função assíncrona excluirTodasAsAutenticaçãoDoWhatsApp(perfil) {
+async function deleteAllWhatsAppAuth(profile) {
   if (!supabase) {
-    throw new Error('Supabase não configurada.');
+    throw new Error('Supabase não configurado.');
   }
 
   const { error } = await supabase
     .from('whatsapp_auth_store')
-    .excluir()
+    .delete()
     .eq('profile', profile);
 
   if (error) {
     logger.error(
       {
-        perfil,
-        erro: mensagem de erro
+        profile,
+        error: error.message
       },
       'Falha ao limpar autenticação do Supabase.'
     );
 
-    lançar erro;
+    throw error;
   }
 
-  para (const key de authMemoryCache.keys()) {
+  for (const key of authMemoryCache.keys()) {
     if (key.startsWith(`${profile}:`)) {
       authMemoryCache.delete(key);
     }
   }
 
-  retornar verdadeiro;
+  return true;
 }
 
-função assíncrona hasWhatsAppAuth(profile) {
+async function hasWhatsAppAuth(profile) {
   const creds = await readWhatsAppAuth(
-    perfil,
-    'credenciais'
+    profile,
+    'creds'
   );
 
   return Boolean(creds?.registered);
 }
 
 
-// =====================================================
+// ======================================================
 // ESTADO DE AUTENTICAÇÃO BAILEYS
-// =====================================================
+// ======================================================
 
-função assíncrona criarEstadoAutenticaçãoSupabase(perfil) {
+async function createSupabaseAuthState(profile) {
   if (!supabase) {
-    lançar novo Erro(
-      'Conexão com Supabase obrigatória para salvar sessão do WhatsApp.'
+    throw new Error(
+      'Conexão com Supabase obrigatória para salvar a sessão do WhatsApp.'
     );
   }
 
   let creds = await readWhatsAppAuth(
-    perfil,
-    'credenciais'
+    profile,
+    'creds'
   );
 
   if (!creds) {
@@ -1449,7 +1319,7 @@ função assíncrona criarEstadoAutenticaçãoSupabase(perfil) {
       const result = {};
       const missing = [];
 
-      para (const id de ids) {
+      for (const id of ids) {
         const cacheKey = `${type}:${id}`;
 
         if (keysCache.has(cacheKey)) {
@@ -1457,7 +1327,7 @@ função assíncrona criarEstadoAutenticaçãoSupabase(perfil) {
         } else {
           missing.push({
             id,
-            chave: cacheKey
+            key: cacheKey
           });
         }
       }
@@ -1469,67 +1339,67 @@ função assíncrona criarEstadoAutenticaçãoSupabase(perfil) {
 
         const { data, error } = await supabase
           .from('whatsapp_auth_store')
-          .select('chave,valor')
+          .select('key,value')
           .eq('profile', profile)
           .in('key', keyNames);
 
         if (error) {
           logger.error(
             {
-              perfil,
-              erro: mensagem de erro
+              profile,
+              error: error.message
             },
             'Erro ao recuperar chaves criptográficas do WhatsApp.'
           );
 
-          lançar erro;
+          throw error;
         }
 
         const found = new Map();
 
-        para (const linha de dados || []) {
-          encontrado.definido(
+        for (const row of data || []) {
+          found.set(
             row.key,
             unpackAuthValue(row.value)
           );
         }
 
-        para (const item ausente) {
+        for (const item of missing) {
           if (found.has(item.key)) {
             const value = found.get(item.key);
 
-            se (valor !== nulo && valor !== indefinido) {
+            if (value !== null && value !== undefined) {
               keysCache.set(item.key, value);
-              result[item.id] = valor;
+              result[item.id] = value;
             }
           }
         }
       }
 
-      retornar resultado;
+      return result;
     },
 
     async set(dataToSet) {
-      const operações = [];
+      const operations = [];
 
-      para (const [tipo, entradas] de Objeto.entradas(
+      for (const [type, entries] of Object.entries(
         dataToSet || {}
       )) {
-        para (constante [id, valor] de Objeto.entradas(
-          entradas || {}
+        for (const [id, value] of Object.entries(
+          entries || {}
         )) {
           const key = `${type}:${id}`;
 
-          se (valor === nulo || valor === indefinido) {
+          if (value === null || value === undefined) {
             keysCache.delete(key);
 
-            operações.push(
+            operations.push(
               deleteWhatsAppAuth(profile, key)
             );
           } else {
-            keysCache.set(chave, valor);
+            keysCache.set(key, value);
 
-            operações.push(
+            operations.push(
               writeWhatsAppAuth(profile, key, value)
             );
           }
@@ -1537,11 +1407,11 @@ função assíncrona criarEstadoAutenticaçãoSupabase(perfil) {
       }
 
       const results = await Promise.allSettled(
-        operações
+        operations
       );
 
-      const falhou = resultados.find(
-        resultado => status.resultado === 'rejeitado'
+      const failed = results.find(
+        result => result.status === 'rejected'
       );
 
       if (failed) {
@@ -1550,11 +1420,11 @@ função assíncrona criarEstadoAutenticaçãoSupabase(perfil) {
     }
   };
 
-  função assíncrona salvarCredenciais() {
+  async function saveCreds() {
     await writeWhatsAppAuth(
-      perfil,
-      'credenciais',
-      Créditos
+      profile,
+      'creds',
+      creds
     );
   }
 
@@ -1566,19 +1436,22 @@ função assíncrona criarEstadoAutenticaçãoSupabase(perfil) {
         )
       : keyStore;
 
-  retornar {
-    estado: {
-      Créditos,
-      chaves: chavesemcache
+  return {
+    state: {
+      creds,
+      keys: cachedKeys
     },
-    salvarCredenciais
+    saveCreds
   };
-}// ======================================================
-// STATUS DO WHATSAPP
-// =====================================================
+}
 
-função setStatus(
-  perfil,
+
+// ======================================================
+// STATUS DO WHATSAPP
+// ======================================================
+
+function setStatus(
+  profile,
   status,
   extra = {}
 ) {
@@ -1589,28 +1462,28 @@ função setStatus(
   });
 }
 
-função getStatus(profile) {
-  retornar connectionStatus.get(profile) || {
-    status: 'desconectado',
+function getStatus(profile) {
+  return connectionStatus.get(profile) || {
+    status: 'disconnected',
     updatedAt: null
   };
 }
 
 
-// =====================================================
+// ======================================================
 // LIMPAR AUTENTICAÇÃO DO WHATSAPP
-// =====================================================
+// ======================================================
 
-função assíncrona limparAutenticaçãoWhatsApp(perfil) {
+async function clearWhatsAppAuth(profile) {
   const data = getData(profile);
 
   // Limpa somente a sessão do perfil solicitado.
-  // Não desligue produtos, grupos ou configurações.
+  // Não apaga produtos, grupos ou configurações.
   await deleteAllWhatsAppAuth(profile);
 
   data.whatsappAuth = {
-    credenciais: nulas,
-    chaves: {}
+    creds: null,
+    keys: {}
   };
 
   qrCache.delete(profile);
@@ -1620,69 +1493,69 @@ função assíncrona limparAutenticaçãoWhatsApp(perfil) {
   await saveProfile(profile);
 
   logger.info(
-    { perfil },
+    { profile },
     'Autenticação do WhatsApp removida do armazenamento.'
   );
 }
 
 
-// =====================================================
+// ======================================================
 // AGENDAMENTO DA RECONEXÃO
-// =====================================================
+// ======================================================
 
-função agendarReconexãoWhatsApp(perfil, idConexão) {
+function scheduleWhatsAppReconnect(profile, connectionId) {
   if (!WHATSAPP_AUTO_RECONNECT) return;
 
   if (reconnectTimers.has(profile)) return;
 
-  Se (connectionIds.get(profile) !== connectionId) retorne;
+  if (connectionIds.get(profile) !== connectionId) return;
 
-  const tentativas =
+  const attempts =
     (reconnectAttempts.get(profile) || 0) + 1;
 
   reconnectAttempts.set(profile, attempts);
 
-  const atraso = Math.min(
+  const delay = Math.min(
     60000,
     3000 * Math.pow(2, Math.min(attempts - 1, 4))
   );
 
   logger.info(
     {
-      perfil,
-      tentativas,
-      atraso
+      profile,
+      attempts,
+      delay
     },
-    'Reconectar automática agendada.'
+    'Reconexão automática agendada.'
   );
 
   const timer = setTimeout(() => {
     reconnectTimers.delete(profile);
 
-    se (connectionIds.get(profile) !== connectionId) {
-      retornar;
+    if (connectionIds.get(profile) !== connectionId) {
+      return;
     }
 
     startWhatsApp(profile).catch(error => {
       logger.error(
         {
-          perfil,
-          erro: mensagem de erro
+          profile,
+          error: error.message
         },
         'Falha na reconexão automática.'
       );
     });
-  }, atraso);
+  }, delay);
 
   reconnectTimers.set(profile, timer);
 }
 
 
-// =====================================================
+// ======================================================
 // CONEXÃO WHATSAPP - BAILEYS
-// =====================================================
+// ======================================================
 
-função assíncrona iniciarWhatsApp(perfil) {
+async function startWhatsApp(profile) {
   if (!PROFILE_IDS.includes(profile)) {
     throw new Error('Perfil inválido.');
   }
@@ -1692,13 +1565,13 @@ função assíncrona iniciarWhatsApp(perfil) {
   if (existingSocket) {
     const currentStatus = getStatus(profile).status;
 
-    se (
-      statusAtual === 'conectado' ||
-      statusAtual === 'qr' ||
-      currentStatus === 'conectando'
+    if (
+      currentStatus === 'connected' ||
+      currentStatus === 'qr' ||
+      currentStatus === 'connecting'
     ) {
-      retornar {
-        ok: verdadeiro,
+      return {
+        ok: true,
         status: getStatus(profile),
         qr: qrCache.get(profile) || null
       };
@@ -1718,24 +1591,23 @@ função assíncrona iniciarWhatsApp(perfil) {
 
   const pendingTimer = reconnectTimers.get(profile);
 
-  if (pendingTimer) {
-    clearTimeout(pendingTimer);
+  if (pendingTimer) {    clearTimeout(pendingTimer);
     reconnectTimers.delete(profile);
   }
 
   const isCurrentConnection = sock => {
-    retornar (
+    return (
       connectionIds.get(profile) === connectionId &&
       (!sock || sockets.get(profile) === sock)
     );
   };
 
   const startPromise = (async () => {
-    tente {
+    try {
       await loadProfile(profile);
 
       if (!isCurrentConnection()) {
-        lançar novo Erro(
+        throw new Error(
           'Inicialização cancelada por uma conexão mais recente.'
         );
       }
@@ -1744,45 +1616,45 @@ função assíncrona iniciarWhatsApp(perfil) {
       pairingCache.delete(profile);
 
       setStatus(profile, 'connecting', {
-        mensagem: 'Iniciando conexão com o WhatsApp...'
+        message: 'Iniciando conexão com o WhatsApp...'
       });
 
       logger.info(
-        { perfil, idDaConexão },
+        { profile, connectionId },
         'Iniciando conexão WhatsApp.'
       );
 
       const auth = await createSupabaseAuthState(profile);
 
       if (!isCurrentConnection()) {
-        lançar novo Erro(
-          'Inicialização cancelada antes de criar o soquete.'
+        throw new Error(
+          'Inicialização cancelada antes de criar o socket.'
         );
       }
 
-      versão let;
+      let version;
 
-      tente {
+      try {
         const latest = await fetchLatestBaileysVersion();
-        versão = versão.mais recente;
+        version = latest.version;
 
         logger.info(
-          { perfil, versão },
+          { profile, version },
           'Versão do WhatsApp obtida.'
         );
-      } catch (erro) {
+      } catch (error) {
         logger.warn(
           {
-            perfil,
-            erro: mensagem de erro
+            profile,
+            error: error.message
           },
           'Não foi possível consultar a versão mais recente do WhatsApp.'
         );
       }
 
       if (!isCurrentConnection()) {
-        lançar novo Erro(
-          'Inicialização cancelada antes de abrir o soquete.'
+        throw new Error(
+          'Inicialização cancelada antes de abrir o socket.'
         );
       }
 
@@ -1790,16 +1662,16 @@ função assíncrona iniciarWhatsApp(perfil) {
         auth: auth.state,
 
         logger: pino({
-          nível: 'silencioso'
+          level: 'silent'
         }),
 
         printQRInTerminal: false,
 
-        navegador:
+        browser:
           typeof Browsers?.macOS === 'function'
             ? Browsers.macOS('Chrome')
             : [
-                'MEDEIROS DIGITAIS',
+                'MEDEIROS DIGITAL',
                 'Chrome',
                 '1.0.0'
               ],
@@ -1813,8 +1685,8 @@ função assíncrona iniciarWhatsApp(perfil) {
         generateHighQualityLinkPreview: true
       };
 
-      if (versão) {
-        socketOptions.version = versão;
+      if (version) {
+        socketOptions.version = version;
       }
 
       const sock = makeWASocket(socketOptions);
@@ -1824,13 +1696,13 @@ função assíncrona iniciarWhatsApp(perfil) {
       sock.ev.on('creds.update', async () => {
         if (!isCurrentConnection(sock)) return;
 
-        tente {
+        try {
           await auth.saveCreds();
-        } catch (erro) {
+        } catch (error) {
           logger.error(
             {
-              perfil,
-              erro: mensagem de erro
+              profile,
+              error: error.message
             },
             'Erro ao salvar credenciais do WhatsApp.'
           );
@@ -1840,24 +1712,24 @@ função assíncrona iniciarWhatsApp(perfil) {
       sock.ev.on('connection.update', async update => {
         if (!isCurrentConnection(sock)) {
           logger.debug(
-            { perfil, idDaConexão },
+            { profile, connectionId },
             'Evento antigo do WhatsApp ignorado.'
           );
-          retornar;
+          return;
         }
 
         const {
-          conexão,
-          últimoDesconectar,
-          QR Code
-        } = atualizar;
+          connection,
+          lastDisconnect,
+          qr
+        } = update;
 
         if (qr) {
-          tente {
+          try {
             const qrDataUrl = await QRCode.toDataURL(qr, {
               errorCorrectionLevel: 'M',
-              margem: 2,
-              largura: 360
+              margin: 2,
+              width: 360
             });
 
             if (!isCurrentConnection(sock)) return;
@@ -1865,33 +1737,33 @@ função assíncrona iniciarWhatsApp(perfil) {
             qrCache.set(profile, qrDataUrl);
 
             setStatus(profile, 'qr', {
-              mensagem: 'Escaneie o QR Code pelo WhatsApp.'
+              message: 'Escaneie o QR Code pelo WhatsApp.'
             });
 
             logger.info(
-              { perfil, idDaConexão },
+              { profile, connectionId },
               'QR Code recebido e gerado com sucesso.'
             );
-          } catch (erro) {
+          } catch (error) {
             logger.error(
               {
-                perfil,
-                erro: mensagem de erro
+                profile,
+                error: error.message
               },
               'Erro ao gerar QR Code.'
             );
           }
         }
 
-        se (conexão === 'conectando') {
+        if (connection === 'connecting') {
           if (!qrCache.has(profile)) {
             setStatus(profile, 'connecting', {
-              mensagem: 'Aguardando conexão com o WhatsApp...'
+              message: 'Aguardando conexão com o WhatsApp...'
             });
           }
         }
 
-        se (conexão === 'aberta') {
+        if (connection === 'open') {
           if (!isCurrentConnection(sock)) return;
 
           qrCache.delete(profile);
@@ -1901,16 +1773,16 @@ função assíncrona iniciarWhatsApp(perfil) {
           authRegistered.set(profile, true);
 
           setStatus(profile, 'connected', {
-            mensagem: 'WhatsApp conectado com sucesso.'
+            message: 'WhatsApp conectado com sucesso.'
           });
 
           logger.info(
-            { perfil, idDaConexão },
+            { profile, connectionId },
             'WhatsApp conectado.'
           );
         }
 
-        se (conexão === 'fechar') {
+        if (connection === 'close') {
           if (!isCurrentConnection(sock)) return;
 
           sockets.delete(profile);
@@ -1920,7 +1792,7 @@ função assíncrona iniciarWhatsApp(perfil) {
           const statusCode =
             lastDisconnect?.error?.output?.statusCode ||
             lastDisconnect?.error?.statusCode ||
-            nulo;
+            null;
 
           const loggedOut =
             statusCode === DisconnectReason.loggedOut ||
@@ -1928,95 +1800,95 @@ função assíncrona iniciarWhatsApp(perfil) {
 
           logger.warn(
             {
-              perfil,
+              profile,
               connectionId,
               statusCode,
-              erro: lastDisconnect?.error?.message || null
+              error: lastDisconnect?.error?.message || null
             },
             'Conexão WhatsApp encerrada.'
           );
 
           if (loggedOut) {
             setStatus(profile, 'logged_out', {
-              motivo: statusCode,
-              mensagem: 'Sessão encerrada. Conecte novamente pelo QR Code.'
+              reason: statusCode,
+              message: 'Sessão encerrada. Conecte novamente pelo QR Code.'
             });
 
-            tente {
+            try {
               await clearWhatsAppAuth(profile);
 
               logger.warn(
-                { perfil, códigoDeStatus },
+                { profile, statusCode },
                 'Autenticação encerrada pelo WhatsApp.'
               );
             } catch (clearError) {
               logger.error(
                 {
-                  perfil,
-                  erro: clearError.message
+                  profile,
+                  error: clearError.message
                 },
                 'Não foi possível limpar a autenticação antiga.'
               );
             }
 
-            retornar;
+            return;
           }
 
-          setStatus(profile, 'desconectado', {
-            motivo: statusCode,
-            mensagem: 'Conexão do WhatsApp encerrada.'
+          setStatus(profile, 'disconnected', {
+            reason: statusCode,
+            message: 'Conexão do WhatsApp encerrada.'
           });
 
-          agendarReconectarWhatsApp(
-            perfil,
+          scheduleWhatsAppReconnect(
+            profile,
             connectionId
           );
         }
       });
 
-      retornar {
-        ok: verdadeiro,
+      return {
+        ok: true,
         status: getStatus(profile),
         qr: qrCache.get(profile) || null
       };
 
-    } catch (erro) {
-      se (connectionIds.get(profile) === connectionId) {
+    } catch (error) {
+      if (connectionIds.get(profile) === connectionId) {
         const failedSocket = sockets.get(profile);
 
         if (failedSocket) {
           sockets.delete(profile);
 
-          tente {
+          try {
             failedSocket.end(
               new Error('Falha ao iniciar conexão.')
             );
-          } pegar (_) {
-            tente {
+          } catch (_) {
+            try {
               failedSocket.ws?.close();
-            } pegar (_) {}
+            } catch (_) {}
           }
         }
 
-        setStatus(profile, 'desconectado', {
-          mensagem: 'Falha ao iniciar conexão.',
-          motivo: mensagem de erro
+        setStatus(profile, 'disconnected', {
+          message: 'Falha ao iniciar conexão.',
+          reason: error.message
         });
       }
 
       logger.error(
         {
-          perfil,
+          profile,
           connectionId,
-          erro: mensagem de erro
+          error: error.message
         },
         'Erro ao iniciar WhatsApp.'
       );
 
-      lançar erro;
+      throw error;
 
-    } finalmente {
-      se (socketStarts.get(profile) === startPromise) {
+    } finally {
+      if (socketStarts.get(profile) === startPromise) {
         socketStarts.delete(profile);
       }
     }
@@ -2024,53 +1896,46 @@ função assíncrona iniciarWhatsApp(perfil) {
 
   socketStarts.set(profile, startPromise);
 
-  retornar startPromise;
+  return startPromise;
 }
 
 
-// =====================================================
+// ======================================================
 // NORMALIZAÇÃO DOS DESTINOS
-// =====================================================
+// ======================================================
 
-função publicDestination(destination) {
-  const classificado = classificarGrupoNicho(
+function publicDestination(destination) {
+  const classified = classifyGroupNiche(
     destination.name ||
-    destino.assunto ||
+    destination.subject ||
     ''
   );
 
-  retornar {
-    ...destino,
+  return {
+    ...destination,
 
-    nicho:
+    niche:
       destination.nicheId &&
       destination.nicheId !== 'auto'
         ? (
             NICHE_DEFINITIONS.find(
-              item => item.id === destino.nicheId
+              item => item.id === destination.nicheId
             )?.label ||
             destination.nicheId
           )
-        : rótulo classificado
+        : classified.label
   };
 }
 
 
-// =====================================================
+// ======================================================
 // NORMALIZAÇÃO DOS PRODUTOS
-// =====================================================
+// ======================================================
 
-função normalizeProduct(product) {
-  const item = produto || {};
+function normalizeProduct(product) {
+  const item = product || {};
 
-  const preçoMin = item.preçoMin ??
-    item.price ??
-    item.productPrice ??
-    '';
-
-  const priceMax = item.priceMax ?? '';
-
-  const preço = item.preço ??
+  const price = item.price ??
     item.productPrice ??
     item.priceMin ??
     '';
@@ -2081,47 +1946,37 @@ função normalizeProduct(product) {
     '';
 
   const discount = item.discount ??
-    item.taxaDeDesconto ??
-    item.priceDiscountRate ??
+    item.discountRate ??
     '';
 
-  const productLink = item.offerLink ||
-    item.productLink ||
-    item.link ||
-    item.url ||
-    '';
-
-  retornar {
+  return {
     id: String(
       item.id ||
       item.productId ||
-      item.itemId ||
       crypto.randomUUID()
     ),
 
-    nomeDoProduto: String(
+    productName: String(
       item.productName ||
       item.name ||
       item.title ||
       'Produto Shopee'
     ),
 
-    nome: String(
+    name: String(
       item.name ||
       item.productName ||
       item.title ||
       'Produto Shopee'
     ),
 
-    título: String(
-      item.title ||
-      item.productName ||
-      item.name ||
-      'Produto Shopee'
+    productLink: String(
+      item.productLink ||
+      item.link ||
+      item.url ||
+      item.offerLink ||
+      ''
     ),
-
-    productLink: String(productLink),
-    ofertaLink: String(item.offerLink || productLink),
 
     imageUrl: String(
       item.imageUrl ||
@@ -2130,37 +1985,30 @@ função normalizeProduct(product) {
       ''
     ),
 
-    preço: String(preço),
-    preçoMínimo: String(preçoMínimo),
-    preçoMáx: String(preçoMáx),
+    price: String(price),
     oldPrice: String(oldPrice),
-    desconto: String(desconto),
+    discount: String(discount),
 
-    Taxa de comissão: String(
-      item.commissionRate ??
-      item.comissão ??
+    category: String(
+      item.category ||      item.categoryName ||
       ''
     ),
 
-    vendas: Número(item.vendas || item.vendido || 0),
-    ratingStar: Número(
-      item.ratingStar ??
-      item.classificação ??
-      0
+    description: String(
+      item.description ||
+      ''
     ),
 
-    categoria: String(item.category || ''),
-
-    descrição: String(item.descrição || ''),
-
-    criadoEm:
+    createdAt:
       item.createdAt ||
       new Date().toISOString()
   };
 }
 
-// =====================================================
-// TEXTO DA OFERTA// ======================================================
+
+// ======================================================
+// TEXTO DA OFERTA
+// ======================================================
 
 function buildOfferMessage(product) {
   const item = normalizeProduct(product);
@@ -2195,14 +2043,15 @@ function buildOfferMessage(product) {
   return lines.join('\n');
 }
 
+
 // ======================================================
-// ENVIO PARA UM DESTINO WHATSAPP// ======================================================
+// ENVIO PARA UM DESTINO WHATSAPP
+// ======================================================
 
 async function sendToDestination(
   profile,
   destination,
-  product,
-  messageOverride = ''
+  product
 ) {
   const sock = sockets.get(profile);
 
@@ -2215,18 +2064,12 @@ async function sendToDestination(
     );
   }
 
-  // O endpoint de teste também envia o destino como texto (telefone).
-  // Aceitamos tanto string quanto objeto de grupo/telefone.
   const target =
-    typeof destination === 'string'
-      ? destination
-      : (
-          destination?.groupId ||
-          destination?.jid ||
-          destination?.phone ||
-          destination?.id ||
-          ''
-        );
+    destination?.groupId ||
+    destination?.jid ||
+    destination?.phone ||
+    destination?.id ||
+    '';
 
   const jid = normalizeWhatsAppJid(target);
 
@@ -2237,8 +2080,7 @@ async function sendToDestination(
   }
 
   const item = normalizeProduct(product);
-  const caption = String(messageOverride || '').trim() ||
-    buildOfferMessage(item);
+  const caption = buildOfferMessage(item);
 
   let result;
 
@@ -2424,26 +2266,16 @@ async function shopeeGraphQL(
 
 async function fetchShopeeOffers(
   profile,
-  limit = 10,
-  keyword = ''
+  limit = 10
 ) {
   const safeLimit = Math.max(
     1,
     Math.min(50, Number(limit) || 10)
   );
 
-  // Mantém o texto digitado pelo usuário para a busca na Shopee.
-  // A normalização é usada apenas na conferência local dos resultados.
-  const safeKeyword = String(keyword || '')
-    .trim()
-    .slice(0, 120);
-
-  const normalizedKeyword = normalizeText(safeKeyword);
-
   const query = `
-    query ProductOffer($limit: Int!, $keyword: String) {
+    query ProductOffer($limit: Int!) {
       productOfferV2(
-        keyword: $keyword,
         listType: 0,
         sortType: 2,
         page: 1,
@@ -2461,6 +2293,7 @@ async function fetchShopeeOffers(
           sales
           ratingStar
           commissionRate
+          categoryName
         }
       }
     }
@@ -2470,8 +2303,7 @@ async function fetchShopeeOffers(
     profile,
     query,
     {
-      limit: safeLimit,
-      keyword: safeKeyword || null
+      limit: safeLimit
     }
   );
 
@@ -2481,68 +2313,51 @@ async function fetchShopeeOffers(
     [];
 
   if (!Array.isArray(nodes)) {
-    throw new Error(
-      'A Shopee respondeu, mas não retornou uma lista válida de produtos.'
-    );
+    return [];
   }
 
-  const normalized = nodes
-    .filter(item => item && typeof item === 'object')
-    .map(item => {
-      const discount = item.priceDiscountRate;
+  return nodes.map(item => {
+    const price = item.priceMin ??
+      item.priceMax ??
+      '';
 
-      return normalizeProduct({
-        id: item.itemId || item.productId,
-        itemId: item.itemId || item.productId,
-        productId: item.productId,
-        productName: item.productName,
-        name: item.productName,
-        priceMin: item.priceMin,
-        priceMax: item.priceMax,
-        price: item.priceMin ?? item.priceMax ?? '',
-        oldPrice: item.priceBeforeDiscount ?? '',
-        discount:
-          discount !== undefined && discount !== null
-            ? `${discount}% OFF`
-            : '',
-        priceDiscountRate: discount,
-        imageUrl: item.imageUrl,
-        productLink: item.productLink || '',
-        offerLink: item.offerLink || '',
-        category: '',
-        description: '',
-        sales: item.sales,
-        ratingStar: item.ratingStar,
-        commissionRate: item.commissionRate
-      });
+    const discount = item.priceDiscountRate;
+
+    return normalizeProduct({
+      id: item.itemId,
+      productName: item.productName,
+      name: item.productName,
+      price,
+      oldPrice: '',
+
+      discount:
+        discount !== undefined &&
+        discount !== null
+          ? `${discount}% OFF`
+          : '',
+
+      imageUrl: item.imageUrl,
+
+      productLink:
+        item.offerLink ||
+        item.productLink ||
+        '',
+
+      category: item.categoryName,
+      description: '',
+      sales: item.sales,
+      rating: item.ratingStar,
+      commissionRate: item.commissionRate
     });
-
-  // Confere também localmente para evitar resultados fora do termo.
-  const filtered = normalizedKeyword
-    ? normalized.filter(item =>
-        normalizeText(item.productName).includes(normalizedKeyword)
-      )
-    : normalized;
-
-  logger.info(
-    {
-      profile,
-      keyword: safeKeyword || null,
-      requested: safeLimit,
-      received: nodes.length,
-      returned: filtered.length
-    },
-    'Busca de ofertas Shopee concluída.'
-  );
-
-  return filtered.slice(0, safeLimit);
+  });
 }
+
 
 // ======================================================
 // PROCESSAMENTO DA FILA DE OFERTAS
 // ======================================================
 
-async function processQueueUnlocked(profile) {
+async function processQueue(profile) {
   const data = getData(profile);
 
   const current = data.queue.find(
@@ -2559,6 +2374,8 @@ async function processQueueUnlocked(profile) {
   current.status = 'processing';
   current.startedAt = new Date().toISOString();
 
+  await saveProfile(profile);
+
   const product = normalizeProduct(
     current.product || current
   );
@@ -2567,15 +2384,11 @@ async function processQueueUnlocked(profile) {
   const results = [];
 
   try {
-    await saveProfile(profile);
-
     if (!targets.length) {
       throw new Error(
         'Nenhum grupo ou destino está selecionado.'
       );
-    }
-
-    for (const destination of targets) {
+    }    for (const destination of targets) {
       const match = destinationMatchesProduct(
         destination,
         product
@@ -2678,18 +2491,7 @@ async function processQueueUnlocked(profile) {
     current.error = error.message;
     current.finishedAt = new Date().toISOString();
 
-    try {
-      await saveProfile(profile);
-    } catch (saveError) {
-      logger.error(
-        {
-          profile,
-          error: saveError.message,
-          queueItemId: current.id
-        },
-        'Não foi possível persistir o erro da fila.'
-      );
-    }
+    await saveProfile(profile);
 
     return {
       ok: false,
@@ -2697,24 +2499,6 @@ async function processQueueUnlocked(profile) {
       message: error.message,
       results
     };
-  }
-}
-
-async function processQueue(profile) {
-  if (queueLocks.has(profile)) {
-    return {
-      ok: false,
-      status: 'busy',
-      message: 'A fila deste perfil já está sendo processada.'
-    };
-  }
-
-  queueLocks.add(profile);
-
-  try {
-    return await processQueueUnlocked(profile);
-  } finally {
-    queueLocks.delete(profile);
   }
 }
 
@@ -2981,10 +2765,6 @@ async function runAutomation(profile) {
 
       const result = await processQueue(profile);
 
-      if (result.status === 'busy') {
-        break;
-      }
-
       processed++;
 
       if (result.status === 'sent') {
@@ -3007,8 +2787,7 @@ async function runAutomation(profile) {
 
     logger.info(
       {
-        profile,
-        productsFound: products.length,
+        profile,        productsFound: products.length,
         queued,
         duplicated,
         sent,
@@ -3284,10 +3063,7 @@ app.post('/api/automation', async (req, res) => {
 
     data.automation = {
       ...data.automation,
-      ...incoming,
-      // Ao salvar uma configuração nova, não reapresentar erro antigo
-      // de uma execução anterior que já foi corrigida.
-      lastError: null
+      ...incoming
     };
 
     if (incoming.enabled !== undefined) {
@@ -3410,8 +3186,7 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
       phone.length > 15
     ) {
       return res.status(400).json({
-        ok: false,
-        message: 'Informe telefone com DDD e código do país.'
+        ok: false,        message: 'Informe telefone com DDD e código do país.'
       });
     }
 
@@ -3539,8 +3314,7 @@ app.post('/api/whatsapp/send', async (req, res) => {
     const result = await sendToDestination(
       profile,
       destination,
-      product,
-      req.body?.message || ''
+      product
     );
 
     res.json({
@@ -3811,8 +3585,7 @@ app.patch('/api/destinations/:id', async (req, res) => {
       });
     }
 
-    data.destinations[index] = {
-      ...data.destinations[index],
+    data.destinations[index] = {      ...data.destinations[index],
       ...(req.body || {})
     };
 
@@ -3992,12 +3765,7 @@ app.post('/api/queue/process', async (req, res) => {
       ) &&
       processed < 100
     ) {
-      const result = await processQueue(profile);
-
-      if (result.status === 'busy') {
-        break;
-      }
-
+      await processQueue(profile);
       processed++;
     }
 
@@ -4095,12 +3863,9 @@ app.get('/api/shopee/products', async (req, res) => {
       req.query.limit || 10
     );
 
-    const keyword = String(req.query.keyword || '').trim().slice(0, 120);
-
     const products = await fetchShopeeOffers(
       profile,
-      limit,
-      keyword
+      limit
     );
 
     res.json({
@@ -4219,10 +3984,7 @@ app.use((error, req, res, next) => {
         ? undefined
         : error.message
   });
-});
-
-
-// ======================================================
+});// ======================================================
 // INICIALIZAÇÃO DO SERVIDOR
 // ======================================================
 
