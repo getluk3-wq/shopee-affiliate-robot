@@ -297,6 +297,18 @@ const NICHE_DEFINITIONS = [
       'para caes',
       'para pets',
       'racao',
+      'ração para pássaros',
+      'racao para passaros',
+      'passaro',
+      'passaros',
+      'ave',
+      'aves',
+      'calopsita',
+      'papagaio',
+      'canario',
+      'alpiste',
+      'gaiola',
+      'viveiro',
       'coleira',
       'brinquedo pet'
     ]
@@ -2733,11 +2745,28 @@ const NICHE_SEARCH_KEYWORDS = {
   ],
   moda_infantil: 'roupa infantil',
   calcados: 'calçados',
-  casa: 'utilidades domésticas',
+  casa: [
+    'utilidades domésticas',
+    'organizador para casa',
+    'itens para casa',
+    'limpeza doméstica',
+    'organização doméstica',
+    'acessórios para banheiro',
+    'lavanderia'
+  ],
   cozinha: 'cozinha',
   decoracao: 'decoração',
   fitness: 'fitness',
-  pet: 'pet',
+  pet: [
+    'pet',
+    'ração para pássaros',
+    'produtos para aves',
+    'calopsita',
+    'ração para cachorro',
+    'ração para gato',
+    'gaiola para pássaros',
+    'alpiste'
+  ],
   brinquedos: 'brinquedos',
   acessorios: 'acessórios'
 };
