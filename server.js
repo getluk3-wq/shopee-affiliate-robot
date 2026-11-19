@@ -790,9 +790,10 @@ async function saveProfile(profile) {
       .update(payload)
       .eq(existing.profileColumn, profile);
 
-    if (!error) return true;        profile,
-        error: error.message
-      },
+    if (!error) return true;
+
+    logger.error(
+      { profile, error: error.message },
       'Falha ao atualizar perfil no Supabase'
     );
   }
@@ -2078,7 +2079,6 @@ async function sendToDestination(
       'Número ou ID do grupo inválido.'
     );
   }
-
   const item = normalizeProduct(product);
   const caption = buildOfferMessage(item);
 
@@ -2293,7 +2293,6 @@ async function fetchShopeeOffers(
           sales
           ratingStar
           commissionRate
-          categoryName
         }
       }
     }
@@ -2343,7 +2342,7 @@ async function fetchShopeeOffers(
         item.productLink ||
         '',
 
-      category: item.categoryName,
+      category: item.category || '',
       description: '',
       sales: item.sales,
       rating: item.ratingStar,
