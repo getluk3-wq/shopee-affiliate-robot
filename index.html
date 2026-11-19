@@ -1616,7 +1616,7 @@ async function saveShopeeCredentials() {
   showMessage("shopeeMessage", "Salvando credenciais...");
 
   try {
-    const d = await api("/api/shopee/credentials", "POST", { appId, secret });
+    const d = await api("/api/shopee/credentials", "POST", { appId, appSecret: secret });
     $("shopeeSecret").value = "";
     showMessage("shopeeMessage", d.message || "Credenciais salvas.", "success");
     await refreshShopeeCredentials();
