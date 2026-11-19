@@ -129,6 +129,14 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
     <div class="profile-label" id="profileLabel">Perfil ativo: Rafael</div>
   </section>
 
+  <section class="card" id="adminAccessCard">
+    <h2>Gerenciar acesso dos perfis</h2>
+    <p class="muted">Somente o administrador pode liberar ou bloquear cada usuário. Ao bloquear, a automação daquele perfil é pausada; WhatsApp, grupos e configurações ficam preservados.</p>
+    <div id="adminProfileList" class="group-list"></div>
+    <div id="adminAccessMessage" class="status"></div>
+  </section>
+
+  <div id="profileTools">
   <div class="grid">
     <div class="card">
       <div class="muted">Produtos cadastrados</div>
@@ -352,6 +360,7 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
     <div id="searchMessage" class="status"></div>
     <div id="productResults"></div>
   </section>
+  </div>
 
 </div>
 </main>
@@ -363,6 +372,7 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 
 let pass = "";
 let profile = "rafael";
+let adminProfiles = [];
 let waTimer = null;
 let connecting = false;
 let loadedGroups = [];
@@ -613,7 +623,15 @@ async function login() {
     await api("/api/profiles");
     $("panel").classList.remove("hidden");
     showMessage("loginmsg", "Acesso autorizado.", "success");
-    await loadProfile();
+    await refreshAdminAccess();
+    const selected = adminProfiles.find(item => item.id === profile);
+    if (selected?.enabled) {
+      $("profileTools").classList.remove("hidden");
+      await loadProfile();
+    } else {
+      $("profileTools").classList.add("hidden");
+      showMessage("adminAccessMessage", "Este perfil está bloqueado. Você ainda pode gerenciar os acessos nesta área.", "error");
+    }
   } catch (error) {
     pass = "";
     $("panel").classList.add("hidden");
@@ -656,7 +674,68 @@ async function changeProfile() {
   $("automationMessage").textContent = "";
   loadedGroups = [];
 
+  await refreshAdminAccess();
+  const selected = adminProfiles.find(item => item.id === profile);
+  if (!selected?.enabled) {
+    $("profileTools").classList.add("hidden");
+    showMessage("adminAccessMessage", "Este perfil está bloqueado. Libere o acesso acima para voltar a utilizá-lo.", "error");
+    return;
+  }
+
+  $("profileTools").classList.remove("hidden");
   await loadProfile();
+}
+
+async function refreshAdminAccess() {
+  const result = await api("/api/admin/profiles");
+  adminProfiles = Array.isArray(result.profiles) ? result.profiles : [];
+  const list = $("adminProfileList");
+  list.replaceChildren();
+
+  for (const item of adminProfiles) {
+    const row = document.createElement("div");
+    row.className = "info-box";
+
+    const title = document.createElement("b");
+    title.textContent = item.label;
+    row.appendChild(title);
+
+    const status = document.createElement("p");
+    status.className = "small";
+    status.textContent = item.enabled ? "Acesso liberado" : "Acesso bloqueado";
+    status.style.color = item.enabled ? "var(--green)" : "var(--red)";
+    row.appendChild(status);
+
+    const button = document.createElement("button");
+    button.className = item.enabled ? "secondary" : "";
+    button.textContent = item.enabled ? "Bloquear acesso" : "Liberar acesso";
+    button.disabled = false;
+    button.addEventListener("click", () => setProfileAccess(item.id, !item.enabled));
+    row.appendChild(button);
+
+    list.appendChild(row);
+  }
+}
+
+async function setProfileAccess(profileId, enabled) {
+  showMessage("adminAccessMessage", "Salvando alteração...");
+  try {
+    const result = await api("/api/admin/profiles/" + encodeURIComponent(profileId) + "/access", "POST", { enabled });
+    showMessage("adminAccessMessage", result.message, "success");
+    await refreshAdminAccess();
+
+    if (profileId === profile) {
+      if (enabled) {
+        $("profileTools").classList.remove("hidden");
+        await loadProfile();
+      } else {
+        $("profileTools").classList.add("hidden");
+        stopWAPolling();
+      }
+    }
+  } catch (error) {
+    showMessage("adminAccessMessage", error.message, "error");
+  }
 }
 
 async function loadProfile() {
