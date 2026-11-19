@@ -117,10 +117,11 @@ const storeCache = Object.fromEntries(
 
 // ======================================================
 // NICHOS E CATEGORIAS
-// Mantidos para compatibilidade com o painel.
-// Não são usados para descobrir o nicho pelo nome
-// nem para bloquear o envio das ofertas.
 // ======================================================
+
+// As categorias abaixo servem para classificar PRODUTOS.
+// O nicho de cada grupo é escolhido manualmente no painel.
+// Nunca identificar o nicho de um grupo pelo nome dele.
 
 const NICHE_DEFINITIONS = [
   {
@@ -433,6 +434,77 @@ function getMapValueByGroupId(map, groupId) {
   return undefined;
 }
 
+
+// ======================================================
+// NORMALIZAÇÃO DO NICHO MANUAL
+// ======================================================
+
+function normalizeNicheId(value) {
+  let raw = value;
+
+  if (
+    raw &&
+    typeof raw === 'object'
+  ) {
+    raw =
+      raw.id ??
+      raw.nicheId ??
+      raw.value ??
+      '';
+  }
+
+  const normalized = normalizeText(raw)
+    .replace(/[\s-]+/g, '_');
+
+  if (
+    !normalized ||
+    [
+      'auto',
+      'automatico',
+      'automatica',
+      'automatic',
+      'unknown',
+      'desconhecido',
+      'nao_identificado',
+      'manual',
+      'selecione',
+      'selecione_manualmente'
+    ].includes(normalized)
+  ) {
+    return '';
+  }
+
+  if (
+    [
+      'all',
+      'todos',
+      'todas',
+      'geral',
+      'todos_os_nichos',
+      'todas_as_categorias'
+    ].includes(normalized)
+  ) {
+    return 'all';
+  }
+
+  const definition = NICHE_DEFINITIONS.find(item => {
+    if (item.id === normalized) {
+      return true;
+    }
+
+    if (normalizeText(item.label) === normalizeText(raw)) {
+      return true;
+    }
+
+    return item.aliases.some(alias =>
+      normalizeText(alias) === normalizeText(raw)
+    );
+  });
+
+  return definition ? definition.id : '';
+}
+
+
 function profileIdFrom(req) {
   const requested =
     req.headers['x-profile'] ||
@@ -525,6 +597,19 @@ function mergeProfileData(value) {
 
   const whatsappAuth = parsed.whatsappAuth || {};
 
+  const rawGroupNiches =
+    oldAutomation.groupNiches &&
+    typeof oldAutomation.groupNiches === 'object'
+      ? oldAutomation.groupNiches
+      : {};
+
+  const normalizedGroupNiches = {};
+
+  for (const [groupId, niche] of Object.entries(rawGroupNiches)) {
+    normalizedGroupNiches[normalizeGroupId(groupId)] =
+      normalizeNicheId(niche);
+  }
+
   return {
     ...defaults,
     ...parsed,
@@ -563,11 +648,7 @@ function mergeProfileData(value) {
         ? oldAutomation.groupIds
         : [],
 
-      groupNiches:
-        oldAutomation.groupNiches &&
-        typeof oldAutomation.groupNiches === 'object'
-          ? oldAutomation.groupNiches
-          : {},
+      groupNiches: normalizedGroupNiches,
 
       groupNames:
         oldAutomation.groupNames &&
@@ -583,7 +664,14 @@ function mergeProfileData(value) {
     },
 
     destinations: Array.isArray(parsed.destinations)
-      ? parsed.destinations
+      ? parsed.destinations.map(destination => ({
+          ...destination,
+          nicheId: normalizeNicheId(
+            destination?.nicheId ??
+            destination?.niche ??
+            ''
+          )
+        }))
       : [],
 
     products: Array.isArray(parsed.products)
@@ -831,6 +919,92 @@ async function saveProfile(profile) {
 
 
 // ======================================================
+// CLASSIFICAÇÃO DE PRODUTOS
+// ======================================================
+
+// Esta função classifica somente o produto.
+// Ela não recebe nem consulta o nome do grupo.
+
+function classifyProductNiches(product) {
+  const text = normalizeText([
+    product?.productName,
+    product?.name,
+    product?.title,
+    product?.description,
+    product?.category,
+    product?.categoryName
+  ].filter(Boolean).join(' '));
+
+  if (!text) return [];
+
+  const matches = [];
+
+  for (const niche of NICHE_DEFINITIONS) {
+    if (
+      niche.aliases.some(alias =>
+        text.includes(normalizeText(alias))
+      )
+    ) {
+      matches.push(niche.id);
+    }
+  }
+
+  return [...new Set(matches)];
+}
+
+
+// ======================================================
+// VERIFICAR COMPATIBILIDADE DO DESTINO
+// ======================================================
+
+// Regras:
+// 1. "all" recebe qualquer produto.
+// 2. Nicho vazio não recebe ofertas automáticas.
+// 3. Nicho específico só recebe produtos compatíveis.
+// 4. Nunca tenta descobrir o nicho pelo nome do grupo.
+
+function destinationMatchesProduct(destination, product) {
+  const selected = normalizeNicheId(
+    destination?.nicheId ??
+    destination?.niche ??
+    ''
+  );
+
+  if (selected === 'all') {
+    return {
+      matches: true,
+      reason: 'Destino configurado para todos os nichos.'
+    };
+  }
+
+  if (!selected) {
+    return {
+      matches: false,
+      reason: 'Este grupo ainda não possui um nicho selecionado manualmente.'
+    };
+  }
+
+  const productNiches = classifyProductNiches(product);
+
+  if (!productNiches.length) {
+    return {
+      matches: false,
+      reason: 'Não foi possível identificar a categoria deste produto.'
+    };
+  }
+
+  const matches = productNiches.includes(selected);
+
+  return {
+    matches,
+    reason: matches
+      ? 'Produto compatível com o nicho selecionado.'
+      : 'Produto não pertence ao nicho selecionado para este grupo.'
+  };
+}
+
+
+// ======================================================
 // DESTINOS DA AUTOMAÇÃO
 // ======================================================
 
@@ -851,6 +1025,23 @@ function getAutomationTargets(data) {
           normalizeGroupId(groupId)
       );
 
+      const savedNiche = getMapValueByGroupId(
+        automation.groupNiches,
+        groupId
+      );
+
+      // Se existir uma escolha manual no mapa, ela é
+      // autoritativa, inclusive quando estiver vazia.
+      // Não usar || aqui: isso poderia recuperar um nicho antigo.
+      const selectedNiche =
+        savedNiche !== undefined
+          ? savedNiche
+          : (
+              destination?.nicheId ??
+              destination?.niche ??
+              ''
+            );
+
       return {
         ...(destination || {}),
         id: groupId,
@@ -864,13 +1055,7 @@ function getAutomationTargets(data) {
           destination?.name ||
           groupId,
 
-        nicheId:
-          getMapValueByGroupId(
-            automation.groupNiches,
-            groupId
-          ) ||
-          destination?.nicheId ||
-          'auto',
+        nicheId: normalizeNicheId(selectedNiche),
 
         active: true
       };
@@ -883,16 +1068,25 @@ function getAutomationTargets(data) {
     ? automation.destinationIds
     : [];
 
-  return data.destinations.filter(destination => {
-    if (destination.active === false) return false;
-    if (!selected.length) return false;
+  return data.destinations
+    .filter(destination => {
+      if (destination.active === false) return false;
+      if (!selected.length) return false;
 
-    return selected.some(id =>
-      String(id) === String(destination.id) ||
-      normalizeGroupId(id) ===
-        normalizeGroupId(destination.groupId)
-    );
-  });
+      return selected.some(id =>
+        String(id) === String(destination.id) ||
+        normalizeGroupId(id) ===
+          normalizeGroupId(destination.groupId)
+      );
+    })
+    .map(destination => ({
+      ...destination,
+      nicheId: normalizeNicheId(
+        destination.nicheId ??
+        destination.niche ??
+        ''
+      )
+    }));
 }
 
 
@@ -1807,20 +2001,30 @@ async function startWhatsApp(profile) {
 // ======================================================
 
 function publicDestination(destination) {
-  const selectedNiche = String(
-    destination.nicheId || ''
+  const nicheId = normalizeNicheId(
+    destination?.nicheId ??
+    destination?.niche ??
+    ''
   );
 
-  const manualNiche = NICHE_DEFINITIONS.find(
-    item => item.id === selectedNiche
-  );
+  let nicheLabel = 'Selecione manualmente';
+
+  if (nicheId === 'all') {
+    nicheLabel = 'Todos os nichos';
+  } else if (nicheId) {
+    const definition = NICHE_DEFINITIONS.find(
+      item => item.id === nicheId
+    );
+
+    nicheLabel = definition
+      ? definition.label
+      : 'Selecione manualmente';
+  }
 
   return {
     ...destination,
-
-    niche: manualNiche
-      ? manualNiche.label
-      : 'Todos os nichos'
+    nicheId,
+    niche: nicheLabel
   };
 }
 
@@ -2003,7 +2207,7 @@ function buildOfferMessage(product) {
   lines.push('⚡ Aproveite antes que acabe!');
 
   return lines.join('\n');
-// ======================================================
+}// ======================================================
 // ENVIO PARA UM DESTINO WHATSAPP
 // ======================================================
 
@@ -2321,7 +2525,6 @@ async function fetchShopeeOffers(
 
 // ======================================================
 // PROCESSAMENTO DA FILA DE OFERTAS
-// SEM FILTRO DE NICHOS
 // ======================================================
 
 async function processQueue(profile) {
@@ -2357,11 +2560,54 @@ async function processQueue(profile) {
       );
     }
 
-    // Envia para TODOS os grupos selecionados.
-    // Não identifica nicho pelo nome.
-    // Não compara categoria do produto.
-    // Não descarta ofertas por incompatibilidade.
+    // Filtra os destinos pelo nicho escolhido manualmente.
+    // Nenhum nome de grupo é usado nessa comparação.
+    const compatibleTargets = [];
+
     for (const destination of targets) {
+      const match = destinationMatchesProduct(
+        destination,
+        product
+      );
+
+      if (match.matches) {
+        compatibleTargets.push(destination);
+      } else {
+        results.push({
+          destination:
+            destination.name ||
+            destination.id ||
+            destination.groupId,
+
+          status: 'skipped',
+          reason: match.reason
+        });
+      }
+    }
+
+    // Se nenhum destino for compatível, não envia a oferta.
+    if (!compatibleTargets.length) {
+      current.status = 'skipped';
+
+      current.error =
+        'Nenhum destino selecionado possui nicho compatível com este produto.';
+
+      current.results = results;
+      current.product = product;
+      current.finishedAt = new Date().toISOString();
+
+      await saveProfile(profile);
+
+      return {
+        ok: false,
+        status: 'skipped',
+        message: current.error,
+        results
+      };
+    }
+
+    // Envia somente para os grupos compatíveis.
+    for (const destination of compatibleTargets) {
       try {
         const sent = await sendToDestination(
           profile,
@@ -2371,7 +2617,10 @@ async function processQueue(profile) {
 
         results.push({
           destination:
-            destination.name || destination.id,
+            destination.name ||
+            destination.id ||
+            destination.groupId,
+
           status: 'accepted',
           messageId: sent?.key?.id || null
         });
@@ -2379,7 +2628,10 @@ async function processQueue(profile) {
       } catch (error) {
         results.push({
           destination:
-            destination.name || destination.id,
+            destination.name ||
+            destination.id ||
+            destination.groupId,
+
           status: 'error',
           message: error.message
         });
@@ -2429,10 +2681,10 @@ async function processQueue(profile) {
       current.results = results;
 
     } else {
-      current.status = 'error';
+      current.status = 'skipped';
 
       current.error =
-        'Nenhum grupo recebeu a oferta.';
+        'Nenhum grupo recebeu a oferta por incompatibilidade de nicho.';
 
       current.results = results;
     }
@@ -2450,6 +2702,7 @@ async function processQueue(profile) {
   } catch (error) {
     current.status = 'error';
     current.error = error.message;
+    current.results = results;
     current.finishedAt = new Date().toISOString();
 
     await saveProfile(profile);
@@ -3028,6 +3281,30 @@ app.post('/api/automation', async (req, res) => {
       ...incoming
     };
 
+    // Salva somente os nichos escolhidos manualmente.
+    // Valores vazios também são preservados para apagar
+    // qualquer seleção antiga daquele grupo.
+    if (
+      incoming.groupNiches &&
+      typeof incoming.groupNiches === 'object' &&
+      !Array.isArray(incoming.groupNiches)
+    ) {
+      const normalizedGroupNiches = {};
+
+      for (const [groupId, niche] of Object.entries(
+        incoming.groupNiches
+      )) {
+        normalizedGroupNiches[
+          normalizeGroupId(groupId)
+        ] = normalizeNicheId(niche);
+      }
+
+      data.automation.groupNiches = {
+        ...(data.automation.groupNiches || {}),
+        ...normalizedGroupNiches
+      };
+    }
+
     if (incoming.enabled !== undefined) {
       data.automation.enabled =
         Boolean(incoming.enabled);
@@ -3351,8 +3628,6 @@ app.get('/api/whatsapp/groups', async (req, res) => {
 
 // ======================================================
 // ROTAS DE NICHOS
-// Categorias continuam disponíveis no painel.
-// A rota de classificação não analisa mais nomes.
 // ======================================================
 
 app.get('/api/niches', (req, res) => {
@@ -3373,15 +3648,58 @@ app.get('/api/niches', (req, res) => {
   });
 });
 
+
+// Não classifica mais o nome de grupos.
+// A seleção do nicho deve ser feita manualmente no painel.
+
 app.post('/api/niches/classify', (req, res) => {
   res.json({
     ok: true,
+
     niche: {
-      id: 'all',
-      label: 'Todos os nichos'
-    }
+      id: '',
+      label: 'Selecione manualmente'
+    },
+
+    manualSelectionRequired: true
   });
 });
+
+
+// ======================================================
+// SINCRONIZAR NICHO MANUAL DO DESTINO
+// ======================================================
+
+function syncDestinationNiche(data, destination) {
+  const groupId = normalizeGroupId(
+    destination?.groupId ||
+    destination?.jid ||
+    ''
+  );
+
+  if (!groupId) return;
+
+  if (
+    !data.automation ||
+    typeof data.automation !== 'object'
+  ) {
+    data.automation = {};
+  }
+
+  if (
+    !data.automation.groupNiches ||
+    typeof data.automation.groupNiches !== 'object'
+  ) {
+    data.automation.groupNiches = {};
+  }
+
+  data.automation.groupNiches[groupId] =
+    normalizeNicheId(
+      destination?.nicheId ??
+      destination?.niche ??
+      ''
+    );
+}
 
 
 // ======================================================
@@ -3437,8 +3755,10 @@ app.post('/api/destinations', async (req, res) => {
         'Novo destino'
       ),
 
-      nicheId: String(
-        incoming.nicheId || 'auto'
+      nicheId: normalizeNicheId(
+        incoming.nicheId ??
+        incoming.niche ??
+        ''
       ),
 
       active: incoming.active !== false,
@@ -3465,6 +3785,9 @@ app.post('/api/destinations', async (req, res) => {
     } else {
       data.destinations.push(destination);
     }
+
+    // Guarda a seleção manual do nicho para o grupo.
+    syncDestinationNiche(data, destination);
 
     await saveProfile(profile);
 
@@ -3505,10 +3828,31 @@ app.post('/api/destinations/update', async (req, res) => {
       });
     }
 
+    const previous = data.destinations[index];
+
     data.destinations[index] = {
-      ...data.destinations[index],
+      ...previous,
       ...incoming
     };
+
+    // Só altera o nicho quando o painel enviou
+    // explicitamente uma nova seleção.
+    if (
+      incoming.nicheId !== undefined ||
+      incoming.niche !== undefined
+    ) {
+      data.destinations[index].nicheId =
+        normalizeNicheId(
+          incoming.nicheId ??
+          incoming.niche ??
+          ''
+        );
+
+      syncDestinationNiche(
+        data,
+        data.destinations[index]
+      );
+    }
 
     await saveProfile(profile);
 
@@ -3544,10 +3888,29 @@ app.patch('/api/destinations/:id', async (req, res) => {
       });
     }
 
+    const incoming = req.body || {};
+
     data.destinations[index] = {
       ...data.destinations[index],
-      ...(req.body || {})
+      ...incoming
     };
+
+    if (
+      incoming.nicheId !== undefined ||
+      incoming.niche !== undefined
+    ) {
+      data.destinations[index].nicheId =
+        normalizeNicheId(
+          incoming.nicheId ??
+          incoming.niche ??
+          ''
+        );
+
+      syncDestinationNiche(
+        data,
+        data.destinations[index]
+      );
+    }
 
     await saveProfile(profile);
 
@@ -3571,10 +3934,31 @@ app.delete('/api/destinations/:id', async (req, res) => {
     const profile = profileIdFrom(req);
     const data = getData(profile);
 
+    const removed = data.destinations.find(
+      item =>
+        String(item.id) === String(req.params.id)
+    );
+
     data.destinations = data.destinations.filter(
       item =>
         String(item.id) !== String(req.params.id)
     );
+
+    // Remove a configuração de nicho associada ao grupo excluído.
+    if (removed) {
+      const groupId = normalizeGroupId(
+        removed.groupId ||
+        removed.jid ||
+        ''
+      );
+
+      if (
+        groupId &&
+        data.automation?.groupNiches
+      ) {
+        delete data.automation.groupNiches[groupId];
+      }
+    }
 
     await saveProfile(profile);
 
@@ -3690,6 +4074,11 @@ app.post('/api/queue', async (req, res) => {
     const item = {
       id: crypto.randomUUID(),
       product,
+      productKey: String(
+        product.id ||
+        product.productLink ||
+        product.productName
+      ),
       status: 'pending',
       source: 'manual',
       createdAt: new Date().toISOString()
@@ -4147,4 +4536,4 @@ initializeApp().catch(error => {
   );
 
   process.exit(1);
-});}
+});
