@@ -987,7 +987,17 @@ function classifyProductNiches(product) {
     }
   }
 
-  if (!matches.length) return [];
+  if (!matches.length) {
+    const sourceNiches = Array.isArray(item.sourceNicheIds)
+      ? item.sourceNicheIds.map(normalizeNicheId).filter(Boolean)
+      : [];
+
+    const singleSource = normalizeNicheId(item.sourceNicheId);
+
+    if (singleSource) sourceNiches.push(singleSource);
+
+    return [...new Set(sourceNiches)];
+  }
 
   const bestScore = Math.max(...matches.map(item => item.score));
   const bestNiches = [...new Set(
@@ -2210,6 +2220,18 @@ function normalizeProduct(product) {
       ''
     ),
 
+    // Guarda a categoria da busca Shopee que originou a oferta.
+    // Isso evita descartar produtos relevantes quando a API não
+    // devolve o nome da categoria no ProductOfferV2.
+    sourceNicheIds: [
+      ...new Set([
+        ...(Array.isArray(item.sourceNicheIds)
+          ? item.sourceNicheIds
+          : []),
+        item.sourceNicheId
+      ].map(normalizeNicheId).filter(Boolean))
+    ],
+
     createdAt:
       item.createdAt ||
       new Date().toISOString()
@@ -2565,6 +2587,99 @@ async function fetchShopeeOffers(
       description: ''
     });
   });
+}
+
+
+// ======================================================
+// BUSCA DE OFERTAS POR NICHO SELECIONADO
+// ======================================================
+
+// A API de afiliados usada aqui não devolve o nome da categoria.
+// Por isso, a busca é feita com a palavra-chave do nicho escolhido
+// manualmente para os grupos. O nicho de origem fica registrado
+// no produto e é usado somente quando o título não permite classificar.
+
+const NICHE_SEARCH_KEYWORDS = {
+  eletricos: 'eletrônicos',
+  perfumaria: 'perfume',
+  beleza: 'maquiagem',
+  moda_feminina: 'moda feminina',
+  moda_masculina: 'moda masculina',
+  moda_infantil: 'roupa infantil',
+  calcados: 'calçados',
+  casa: 'utilidades domésticas',
+  cozinha: 'cozinha',
+  decoracao: 'decoração',
+  fitness: 'fitness',
+  pet: 'pet',
+  brinquedos: 'brinquedos',
+  acessorios: 'acessórios'
+};
+
+async function fetchShopeeOffersForNiches(
+  profile,
+  limit,
+  nicheIds
+) {
+  const niches = [...new Set(
+    (Array.isArray(nicheIds) ? nicheIds : [])
+      .map(normalizeNicheId)
+      .filter(nicheId => nicheId && nicheId !== 'all')
+  )];
+
+  if (!niches.length) {
+    return fetchShopeeOffers(profile, limit);
+  }
+
+  const totalLimit = Math.max(1, Math.min(50, Number(limit) || 10));
+  const selectedNiches = niches.slice(0, totalLimit);
+  const basePerNiche = Math.floor(totalLimit / selectedNiches.length);
+  const remainder = totalLimit % selectedNiches.length;
+  const merged = new Map();
+
+  for (let index = 0; index < selectedNiches.length; index++) {
+    const nicheId = selectedNiches[index];
+    const keyword = NICHE_SEARCH_KEYWORDS[nicheId];
+
+    if (!keyword) continue;
+
+    const nicheLimit = Math.max(
+      1,
+      basePerNiche + (index < remainder ? 1 : 0)
+    );
+
+    const offers = await fetchShopeeOffers(
+      profile,
+      nicheLimit,
+      keyword
+    );
+
+    for (const offer of offers) {
+      const key = String(
+        offer.id ||
+        offer.productLink ||
+        offer.productName
+      );
+
+      const existing = merged.get(key);
+
+      if (existing) {
+        existing.sourceNicheIds = [
+          ...new Set([
+            ...(existing.sourceNicheIds || []),
+            nicheId
+          ])
+        ];
+      } else {
+        merged.set(key, normalizeProduct({
+          ...offer,
+          sourceNicheIds: [nicheId]
+        }));
+      }
+    }
+  }
+
+  return [...merged.values()].slice(0, totalLimit);
 }
 
 
@@ -2951,9 +3066,34 @@ async function runAutomation(profile) {
       )
     );
 
-    const products = await fetchShopeeOffers(
-      profile,
-      maxProducts
+    const selectedNiches = [
+      ...new Set(
+        destinations
+          .map(destination => normalizeNicheId(
+            destination?.nicheId ?? destination?.niche ?? ''
+          ))
+          .filter(Boolean)
+      )
+    ];
+
+    const hasAllNichesDestination = selectedNiches.includes('all');
+
+    const products = hasAllNichesDestination
+      ? await fetchShopeeOffers(profile, maxProducts)
+      : await fetchShopeeOffersForNiches(
+          profile,
+          maxProducts,
+          selectedNiches
+        );
+
+    logger.info(
+      {
+        profile,
+        selectedNiches,
+        hasAllNichesDestination,
+        productsFound: products.length
+      },
+      'Busca de ofertas preparada para os nichos selecionados.'
     );
 
     if (!products.length) {
