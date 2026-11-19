@@ -1011,7 +1011,9 @@ function getAutomationGroupMaps(automation) {
     const id = String(groupId || "").trim();
     const nicheId = normalizeNicheId(niche);
 
-    if (id && nicheId) {
+    // Preserva também o valor vazio: ele representa uma seleção manual
+    // sem nicho e não deve ser substituído por uma configuração antiga.
+    if (id) {
       groupNiches[id] = nicheId;
     }
   });
@@ -1092,7 +1094,11 @@ async function getAutomationGroupState(automation = {}) {
       item.groupName || item.name || groupId
     ).trim();
 
-    if (nicheId && !maps.groupNiches[groupId]) {
+    const hasManualNiche = Object.keys(maps.groupNiches).some(key =>
+      normalizeGroupId(key) === normalizeGroupId(groupId)
+    );
+
+    if (!hasManualNiche) {
       maps.groupNiches[groupId] = nicheId;
     }
 
@@ -1266,11 +1272,17 @@ async function renderGroupCheckboxes(state = savedGroupState, groups = loadedGro
     const normalizedId = normalizeGroupId(groupId);
     const isSelected = selected.has(normalizedId);
 
-    const savedNiche =
-      normalizeNicheId(groupNiches[groupId]) ||
-      normalizeNicheId(group.nicheId) ||
-      normalizeNicheId(group.niche?.id) ||
-      normalizeNicheId(group.niche);
+    const savedNicheKey = Object.keys(groupNiches).find(key =>
+      normalizeGroupId(key) === normalizedId
+    );
+
+    const savedNiche = savedNicheKey !== undefined
+      ? normalizeNicheId(groupNiches[savedNicheKey])
+      : (
+          normalizeNicheId(group.nicheId) ||
+          normalizeNicheId(group.niche?.id) ||
+          normalizeNicheId(group.niche)
+        );
 
     const label = document.createElement("label");
     label.className = "group-item";
