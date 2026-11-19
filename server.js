@@ -117,6 +117,9 @@ const storeCache = Object.fromEntries(
 
 // ======================================================
 // NICHOS E CATEGORIAS
+// Mantidos para compatibilidade com o painel.
+// Não são usados para descobrir o nicho pelo nome
+// nem para bloquear o envio das ofertas.
 // ======================================================
 
 const NICHE_DEFINITIONS = [
@@ -824,112 +827,6 @@ async function saveProfile(profile) {
   );
 
   return true;
-}
-
-
-// ======================================================
-// CLASSIFICAÇÃO DE GRUPOS E PRODUTOS
-// ======================================================
-
-function classifyGroupNiche(name) {
-  const normalized = normalizeText(name);
-
-  for (const niche of NICHE_DEFINITIONS) {
-    if (
-      niche.aliases.some(alias =>
-        normalized.includes(normalizeText(alias))
-      )
-    ) {
-      return {
-        id: niche.id,
-        label: niche.label
-      };
-    }
-  }
-
-  return {
-    id: 'unknown',
-    label: 'Não identificado'
-  };
-}
-
-function classifyProductNiches(product) {
-  const text = normalizeText([
-    product?.productName,
-    product?.name,
-    product?.title,
-    product?.description,
-    product?.category
-  ].filter(Boolean).join(' '));
-
-  const matches = [];
-
-  for (const niche of NICHE_DEFINITIONS) {
-    if (
-      niche.aliases.some(alias =>
-        text.includes(normalizeText(alias))
-      )
-    ) {
-      matches.push(niche.id);
-    }
-  }
-
-  return [...new Set(matches)];
-}
-
-function destinationMatchesProduct(destination, product) {
-  const selected = normalizeText(
-    destination?.nicheId ||
-    destination?.niche ||
-    'auto'
-  );
-
-  if (
-    ['all', 'geral', 'todos', 'todas'].includes(selected)
-  ) {
-    return {
-      matches: true,
-      reason: 'Destino aceita todos os nichos.'
-    };
-  }
-
-  let destinationNiche = selected;
-
-  if (
-    !destinationNiche ||
-    destinationNiche === 'auto'
-  ) {
-    const classified = classifyGroupNiche(
-      destination?.name ||
-      destination?.subject ||
-      ''
-    );
-
-    destinationNiche = classified.id;
-  }
-
-  if (destinationNiche === 'unknown') {
-    return {
-      matches: false,
-      reason: 'Selecione manualmente o nicho deste grupo.'
-    };
-  }
-
-  const productNiches = classifyProductNiches(product);
-
-  if (!productNiches.length) {
-    return {
-      matches: false,
-      reason: 'Não foi possível identificar o nicho do produto.'
-    };
-  }
-
-  return {
-    matches: productNiches.includes(destinationNiche),
-    reason: productNiches.includes(destinationNiche)
-      ? 'Nicho compatível.'
-      : 'Produto não pertence ao nicho deste grupo.'
-  };
 }
 
 
@@ -1910,25 +1807,20 @@ async function startWhatsApp(profile) {
 // ======================================================
 
 function publicDestination(destination) {
-  const classified = classifyGroupNiche(
-    destination.name ||
-    destination.subject ||
-    ''
+  const selectedNiche = String(
+    destination.nicheId || ''
+  );
+
+  const manualNiche = NICHE_DEFINITIONS.find(
+    item => item.id === selectedNiche
   );
 
   return {
     ...destination,
 
-    niche:
-      destination.nicheId &&
-      destination.nicheId !== 'auto'
-        ? (
-            NICHE_DEFINITIONS.find(
-              item => item.id === destination.nicheId
-            )?.label ||
-            destination.nicheId
-          )
-        : classified.label
+    niche: manualNiche
+      ? manualNiche.label
+      : 'Todos os nichos'
   };
 }
 
@@ -2111,7 +2003,7 @@ function buildOfferMessage(product) {
   lines.push('⚡ Aproveite antes que acabe!');
 
   return lines.join('\n');
-}// ======================================================
+// ======================================================
 // ENVIO PARA UM DESTINO WHATSAPP
 // ======================================================
 
@@ -2429,6 +2321,7 @@ async function fetchShopeeOffers(
 
 // ======================================================
 // PROCESSAMENTO DA FILA DE OFERTAS
+// SEM FILTRO DE NICHOS
 // ======================================================
 
 async function processQueue(profile) {
@@ -2464,22 +2357,11 @@ async function processQueue(profile) {
       );
     }
 
+    // Envia para TODOS os grupos selecionados.
+    // Não identifica nicho pelo nome.
+    // Não compara categoria do produto.
+    // Não descarta ofertas por incompatibilidade.
     for (const destination of targets) {
-      const match = destinationMatchesProduct(
-        destination,
-        product
-      );
-
-      if (!match.matches) {
-        results.push({
-          destination: destination.name || destination.id,
-          status: 'skipped',
-          reason: match.reason
-        });
-
-        continue;
-      }
-
       try {
         const sent = await sendToDestination(
           profile,
@@ -2488,13 +2370,16 @@ async function processQueue(profile) {
         );
 
         results.push({
-          destination: destination.name || destination.id,
+          destination:
+            destination.name || destination.id,
           status: 'accepted',
           messageId: sent?.key?.id || null
         });
+
       } catch (error) {
         results.push({
-          destination: destination.name || destination.id,
+          destination:
+            destination.name || destination.id,
           status: 'error',
           message: error.message
         });
@@ -2544,10 +2429,10 @@ async function processQueue(profile) {
       current.results = results;
 
     } else {
-      current.status = 'skipped';
+      current.status = 'error';
 
       current.error =
-        'Nenhum destino compatível com o nicho do produto.';
+        'Nenhum grupo recebeu a oferta.';
 
       current.results = results;
     }
@@ -3466,6 +3351,8 @@ app.get('/api/whatsapp/groups', async (req, res) => {
 
 // ======================================================
 // ROTAS DE NICHOS
+// Categorias continuam disponíveis no painel.
+// A rota de classificação não analisa mais nomes.
 // ======================================================
 
 app.get('/api/niches', (req, res) => {
@@ -3487,16 +3374,12 @@ app.get('/api/niches', (req, res) => {
 });
 
 app.post('/api/niches/classify', (req, res) => {
-  const name = String(
-    req.body?.name ||
-    req.body?.groupName ||
-    req.body?.productName ||
-    ''
-  );
-
   res.json({
     ok: true,
-    niche: classifyGroupNiche(name)
+    niche: {
+      id: 'all',
+      label: 'Todos os nichos'
+    }
   });
 });
 
@@ -4264,4 +4147,4 @@ initializeApp().catch(error => {
   );
 
   process.exit(1);
-});
+});}
