@@ -1,0 +1,75 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Preparar aplicativo Android
+        run: |
+          mkdir android-wrapper
+          cd android-wrapper
+          npm init -y
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+          mkdir www
+          cat > capacitor.config.json <<'EOF'
+          {
+            "appId": "com.medeirosdigital.divulgacao",
+            "appName": "Medeiros Divulgação",
+            "webDir": "www",
+            "server": {
+              "url": "https://medeiros-shopee-affiliate-robot.onrender.com",
+              "cleartext": false,
+              "allowNavigation": [
+                "medeiros-shopee-affiliate-robot.onrender.com"
+              ]
+            }
+          }
+          EOF
+          cat > www/index.html <<'EOF'
+          <!doctype html>
+          <html lang="pt-BR">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+            <meta name="theme-color" content="#101010">
+            <title>Medeiros Divulgação</title>
+          </head>
+          <body style="margin:0;background:#101010;color:#fff;font:16px system-ui;display:grid;place-items:center;min-height:100vh">
+            <p>Carregando Medeiros Divulgação…</p>
+          </body>
+          </html>
+          EOF
+          npx cap add android
+          npx cap sync android
+
+      - name: Gerar APK
+        working-directory: android-wrapper/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Disponibilizar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Medeiros-Divulgacao-Android
+          path: android-wrapper/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
