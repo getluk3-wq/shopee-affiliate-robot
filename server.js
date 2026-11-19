@@ -3731,8 +3731,8 @@ async function automationSchedulerTick() {
 // SEGURANÇA E CONTROLE DE ACESSO DOS PERFIS
 // ======================================================
 
-function isValidAdminPassword(value) {
-  const configured = String(process.env.ADMIN_PASSWORD || '');
+function passwordMatchesSecret(secret, value) {
+  const configured = String(secret || '');
   const supplied = String(value || '');
   if (!configured) return false;
 
@@ -3741,26 +3741,51 @@ function isValidAdminPassword(value) {
   return crypto.timingSafeEqual(expectedDigest, suppliedDigest);
 }
 
+function isValidAdminPassword(value) {
+  return passwordMatchesSecret(process.env.ADMIN_PASSWORD, value);
+}
+
+function isValidProfilePassword(profile, value) {
+  if (profile === 'usuario2') {
+    return passwordMatchesSecret(process.env.PROFILE_2_PASSWORD, value);
+  }
+  return false;
+}
+
 app.use((req, res, next) => {
   if (req.path === '/health') return next();
 
-  if (!isValidAdminPassword(req.headers['x-admin-password'])) {
-    return res.status(process.env.ADMIN_PASSWORD ? 401 : 503).json({
+  const suppliedPassword = req.headers['x-admin-password'];
+  const admin = isValidAdminPassword(suppliedPassword);
+  const requestedProfile = profileIdFrom(req);
+  const profileUser = isValidProfilePassword('usuario2', suppliedPassword);
+
+  if (req.path === '/api/profiles') {
+    if (admin || profileUser) return next();
+    return res.status(401).json({
       ok: false,
-      message: process.env.ADMIN_PASSWORD
-        ? 'Senha administrativa inválida.'
-        : 'A senha administrativa ainda não foi configurada no servidor.'
+      message: 'Senha inválida.'
     });
   }
 
-  // O administrador precisa consultar e alterar o acesso mesmo
-  // quando um dos perfis estiver bloqueado.
-  if (req.path === '/api/profiles' || req.path.startsWith('/api/admin/')) {
+  if (req.path.startsWith('/api/admin/')) {
+    if (!admin) {
+      return res.status(403).json({
+        ok: false,
+        message: 'Somente o administrador pode gerenciar os acessos.'
+      });
+    }
     return next();
   }
 
-  const profile = profileIdFrom(req);
-  if (getData(profile).accessEnabled === false) {
+  if (!admin && (!profileUser || requestedProfile !== 'usuario2')) {
+    return res.status(401).json({
+      ok: false,
+      message: 'Senha ou perfil inválido.'
+    });
+  }
+
+  if (getData(requestedProfile).accessEnabled === false) {
     return res.status(403).json({
       ok: false,
       accessBlocked: true,
@@ -3791,9 +3816,21 @@ app.get('/health', (req, res) => {
 // ======================================================
 
 app.get('/api/profiles', (req, res) => {
-  res.json({
+  const suppliedPassword = req.headers['x-admin-password'];
+  const admin = isValidAdminPassword(suppliedPassword);
+
+  if (admin) {
+    return res.json({
+      ok: true,
+      role: 'admin',
+      profiles: PROFILE_IDS
+    });
+  }
+
+  return res.json({
     ok: true,
-    profiles: PROFILE_IDS
+    role: 'profile',
+    profiles: ['usuario2']
   });
 });
 
