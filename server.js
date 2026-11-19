@@ -3830,7 +3830,8 @@ app.get('/api/profiles', (req, res) => {
   return res.json({
     ok: true,
     role: 'profile',
-    profiles: ['usuario2']
+    profiles: ['usuario2'],
+    enabled: getData('usuario2').accessEnabled !== false
   });
 });
 
