@@ -2615,6 +2615,33 @@ async function processQueue(profile) {
         product
       );
 
+      logger.info(
+        {
+          profile,
+          product: String(
+            product.productName ||
+            product.name ||
+            product.title ||
+            'Produto sem nome'
+          ).slice(0, 180),
+          destination: String(
+            destination.name ||
+            destination.groupId ||
+            destination.id ||
+            ''
+          ),
+          selectedNiche: normalizeNicheId(
+            destination?.nicheId ??
+            destination?.niche ??
+            ''
+          ),
+          detectedProductNiches: classifyProductNiches(product),
+          matches: match.matches,
+          reason: match.reason
+        },
+        'Diagnóstico de compatibilidade da oferta com o grupo.'
+      );
+
       if (match.matches) {
         compatibleTargets.push(destination);
       } else {
