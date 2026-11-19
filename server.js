@@ -3587,6 +3587,44 @@ app.post('/api/whatsapp/send', async (req, res) => {
       req.body ||
       {};
 
+    // Envio manual de teste: o painel envia destination como string
+    // e a mensagem em req.body.message.
+    if (typeof destination === 'string') {
+      const sock = sockets.get(profile);
+
+      if (!sock || getStatus(profile).status !== 'connected') {
+        throw new Error('WhatsApp não está conectado.');
+      }
+
+      const jid = normalizeWhatsAppJid(destination);
+      const message = String(req.body?.message || '').trim();
+
+      if (!jid) {
+        throw new Error('Número ou ID do grupo inválido.');
+      }
+
+      if (!message) {
+        throw new Error('Digite uma mensagem para enviar.');
+      }
+
+      const result = await sock.sendMessage(jid, { text: message });
+
+      logger.info(
+        {
+          profile,
+          jid,
+          messageId: result?.key?.id || null
+        },
+        'Mensagem manual de teste aceita pelo WhatsApp.'
+      );
+
+      return res.json({
+        ok: true,
+        message: 'Solicitação aceita pelo WhatsApp.',
+        messageId: result?.key?.id || null
+      });
+    }
+
     const product = normalizeProduct(
       req.body?.product ||
       req.body?.offer ||
