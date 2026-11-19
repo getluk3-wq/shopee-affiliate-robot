@@ -2407,10 +2407,7 @@ async function shopeeGraphQL(
 ) {
   const credentials = getShopeeCredentials(profile);
 
-  if (
-    !credentials.appId ||
-    !credentials.appSecret
-  ) {
+  if (!credentials.appId || !credentials.appSecret) {
     throw new Error(
       'Configure o App ID e o App Secret da Shopee.'
     );
@@ -2420,75 +2417,126 @@ async function shopeeGraphQL(
     process.env.SHOPEE_API_URL ||
     'https://open-api.affiliate.shopee.com.br/graphql';
 
-  const timestamp = Math.floor(
-    Date.now() / 1000
-  );
+  const maxAttempts = 3;
+  let lastError = null;
 
-  const payload = JSON.stringify({
-    query,
-    variables
-  });
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const payload = JSON.stringify({ query, variables });
 
-  const signature = crypto
-    .createHash('sha256')
-    .update(
-      `${credentials.appId}${timestamp}${payload}${credentials.appSecret}`
-    )
-    .digest('hex');
+    // A assinatura é refeita em cada tentativa para usar
+    // um timestamp novo, conforme exigido pela API.
+    const signature = crypto
+      .createHash('sha256')
+      .update(
+        `${credentials.appId}${timestamp}${payload}${credentials.appSecret}`
+      )
+      .digest('hex');
 
-  const authorization =
-    `SHA256 Credential=${credentials.appId}, ` +
-    `Timestamp=${timestamp}, ` +
-    `Signature=${signature}`;
+    const authorization =
+      `SHA256 Credential=${credentials.appId}, ` +
+      `Timestamp=${timestamp}, ` +
+      `Signature=${signature}`;
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': authorization
+        },
+        body: payload,
+        signal: AbortSignal.timeout(30000)
+      });
 
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': authorization
-    },
+      const responseText = await response.text();
+      let result;
 
-    body: payload,
+      try {
+        result = JSON.parse(responseText);
+      } catch (_) {
+        throw new Error(
+          'A Shopee retornou uma resposta inválida.'
+        );
+      }
 
-    signal: AbortSignal.timeout(30000)
-  });
+      const graphErrors = Array.isArray(result?.errors)
+        ? result.errors
+            .map(item => item?.message || item?.error)
+            .filter(Boolean)
+        : [];
 
-  const responseText = await response.text();
+      const apiError =
+        (typeof result?.error === 'string' && result.error) ||
+        result?.error?.message ||
+        result?.message ||
+        graphErrors.join('; ');
 
-  let result;
+      if (!response.ok || apiError) {
+        const message = String(
+          apiError ||
+          `Erro HTTP da Shopee: ${response.status}`
+        );
 
-  try {
-    result = JSON.parse(responseText);
-  } catch (_) {
-    throw new Error(
-      'A Shopee retornou uma resposta inválida.'
-    );
+        const errorCode =
+          message.match(/\\b(?:error\\s*)?\\[?(\\d{4,})\\]?/i)?.[1] || '';
+
+        const retryable =
+          errorCode === '10000' ||
+          /system error|temporar|timeout|rate.?limit/i.test(message) ||
+          [408, 425, 429, 500, 502, 503, 504].includes(response.status);
+
+        if (retryable && attempt < maxAttempts) {
+          logger.warn(
+            {
+              profile,
+              attempt,
+              maxAttempts,
+              httpStatus: response.status,
+              errorCode: errorCode || null,
+              error: message
+            },
+            'Erro temporário na API Shopee; nova tentativa será realizada.'
+          );
+
+          await sleep(1200 * attempt);
+          continue;
+        }
+
+        throw new Error(message);
+      }
+
+      return result?.data || result;
+
+    } catch (error) {
+      lastError = error;
+
+      const message = String(error?.message || error);
+      const retryable =
+        error?.name === 'AbortError' ||
+        error?.name === 'TimeoutError' ||
+        /fetch failed|network|socket|timeout|system error|error \\[10000\\]/i.test(message);
+
+      if (!retryable || attempt >= maxAttempts) {
+        throw error;
+      }
+
+      logger.warn(
+        {
+          profile,
+          attempt,
+          maxAttempts,
+          error: message
+        },
+        'Falha temporária ao consultar a Shopee; repetindo a consulta.'
+      );
+
+      await sleep(1200 * attempt);
+    }
   }
 
-  if (!response.ok) {
-    throw new Error(
-      result?.message ||
-      result?.error ||
-      `Erro HTTP da Shopee: ${response.status}`
-    );
-  }
-
-  if (
-    Array.isArray(result?.errors) &&
-    result.errors.length
-  ) {
-    throw new Error(
-      result.errors
-        .map(item => item.message)
-        .filter(Boolean)
-        .join('; ')
-    );
-  }
-
-  return result?.data || result;
+  throw lastError || new Error('Não foi possível consultar a API Shopee.');
 }
-
 
 // ======================================================
 // BUSCAR OFERTAS NA SHOPEE
