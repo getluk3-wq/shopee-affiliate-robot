@@ -186,11 +186,21 @@ const NICHE_DEFINITIONS = [
     label: 'Moda masculina',
     aliases: [
       'moda masculina',
+      'roupa masculina',
+      'roupas masculinas',
       'masculino',
       'masculina',
       'camiseta masculina',
+      'camisa masculina',
+      'camisa social masculina',
+      'cueca masculina',
       'cueca',
-      'bermuda masculina'
+      'bermuda masculina',
+      'short masculino',
+      'shorts masculino',
+      'calca masculina',
+      'calca jeans masculina',
+      'jaqueta masculina'
     ]
   },
   {
@@ -2713,7 +2723,13 @@ const NICHE_SEARCH_KEYWORDS = {
   perfumaria: 'perfume',
   beleza: 'maquiagem',
   moda_feminina: 'moda feminina',
-  moda_masculina: 'moda masculina',
+  moda_masculina: [
+    'roupa masculina',
+    'camiseta masculina',
+    'bermuda masculina',
+    'camisa masculina',
+    'calça masculina'
+  ],
   moda_infantil: 'roupa infantil',
   calcados: 'calçados',
   casa: 'utilidades domésticas',
@@ -2764,63 +2780,82 @@ async function fetchShopeeOffersForNiches(
   const nicheLimit = Math.max(20, Math.min(50, totalLimit * 2));
 
   for (const nicheId of selectedNiches) {
-    const keyword = NICHE_SEARCH_KEYWORDS[nicheId];
+    const configuredKeywords = NICHE_SEARCH_KEYWORDS[nicheId];
+    const keywords = Array.isArray(configuredKeywords)
+      ? configuredKeywords
+      : [configuredKeywords].filter(Boolean);
 
-    if (!keyword) continue;
+    if (!keywords.length) continue;
 
-    const page = Math.max(
-      1,
-      Math.min(5, Number(data.automation.nicheSearchPages[nicheId]) || 1)
-    );
-
-    let offers = [];
+    const nicheOffers = new Map();
     let acceptedForNiche = 0;
     let rejectedForNiche = 0;
 
-    try {
-      offers = await fetchShopeeOffers(
-        profile,
-        nicheLimit,
-        keyword,
-        page
+    // Alguns termos genéricos da busca Shopee retornam produtos de nichos
+    // completamente diferentes. Pesquisamos termos específicos por peça.
+    for (const keyword of keywords) {
+      const pageKey = `${nicheId}:${keyword}`;
+      const page = Math.max(
+        1,
+        Math.min(5, Number(data.automation.nicheSearchPages[pageKey]) || 1)
       );
 
-      data.automation.nicheSearchPages[nicheId] =
-        page >= 5 ? 1 : page + 1;
-    } catch (error) {
-      nicheErrors.push({ nicheId, message: error.message });
+      let offers = [];
 
-      logger.warn(
-        { profile, nicheId, keyword, error: error.message },
-        'Falha ao buscar um nicho na Shopee; os demais nichos continuarão.'
-      );
+      try {
+        offers = await fetchShopeeOffers(
+          profile,
+          nicheLimit,
+          keyword,
+          page
+        );
 
-      continue;
-    }
+        data.automation.nicheSearchPages[pageKey] =
+          page >= 5 ? 1 : page + 1;
+      } catch (error) {
+        nicheErrors.push({ nicheId, keyword, message: error.message });
 
-    const nicheOffers = new Map();
+        logger.warn(
+          { profile, nicheId, keyword, error: error.message },
+          'Falha em um termo de busca; os demais termos e nichos continuarão.'
+        );
 
-    for (const offer of offers) {
-      // A busca por palavra-chave da Shopee pode retornar itens de outras
-      // categorias. Nunca confiar apenas no termo pesquisado como categoria.
-      const detectedNiches = classifyProductNiches(offer);
-
-      if (!detectedNiches.includes(nicheId)) {
-        rejectedForNiche++;
         continue;
       }
 
-      acceptedForNiche++;
+      for (const offer of offers) {
+        const detectedNiches = classifyProductNiches(offer);
 
-      // A identidade da oferta inclui o vendedor: o mesmo produto de
-      // outra loja pode ser divulgado, mas não repetimos a mesma oferta.
-      const key = productSellerKey(offer);
-      if (!key || nicheOffers.has(key)) continue;
+        if (!detectedNiches.includes(nicheId)) {
+          rejectedForNiche++;
+          continue;
+        }
 
-      nicheOffers.set(key, normalizeProduct({
-        ...offer,
-        sourceNicheIds: [nicheId]
-      }));
+        acceptedForNiche++;
+
+        const key = productSellerKey(offer);
+        if (!key || nicheOffers.has(key)) continue;
+
+        nicheOffers.set(key, normalizeProduct({
+          ...offer,
+          sourceNicheIds: [nicheId]
+        }));
+      }
+
+      logger.info(
+        {
+          profile,
+          nicheId,
+          keyword,
+          page,
+          requestedLimit: nicheLimit,
+          offersReturned: offers.length
+        },
+        'Busca específica do nicho concluída.'
+      );
+
+      // Evita consultas desnecessárias quando já temos ofertas suficientes.
+      if (nicheOffers.size >= totalLimit) break;
     }
 
     offersByNiche.set(nicheId, [...nicheOffers.values()]);
@@ -2829,14 +2864,13 @@ async function fetchShopeeOffersForNiches(
       {
         profile,
         nicheId,
-        keyword,
-        page,
+        keywords,
         requestedLimit: nicheLimit,
-        offersReturned: offers.length,
         acceptedForNiche,
-        rejectedForNiche
+        rejectedForNiche,
+        uniqueOffers: nicheOffers.size
       },
-      'Resultado da busca Shopee validado pelo nicho do produto.'
+      'Resultado consolidado da busca por nicho.'
     );
   }
 
