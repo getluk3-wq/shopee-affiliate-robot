@@ -119,7 +119,7 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 
 <div id="panel" class="hidden">
 
-  <section class="card">
+  <section class="card" id="profileSelectorCard">
     <h2>Selecionar perfil</h2>
     <p class="muted">Cada perfil possui seus próprios dados, WhatsApp, Shopee e automação.</p>
     <select id="profile">
@@ -620,17 +620,33 @@ async function login() {
   $("loginButton").disabled = true;
 
   try {
-    await api("/api/profiles");
-    $("panel").classList.remove("hidden");
-    showMessage("loginmsg", "Acesso autorizado.", "success");
-    await refreshAdminAccess();
-    const selected = adminProfiles.find(item => item.id === profile);
-    if (selected?.enabled) {
+    const auth = await api("/api/profiles");
+    if (auth.role === "profile") {
+      profile = "usuario2";
+      $("profile").value = "usuario2";
+      $("profileSelectorCard").classList.add("hidden");
+      $("adminAccessCard").classList.add("hidden");
+      if (!auth.enabled) {
+        throw new Error("Acesso do Perfil 2 bloqueado pelo administrador. Solicite a liberação.");
+      }
+      $("panel").classList.remove("hidden");
       $("profileTools").classList.remove("hidden");
+      showMessage("loginmsg", "Acesso autorizado ao Perfil 2.", "success");
       await loadProfile();
     } else {
-      $("profileTools").classList.add("hidden");
-      showMessage("adminAccessMessage", "Este perfil está bloqueado. Você ainda pode gerenciar os acessos nesta área.", "error");
+      $("profileSelectorCard").classList.remove("hidden");
+      $("adminAccessCard").classList.remove("hidden");
+      $("panel").classList.remove("hidden");
+      showMessage("loginmsg", "Acesso administrativo autorizado.", "success");
+      await refreshAdminAccess();
+      const selected = adminProfiles.find(item => item.id === profile);
+      if (selected?.enabled) {
+        $("profileTools").classList.remove("hidden");
+        await loadProfile();
+      } else {
+        $("profileTools").classList.add("hidden");
+        showMessage("adminAccessMessage", "Este perfil está bloqueado. Você ainda pode gerenciar os acessos nesta área.", "error");
+      }
     }
   } catch (error) {
     pass = "";
