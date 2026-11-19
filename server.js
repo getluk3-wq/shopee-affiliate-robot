@@ -2174,6 +2174,13 @@ function normalizeProduct(product) {
       ''
     ),
 
+    shopId: String(
+      item.shopId ||
+      item.sellerId ||
+      item.shop_id ||
+      ''
+    ),
+
     productName: String(
       item.productName ||
       item.name ||
@@ -2247,6 +2254,24 @@ function normalizeProduct(product) {
 
 
 // ======================================================
+function productSellerKey(product) {
+  const item = product || {};
+  const itemId = String(
+    item.itemId || item.id || item.productId || ''
+  ).trim();
+  const shopId = String(
+    item.shopId || item.sellerId || item.shop_id || ''
+  ).trim();
+
+  // A mesma mercadoria anunciada por outra loja é uma oferta diferente.
+  if (itemId && shopId) return `${shopId}:${itemId}`;
+  if (itemId) return itemId;
+
+  return String(
+    item.productLink || item.offerLink || item.productName || ''
+  ).trim();
+}
+
 // TEXTO DA OFERTA
 // ======================================================
 
@@ -2309,6 +2334,18 @@ async function sendToDestination(
     '';
 
   const jid = normalizeWhatsAppJid(target);
+
+  logger.info(
+    {
+      profile,
+      destinationName: String(destination?.name || ''),
+      destinationId: String(destination?.id || ''),
+      groupId: String(destination?.groupId || ''),
+      rawTarget: String(target || ''),
+      jid
+    },
+    'Destino WhatsApp resolvido para envio.'
+  );
 
   if (!jid) {
     throw new Error(
@@ -2593,6 +2630,7 @@ async function fetchShopeeOffers(
         nodes {
           productName
           itemId
+          shopId
           priceMin
           priceMax
           priceDiscountRate
@@ -2990,12 +3028,7 @@ async function processQueue(profile) {
       current.results = results;
       current.product = product;
 
-      const key = String(
-        current.productKey ||
-        product.id ||
-        product.productLink ||
-        product.productName
-      );
+      const key = productSellerKey(product);
 
       if (key) {
         data.sentProducts[key] = {
@@ -3268,11 +3301,7 @@ async function runAutomation(profile) {
     let duplicated = 0;
 
     for (const product of products) {
-      const productKey = String(
-        product.id ||
-        product.productLink ||
-        product.productName
-      );
+      const productKey = productSellerKey(product);
 
       const previous =
         data.sentProducts[productKey];
@@ -3299,11 +3328,8 @@ async function runAutomation(profile) {
       }
 
       const alreadyQueued = data.queue.some(item => {
-        const itemKey = String(
-          item.productKey ||
-          item.product?.id ||
-          item.product?.productLink ||
-          ''
+        const itemKey = productSellerKey(
+          item.product || item
         );
 
         return (
