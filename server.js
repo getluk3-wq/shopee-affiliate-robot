@@ -412,7 +412,9 @@ function normalizeWhatsAppJid(value) {
   }
 
   return '';
-}function getMapValueByGroupId(map, groupId) {
+}
+
+function getMapValueByGroupId(map, groupId) {
   if (!map || typeof map !== 'object') {
     return undefined;
   }
@@ -1190,7 +1192,8 @@ async function writeWhatsAppAuth(profile, key, value) {
   const cacheKey = authCacheKey(profile, key);
   const storedValue = packAuthValue(value);
 
-  const { error } = await supabase     .from('whatsapp_auth_store')
+  const { error } = await supabase
+    .from('whatsapp_auth_store')
     .upsert(
       {
         profile,
@@ -1592,7 +1595,8 @@ async function startWhatsApp(profile) {
 
   const pendingTimer = reconnectTimers.get(profile);
 
-  if (pendingTimer) {    clearTimeout(pendingTimer);
+  if (pendingTimer) {
+    clearTimeout(pendingTimer);
     reconnectTimers.delete(profile);
   }
 
@@ -1936,25 +1940,80 @@ function publicDestination(destination) {
 function normalizeProduct(product) {
   const item = product || {};
 
-  const price = item.price ??
-    item.productPrice ??
+  const priceMin =
     item.priceMin ??
+    item.price ??
+    item.productPrice ??
     '';
 
-  const oldPrice = item.oldPrice ??
+  const priceMax =
+    item.priceMax ??
+    '';
+
+  const oldPrice =
+    item.oldPrice ??
     item.originalPrice ??
     item.priceBeforeDiscount ??
     '';
 
-  const discount = item.discount ??
+  const discount =
+    item.discount ??
     item.discountRate ??
+    item.priceDiscountRate ??
+    '';
+
+  const rawCommission =
+    item.commissionRate ??
+    item.commission ??
+    '';
+
+  let commissionRate = '';
+
+  if (
+    rawCommission !== '' &&
+    rawCommission !== null &&
+    rawCommission !== undefined
+  ) {
+    const numericCommission = Number(rawCommission);
+
+    if (Number.isFinite(numericCommission)) {
+      const percentage =
+        numericCommission <= 1
+          ? numericCommission * 100
+          : numericCommission;
+
+      commissionRate =
+        percentage.toLocaleString('pt-BR', {
+          maximumFractionDigits: 2
+        }) + '%';
+    } else {
+      commissionRate = String(rawCommission);
+    }
+  }
+
+  const sales =
+    item.sales ??
+    item.soldCount ??
+    '';
+
+  const ratingStar =
+    item.ratingStar ??
+    item.rating ??
     '';
 
   return {
     id: String(
       item.id ||
+      item.itemId ||
       item.productId ||
       crypto.randomUUID()
+    ),
+
+    itemId: String(
+      item.itemId ||
+      item.productId ||
+      item.id ||
+      ''
     ),
 
     productName: String(
@@ -1986,12 +2045,22 @@ function normalizeProduct(product) {
       ''
     ),
 
-    price: String(price),
+    price: String(priceMin),
+    priceMin: String(priceMin),
+    priceMax: String(priceMax),
+
     oldPrice: String(oldPrice),
     discount: String(discount),
 
+    commissionRate,
+    commissionRateRaw: String(rawCommission),
+
+    sales,
+    ratingStar,
+
     category: String(
-      item.category ||      item.categoryName ||
+      item.category ||
+      item.categoryName ||
       ''
     ),
 
@@ -2042,10 +2111,7 @@ function buildOfferMessage(product) {
   lines.push('⚡ Aproveite antes que acabe!');
 
   return lines.join('\n');
-}
-
-
-// ======================================================
+}// ======================================================
 // ENVIO PARA UM DESTINO WHATSAPP
 // ======================================================
 
@@ -2079,6 +2145,7 @@ async function sendToDestination(
       'Número ou ID do grupo inválido.'
     );
   }
+
   const item = normalizeProduct(product);
   const caption = buildOfferMessage(item);
 
@@ -2266,16 +2333,25 @@ async function shopeeGraphQL(
 
 async function fetchShopeeOffers(
   profile,
-  limit = 10
+  limit = 10,
+  keyword = ''
 ) {
   const safeLimit = Math.max(
     1,
     Math.min(50, Number(limit) || 10)
   );
 
+  const safeKeyword = String(
+    keyword || ''
+  ).trim();
+
   const query = `
-    query ProductOffer($limit: Int!) {
+    query ProductOffer(
+      $limit: Int!,
+      $keyword: String
+    ) {
       productOfferV2(
+        keyword: $keyword,
         listType: 0,
         sortType: 2,
         page: 1,
@@ -2302,7 +2378,8 @@ async function fetchShopeeOffers(
     profile,
     query,
     {
-      limit: safeLimit
+      limit: safeLimit,
+      keyword: safeKeyword || null
     }
   );
 
@@ -2316,23 +2393,20 @@ async function fetchShopeeOffers(
   }
 
   return nodes.map(item => {
-    const price = item.priceMin ??
-      item.priceMax ??
-      '';
-
-    const discount = item.priceDiscountRate;
-
     return normalizeProduct({
       id: item.itemId,
+      itemId: item.itemId,
+
       productName: item.productName,
       name: item.productName,
-      price,
-      oldPrice: '',
+
+      priceMin: item.priceMin,
+      priceMax: item.priceMax,
 
       discount:
-        discount !== undefined &&
-        discount !== null
-          ? `${discount}% OFF`
+        item.priceDiscountRate !== undefined &&
+        item.priceDiscountRate !== null
+          ? `${item.priceDiscountRate}% OFF`
           : '',
 
       imageUrl: item.imageUrl,
@@ -2342,11 +2416,12 @@ async function fetchShopeeOffers(
         item.productLink ||
         '',
 
-      category: item.category || '',
-      description: '',
       sales: item.sales,
-      rating: item.ratingStar,
-      commissionRate: item.commissionRate
+      ratingStar: item.ratingStar,
+      commissionRate: item.commissionRate,
+
+      category: '',
+      description: ''
     });
   });
 }
@@ -2387,7 +2462,9 @@ async function processQueue(profile) {
       throw new Error(
         'Nenhum grupo ou destino está selecionado.'
       );
-    }    for (const destination of targets) {
+    }
+
+    for (const destination of targets) {
       const match = destinationMatchesProduct(
         destination,
         product
@@ -2786,7 +2863,8 @@ async function runAutomation(profile) {
 
     logger.info(
       {
-        profile,        productsFound: products.length,
+        profile,
+        productsFound: products.length,
         queued,
         duplicated,
         sent,
@@ -3098,9 +3176,7 @@ app.post('/api/automation', async (req, res) => {
       data.automation.intervalMinutes =
         Math.max(
           1,
-          Math.ceil(
-            data.automation.intervalSeconds / 60
-          )
+          Math.ceil(data.automation.intervalSeconds / 60)
         );
     }
 
@@ -3185,7 +3261,8 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
       phone.length > 15
     ) {
       return res.status(400).json({
-        ok: false,        message: 'Informe telefone com DDD e código do país.'
+        ok: false,
+        message: 'Informe telefone com DDD e código do país.'
       });
     }
 
@@ -3584,7 +3661,8 @@ app.patch('/api/destinations/:id', async (req, res) => {
       });
     }
 
-    data.destinations[index] = {      ...data.destinations[index],
+    data.destinations[index] = {
+      ...data.destinations[index],
       ...(req.body || {})
     };
 
@@ -3862,18 +3940,42 @@ app.get('/api/shopee/products', async (req, res) => {
       req.query.limit || 10
     );
 
-    const products = await fetchShopeeOffers(
-      profile,
-      limit
+    const keyword = String(
+      req.query.keyword || ''
+    ).trim();
+
+    logger.info(
+      {
+        profile,
+        keyword,
+        limit
+      },
+      'Iniciando pesquisa de produtos Shopee.'
     );
 
-    res.json({
+    const products = await fetchShopeeOffers(
+      profile,
+      limit,
+      keyword
+    );
+
+    return res.json({
       ok: true,
+      keyword,
+      total: products.length,
       products
     });
 
   } catch (error) {
-    res.status(400).json({
+    logger.error(
+      {
+        error: error.message,
+        stack: error.stack
+      },
+      'Erro ao pesquisar produtos Shopee.'
+    );
+
+    return res.status(400).json({
       ok: false,
       message: error.message
     });
@@ -3983,7 +4085,10 @@ app.use((error, req, res, next) => {
         ? undefined
         : error.message
   });
-});// ======================================================
+});
+
+
+// ======================================================
 // INICIALIZAÇÃO DO SERVIDOR
 // ======================================================
 
