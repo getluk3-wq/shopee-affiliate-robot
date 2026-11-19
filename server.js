@@ -2741,8 +2741,10 @@ async function fetchShopeeOffersForNiches(
   }
 
   const totalLimit = Math.max(1, Math.min(50, Number(limit) || 10));
-  const selectedNiches = niches.slice(0, totalLimit);
-  const merged = new Map();
+  const selectedNiches = niches;
+  // Mantém uma lista separada por nicho para que o primeiro nicho
+  // não ocupe sozinho todo o limite e deixe os demais sem ofertas.
+  const offersByNiche = new Map();
   const nicheErrors = [];
   const data = getData(profile);
 
@@ -2796,10 +2798,11 @@ async function fetchShopeeOffersForNiches(
       continue;
     }
 
+    const nicheOffers = new Map();
+
     for (const offer of offers) {
       // A busca por palavra-chave da Shopee pode retornar itens de outras
       // categorias. Nunca confiar apenas no termo pesquisado como categoria.
-      // Só manter o produto quando o próprio título/categoria comprovar o nicho.
       const detectedNiches = classifyProductNiches(offer);
 
       if (!detectedNiches.includes(nicheId)) {
@@ -2809,28 +2812,18 @@ async function fetchShopeeOffersForNiches(
 
       acceptedForNiche++;
 
-      const key = String(
-        offer.id ||
-        offer.productLink ||
-        offer.productName
-      );
+      // A identidade da oferta inclui o vendedor: o mesmo produto de
+      // outra loja pode ser divulgado, mas não repetimos a mesma oferta.
+      const key = productSellerKey(offer);
+      if (!key || nicheOffers.has(key)) continue;
 
-      const existing = merged.get(key);
-
-      if (existing) {
-        existing.sourceNicheIds = [
-          ...new Set([
-            ...(existing.sourceNicheIds || []),
-            nicheId
-          ])
-        ];
-      } else {
-        merged.set(key, normalizeProduct({
-          ...offer,
-          sourceNicheIds: [nicheId]
-        }));
-      }
+      nicheOffers.set(key, normalizeProduct({
+        ...offer,
+        sourceNicheIds: [nicheId]
+      }));
     }
+
+    offersByNiche.set(nicheId, [...nicheOffers.values()]);
 
     logger.info(
       {
@@ -2847,7 +2840,57 @@ async function fetchShopeeOffersForNiches(
     );
   }
 
-  if (!merged.size && nicheErrors.length) {
+  const results = [];
+  const seenOffers = new Set();
+  const cursors = new Map(selectedNiches.map(nicheId => [nicheId, 0]));
+
+  // Distribuição em rodízio: pega uma oferta de cada nicho por vez.
+  // Assim, um nicho com muitos resultados não elimina os outros pelo slice.
+  while (results.length < totalLimit) {
+    let addedInRound = false;
+
+    for (const nicheId of selectedNiches) {
+      if (results.length >= totalLimit) break;
+
+      const nicheOffers = offersByNiche.get(nicheId) || [];
+      const cursor = cursors.get(nicheId) || 0;
+
+      if (cursor >= nicheOffers.length) continue;
+
+      const offer = nicheOffers[cursor];
+      cursors.set(nicheId, cursor + 1);
+
+      const key = productSellerKey(offer);
+      if (!key || seenOffers.has(key)) continue;
+
+      seenOffers.add(key);
+      results.push(offer);
+      addedInRound = true;
+    }
+
+    if (!addedInRound) break;
+  }
+
+  const distribution = Object.fromEntries(
+    selectedNiches.map(nicheId => [
+      nicheId,
+      results.filter(product =>
+        (product.sourceNicheIds || []).includes(nicheId)
+      ).length
+    ])
+  );
+
+  logger.info(
+    {
+      profile,
+      selectedNiches,
+      productsReturned: results.length,
+      distribution
+    },
+    'Distribuição equilibrada de ofertas por nicho.'
+  );
+
+  if (!results.length && nicheErrors.length) {
     throw new Error(
       `A Shopee falhou em todos os nichos consultados: ${nicheErrors
         .map(item => `${item.nicheId}: ${item.message}`)
@@ -2860,13 +2903,13 @@ async function fetchShopeeOffersForNiches(
       {
         profile,
         failedNiches: nicheErrors.map(item => item.nicheId),
-        productsFound: merged.size
+        productsFound: results.length
       },
       'Busca parcial concluída; ofertas dos nichos disponíveis serão processadas.'
     );
   }
 
-  return [...merged.values()].slice(0, totalLimit);
+  return results;
 }
 
 
