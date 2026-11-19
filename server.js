@@ -2417,7 +2417,9 @@ async function shopeeGraphQL(
     process.env.SHOPEE_API_URL ||
     'https://open-api.affiliate.shopee.com.br/graphql';
 
-  const maxAttempts = 3;
+  // A Shopee 10000 is an internal provider error. Retry for longer with
+  // exponential backoff because short retries can all hit the same outage window.
+  const maxAttempts = 5;
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -2505,7 +2507,7 @@ async function shopeeGraphQL(
             'Erro temporário na API Shopee; nova tentativa será realizada.'
           );
 
-          await sleep(1200 * attempt);
+          await sleep(Math.min(15000, 2000 * (2 ** (attempt - 1))));
           continue;
         }
 
@@ -2537,7 +2539,7 @@ async function shopeeGraphQL(
         'Falha temporária ao consultar a Shopee; repetindo a consulta.'
       );
 
-      await sleep(1200 * attempt);
+      await sleep(Math.min(15000, 2000 * (2 ** (attempt - 1))));
     }
   }
 
