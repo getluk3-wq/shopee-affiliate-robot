@@ -2831,10 +2831,41 @@ async function fetchShopeeOffersForNiches(
           continue;
         }
 
-        acceptedForNiche++;
-
         const key = productSellerKey(offer);
         if (!key || nicheOffers.has(key)) continue;
+
+        // Não encerra a busca por causa de produtos já enviados.
+        // Filtra os repetidos aqui para continuar procurando ofertas novas
+        // nas próximas palavras-chave e páginas do mesmo nicho.
+        const previous = data.sentProducts?.[key];
+        let previousDate = 0;
+
+        if (typeof previous === 'string') {
+          previousDate = Date.parse(previous) || 0;
+        } else if (previous && typeof previous === 'object') {
+          previousDate = Date.parse(
+            previous.sentAt || previous.date || ''
+          ) || 0;
+        }
+
+        const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+
+        if (previousDate > sevenDaysAgo) {
+          rejectedForNiche++;
+          continue;
+        }
+
+        const queuedRecently = data.queue.some(item => {
+          if (!['pending', 'processing'].includes(item.status)) return false;
+          return productSellerKey(item.product || item) === key;
+        });
+
+        if (queuedRecently) {
+          rejectedForNiche++;
+          continue;
+        }
+
+        acceptedForNiche++;
 
         nicheOffers.set(key, normalizeProduct({
           ...offer,
