@@ -3316,6 +3316,11 @@ async function runAutomation(profile) {
 
   automationLocks.add(profile);
 
+  logger.info(
+    { profile },
+    'Iniciando ciclo da automação.'
+  );
+
   const data = getData(profile);
   const automation = data.automation || {};
 
@@ -5002,7 +5007,7 @@ async function initializeApp() {
         'Erro no agendador.'
       );
     });
-  }, 60000);
+  }, 5000);
 
   schedulerTimer.unref?.();
 
