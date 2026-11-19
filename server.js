@@ -277,8 +277,15 @@ const NICHE_DEFINITIONS = [
     aliases: [
       'pet',
       'cachorro',
+      'cachorros',
       'gato',
+      'gatos',
       'cao',
+      'caes',
+      'para gatos',
+      'para cachorro',
+      'para caes',
+      'para pets',
       'racao',
       'coleira',
       'brinquedo pet'
@@ -2706,6 +2713,8 @@ async function fetchShopeeOffersForNiches(
     );
 
     let offers = [];
+    let acceptedForNiche = 0;
+    let rejectedForNiche = 0;
 
     try {
       offers = await fetchShopeeOffers(
@@ -2725,6 +2734,18 @@ async function fetchShopeeOffersForNiches(
     }
 
     for (const offer of offers) {
+      // A busca por palavra-chave da Shopee pode retornar itens de outras
+      // categorias. Nunca confiar apenas no termo pesquisado como categoria.
+      // Só manter o produto quando o próprio título/categoria comprovar o nicho.
+      const detectedNiches = classifyProductNiches(offer);
+
+      if (!detectedNiches.includes(nicheId)) {
+        rejectedForNiche++;
+        continue;
+      }
+
+      acceptedForNiche++;
+
       const key = String(
         offer.id ||
         offer.productLink ||
@@ -2747,6 +2768,18 @@ async function fetchShopeeOffersForNiches(
         }));
       }
     }
+
+    logger.info(
+      {
+        profile,
+        nicheId,
+        keyword,
+        offersReturned: offers.length,
+        acceptedForNiche,
+        rejectedForNiche
+      },
+      'Resultado da busca Shopee validado pelo nicho do produto.'
+    );
   }
 
   if (!merged.size && nicheErrors.length) {
