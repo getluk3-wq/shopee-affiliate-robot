@@ -348,6 +348,7 @@ const NICHE_DEFINITIONS = [
 
 function defaultProfileData() {
   return {
+    accessEnabled: true,
     automation: {
       enabled: false,
       active: false,
@@ -3726,6 +3727,50 @@ async function automationSchedulerTick() {
 // ROTA DE SAÚDE
 // ======================================================
 
+// ======================================================
+// SEGURANÇA E CONTROLE DE ACESSO DOS PERFIS
+// ======================================================
+
+function isValidAdminPassword(value) {
+  const configured = String(process.env.ADMIN_PASSWORD || '');
+  const supplied = String(value || '');
+  if (!configured) return false;
+
+  const expectedDigest = crypto.createHash('sha256').update(configured).digest();
+  const suppliedDigest = crypto.createHash('sha256').update(supplied).digest();
+  return crypto.timingSafeEqual(expectedDigest, suppliedDigest);
+}
+
+app.use((req, res, next) => {
+  if (req.path === '/health') return next();
+
+  if (!isValidAdminPassword(req.headers['x-admin-password'])) {
+    return res.status(process.env.ADMIN_PASSWORD ? 401 : 503).json({
+      ok: false,
+      message: process.env.ADMIN_PASSWORD
+        ? 'Senha administrativa inválida.'
+        : 'A senha administrativa ainda não foi configurada no servidor.'
+    });
+  }
+
+  // O administrador precisa consultar e alterar o acesso mesmo
+  // quando um dos perfis estiver bloqueado.
+  if (req.path === '/api/profiles' || req.path.startsWith('/api/admin/')) {
+    return next();
+  }
+
+  const profile = profileIdFrom(req);
+  if (getData(profile).accessEnabled === false) {
+    return res.status(403).json({
+      ok: false,
+      accessBlocked: true,
+      message: 'Acesso deste perfil bloqueado pelo administrador.'
+    });
+  }
+
+  next();
+});
+
 app.get('/health', (req, res) => {
   res.json({
     ok: true,
@@ -3750,6 +3795,51 @@ app.get('/api/profiles', (req, res) => {
     ok: true,
     profiles: PROFILE_IDS
   });
+});
+
+app.get('/api/admin/profiles', (req, res) => {
+  res.json({
+    ok: true,
+    profiles: PROFILE_IDS.map(profile => ({
+      id: profile,
+      label: profile === 'rafael' ? 'Perfil 1 — Rafael' : 'Perfil 2 — Segundo usuário',
+      enabled: getData(profile).accessEnabled !== false,
+      automationActive: isAutomationActive(getData(profile).automation)
+    }))
+  });
+});
+
+app.post('/api/admin/profiles/:profile/access', async (req, res) => {
+  try {
+    const profile = String(req.params.profile || '');
+    if (!PROFILE_IDS.includes(profile)) {
+      return res.status(404).json({ ok: false, message: 'Perfil não encontrado.' });
+    }
+
+    const enabled = req.body?.enabled === true;
+    const data = getData(profile);
+    data.accessEnabled = enabled;
+
+    // Ao bloquear, pausa a automação para impedir novos envios.
+    // A sessão WhatsApp e os grupos salvos são preservados.
+    if (!enabled) {
+      data.automation.active = false;
+      data.automation.enabled = false;
+    }
+
+    await saveProfile(profile);
+
+    return res.json({
+      ok: true,
+      profile,
+      enabled,
+      message: enabled
+        ? 'Acesso liberado para este perfil.'
+        : 'Acesso bloqueado e automação pausada. A conexão e as configurações foram preservadas.'
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, message: error.message });
+  }
 });
 
 
