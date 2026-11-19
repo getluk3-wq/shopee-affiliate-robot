@@ -2455,6 +2455,12 @@ async function shopeeGraphQL(
       try {
         result = JSON.parse(responseText);
       } catch (_) {
+        if (!response.ok) {
+          throw new Error(
+            `HTTP ${response.status}: a Shopee retornou uma resposta temporariamente inválida.`
+          );
+        }
+
         throw new Error(
           'A Shopee retornou uma resposta inválida.'
         );
@@ -2515,7 +2521,7 @@ async function shopeeGraphQL(
       const retryable =
         error?.name === 'AbortError' ||
         error?.name === 'TimeoutError' ||
-        /fetch failed|network|socket|timeout|system error|error \[10000\]/i.test(message);
+        /fetch failed|network|socket|timeout|system error|error \[10000\]|\bHTTP (?:408|425|429|5\d{2})\b/i.test(message);
 
       if (!retryable || attempt >= maxAttempts) {
         throw error;
@@ -2684,6 +2690,7 @@ async function fetchShopeeOffersForNiches(
   const basePerNiche = Math.floor(totalLimit / selectedNiches.length);
   const remainder = totalLimit % selectedNiches.length;
   const merged = new Map();
+  const nicheErrors = [];
 
   for (let index = 0; index < selectedNiches.length; index++) {
     const nicheId = selectedNiches[index];
@@ -2696,11 +2703,24 @@ async function fetchShopeeOffersForNiches(
       basePerNiche + (index < remainder ? 1 : 0)
     );
 
-    const offers = await fetchShopeeOffers(
-      profile,
-      nicheLimit,
-      keyword
-    );
+    let offers = [];
+
+    try {
+      offers = await fetchShopeeOffers(
+        profile,
+        nicheLimit,
+        keyword
+      );
+    } catch (error) {
+      nicheErrors.push({ nicheId, message: error.message });
+
+      logger.warn(
+        { profile, nicheId, keyword, error: error.message },
+        'Falha ao buscar um nicho na Shopee; os demais nichos continuarão.'
+      );
+
+      continue;
+    }
 
     for (const offer of offers) {
       const key = String(
@@ -2725,6 +2745,25 @@ async function fetchShopeeOffersForNiches(
         }));
       }
     }
+  }
+
+  if (!merged.size && nicheErrors.length) {
+    throw new Error(
+      `A Shopee falhou em todos os nichos consultados: ${nicheErrors
+        .map(item => `${item.nicheId}: ${item.message}`)
+        .join(' | ')}`
+    );
+  }
+
+  if (nicheErrors.length) {
+    logger.warn(
+      {
+        profile,
+        failedNiches: nicheErrors.map(item => item.nicheId),
+        productsFound: merged.size
+      },
+      'Busca parcial concluída; ofertas dos nichos disponíveis serão processadas.'
+    );
   }
 
   return [...merged.values()].slice(0, totalLimit);
@@ -4664,8 +4703,11 @@ app.use((error, req, res, next) => {
 
 let httpServer = null;
 let schedulerTimer = null;
+let startupReconnectTimer = null;
 
 async function initializeApp() {
+  const profilesToReconnect = [];
+
   for (const profile of PROFILE_IDS) {
     try {
       await loadProfile(profile);
@@ -4681,15 +4723,7 @@ async function initializeApp() {
             'Sessão encontrada no Supabase. Iniciando WhatsApp.'
           );
 
-          startWhatsApp(profile).catch(error => {
-            logger.error(
-              {
-                profile,
-                error: error.message
-              },
-              'Erro ao iniciar WhatsApp automaticamente.'
-            );
-          });
+          profilesToReconnect.push(profile);
         } else {
           logger.info(
             { profile },
@@ -4728,6 +4762,28 @@ async function initializeApp() {
         },
         'MEDEIROS DIGITAL iniciado.'
       );
+
+      // Durante o deploy, a instância anterior pode continuar ativa.
+      // Aguarda seu encerramento antes de abrir as sessões Baileys salvas,
+      // evitando conexões simultâneas e conflitos 440/Bad MAC.
+      if (profilesToReconnect.length) {
+        startupReconnectTimer = setTimeout(() => {
+          startupReconnectTimer = null;
+
+          for (const profile of profilesToReconnect) {
+            if (sockets.has(profile) || socketStarts.has(profile)) continue;
+
+            startWhatsApp(profile).catch(error => {
+              logger.error(
+                { profile, error: error.message },
+                'Erro ao iniciar WhatsApp após a janela segura de inicialização.'
+              );
+            });
+          }
+        }, 30000);
+
+        startupReconnectTimer.unref?.();
+      }
     }
   );
 
@@ -4761,6 +4817,11 @@ async function shutdown(signal) {
   if (schedulerTimer) {
     clearInterval(schedulerTimer);
     schedulerTimer = null;
+  }
+
+  if (startupReconnectTimer) {
+    clearTimeout(startupReconnectTimer);
+    startupReconnectTimer = null;
   }
 
   for (const [profile, timer] of reconnectTimers.entries()) {
