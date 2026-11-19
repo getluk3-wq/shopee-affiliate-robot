@@ -2838,7 +2838,14 @@ async function fetchShopeeOffersForNiches(
         // Não encerra a busca por causa de produtos já enviados.
         // Filtra os repetidos aqui para continuar procurando ofertas novas
         // nas próximas palavras-chave e páginas do mesmo nicho.
-        const previous = data.sentProducts?.[key];
+        // Compatibilidade com o histórico antigo, que podia estar salvo
+        // somente pelo itemId antes de o shopId ser preservado.
+        const legacyItemKey = String(
+          offer.itemId || offer.id || offer.productId || ''
+        ).trim();
+        const previous =
+          data.sentProducts?.[key] ||
+          (legacyItemKey ? data.sentProducts?.[legacyItemKey] : null);
         let previousDate = 0;
 
         if (typeof previous === 'string') {
@@ -3379,11 +3386,18 @@ async function runAutomation(profile) {
       Math.min(5, Number(automation.searchPage) || 1)
     );
 
+    // Reserva pelo menos uma oferta para cada nicho selecionado,
+    // mesmo quando existem mais nichos do que o limite padrão do painel.
+    const searchLimit = Math.max(
+      maxProducts,
+      Math.min(50, selectedNiches.length)
+    );
+
     const products = hasAllNichesDestination
       ? await fetchShopeeOffers(profile, maxProducts, '', allNichesPage)
       : await fetchShopeeOffersForNiches(
           profile,
-          maxProducts,
+          searchLimit,
           selectedNiches
         );
 
@@ -3417,8 +3431,13 @@ async function runAutomation(profile) {
     for (const product of products) {
       const productKey = productSellerKey(product);
 
+      // Lê também registros antigos salvos apenas pelo itemId.
+      const legacyItemKey = String(
+        product.itemId || product.id || product.productId || ''
+      ).trim();
       const previous =
-        data.sentProducts[productKey];
+        data.sentProducts[productKey] ||
+        (legacyItemKey ? data.sentProducts[legacyItemKey] : null);
 
       let previousDate = 0;
 
