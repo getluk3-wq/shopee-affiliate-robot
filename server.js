@@ -3468,6 +3468,18 @@ async function runAutomation(profile) {
     for (const product of products) {
       const productKey = productSellerKey(product);
 
+      // Mantém no catálogo os produtos encontrados pela automação,
+      // para que o indicador do painel reflita as ofertas processadas.
+      if (productKey) {
+        const existsInCatalog = data.products.some(item =>
+          productSellerKey(item) === productKey
+        );
+        if (!existsInCatalog) {
+          data.products.unshift(product);
+        }
+        data.products = data.products.slice(0, 500);
+      }
+
       // Lê também registros antigos salvos apenas pelo itemId.
       const legacyItemKey = String(
         product.itemId || product.id || product.productId || ''
@@ -3747,11 +3759,19 @@ app.get('/api/profiles', (req, res) => {
 
 app.get('/api/status', (req, res) => {
   const profile = profileIdFrom(req);
+  const data = getData(profile);
+  const targets = getAutomationTargets(data);
+  const pendingQueue = data.queue.filter(item =>
+    ['pending', 'processing'].includes(item.status)
+  ).length;
 
   res.json({
     ok: true,
     profile,
     status: getStatus(profile),
+    products: Array.isArray(data.products) ? data.products.length : 0,
+    destinations: targets.length,
+    queue: pendingQueue,
     qr: qrCache.get(profile) || null,
     pairingCode: pairingCache.get(profile) || null,
     connected:
