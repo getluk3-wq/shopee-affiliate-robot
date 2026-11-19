@@ -2678,6 +2678,7 @@ async function fetchShopeeOffers(
     return normalizeProduct({
       id: item.itemId,
       itemId: item.itemId,
+      shopId: item.shopId,
 
       productName: item.productName,
       name: item.productName,
