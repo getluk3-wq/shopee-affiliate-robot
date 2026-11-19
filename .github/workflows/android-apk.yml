@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - '.github/workflows/android-apk.yml'
+      - 'download/**'
 
 permissions:
   contents: read
@@ -75,4 +76,4 @@ jobs:
           name: Medeiros-Divulgacao-Android
           path: android-wrapper/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
