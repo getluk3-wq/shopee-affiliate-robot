@@ -2479,7 +2479,7 @@ async function shopeeGraphQL(
         );
 
         const errorCode =
-          message.match(/\\b(?:error\\s*)?\\[?(\\d{4,})\\]?/i)?.[1] || '';
+          message.match(/\b(?:error\s*)?\[?(\d{4,})\]?/i)?.[1] || '';
 
         const retryable =
           errorCode === '10000' ||
@@ -2515,7 +2515,7 @@ async function shopeeGraphQL(
       const retryable =
         error?.name === 'AbortError' ||
         error?.name === 'TimeoutError' ||
-        /fetch failed|network|socket|timeout|system error|error \\[10000\\]/i.test(message);
+        /fetch failed|network|socket|timeout|system error|error \[10000\]/i.test(message);
 
       if (!retryable || attempt >= maxAttempts) {
         throw error;
