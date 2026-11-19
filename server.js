@@ -925,31 +925,76 @@ async function saveProfile(profile) {
 // Esta função classifica somente o produto.
 // Ela não recebe nem consulta o nome do grupo.
 
+function containsNichePhrase(text, phrase) {
+  const textWords = normalizeText(text)
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+  const phraseWords = normalizeText(phrase)
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+  if (!phraseWords.length || phraseWords.length > textWords.length) {
+    return false;
+  }
+
+  for (let i = 0; i <= textWords.length - phraseWords.length; i++) {
+    let found = true;
+
+    for (let j = 0; j < phraseWords.length; j++) {
+      if (textWords[i + j] !== phraseWords[j]) {
+        found = false;
+        break;
+      }
+    }
+
+    if (found) return true;
+  }
+
+  return false;
+}
+
 function classifyProductNiches(product) {
+  const item = product && typeof product === 'object' ? product : {};
+
   const text = normalizeText([
-    product?.productName,
-    product?.name,
-    product?.title,
-    product?.description,
-    product?.category,
-    product?.categoryName
+    item.productName,
+    item.name,
+    item.title,
+    item.category,
+    item.categoryName,
+    item.description
   ].filter(Boolean).join(' '));
 
   if (!text) return [];
 
+  const genericAliases = new Set([
+    'make', 'base', 'casa', 'feminino', 'feminina',
+    'masculino', 'masculina', 'menino', 'menina'
+  ]);
+
   const matches = [];
 
   for (const niche of NICHE_DEFINITIONS) {
-    if (
-      niche.aliases.some(alias =>
-        text.includes(normalizeText(alias))
-      )
-    ) {
-      matches.push(niche.id);
+    for (const alias of (niche.aliases || [])) {
+      const normalizedAlias = normalizeText(alias);
+
+      if (genericAliases.has(normalizedAlias)) continue;
+
+      if (containsNichePhrase(text, normalizedAlias)) {
+        matches.push({ id: niche.id, score: normalizedAlias.length });
+      }
     }
   }
 
-  return [...new Set(matches)];
+  if (!matches.length) return [];
+
+  const bestScore = Math.max(...matches.map(item => item.score));
+  const bestNiches = [...new Set(
+    matches.filter(item => item.score === bestScore).map(item => item.id)
+  )];
+
+  return bestNiches.length === 1 ? bestNiches : [];
 }
 
 
