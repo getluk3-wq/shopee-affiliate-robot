@@ -3625,7 +3625,12 @@ async function automationSchedulerTick() {
       const now = currentTimeInAutomationZone();
       const minuteKey = getAutomationMinuteKey();
 
-      if (scheduleTimes.length) {
+      // O painel atual usa startTime/endTime como janela de funcionamento
+      // e intervalSeconds como frequência. Uma única scheduleTime antiga
+      // representa o início da janela, não um disparo único diário.
+      // Mantemos horários fixos somente quando houver dois ou mais horários
+      // explicitamente configurados (compatibilidade com configurações antigas).
+      if (scheduleTimes.length > 1) {
         const alreadyRan =
           automation.lastScheduleMinute === minuteKey;
 
