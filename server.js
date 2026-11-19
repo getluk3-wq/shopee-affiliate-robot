@@ -2854,7 +2854,15 @@ async function fetchShopeeOffersForNiches(
       }
 
       for (const offer of offers) {
-        const detectedNiches = classifyProductNiches(offer);
+        let detectedNiches = classifyProductNiches(offer);
+
+        // A API de afiliados não informa a categoria real em vários resultados.
+        // Quando o título não permite classificar o produto, usamos o nicho
+        // da consulta específica como origem. Se o título identificar outra
+        // categoria, a oferta continua sendo rejeitada para evitar mistura.
+        if (!detectedNiches.length) {
+          detectedNiches = [nicheId];
+        }
 
         if (!detectedNiches.includes(nicheId)) {
           rejectedForNiche++;
