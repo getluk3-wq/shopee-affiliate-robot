@@ -3576,6 +3576,37 @@ async function runAutomation(profile) {
     automation.lastRunAt = cycleStartedAt;
     await saveProfile(profile);
 
+    // PRIORIDADE: esvazia a fila que já estava pendente ANTES de consultar
+    // a Shopee. Uma busca lenta ou erro externo não deve segurar ofertas prontas.
+    let queueBlockedByRetry = false;
+    let preprocessedQueueItems = 0;
+
+    while (
+      data.queue.some(item => item.status === 'pending') &&
+      preprocessedQueueItems < 100
+    ) {
+      const pendingResult = await processQueue(profile);
+      preprocessedQueueItems++;
+
+      if (
+        pendingResult.status === 'retry' ||
+        pendingResult.status === 'error' ||
+        (pendingResult.ok === false && pendingResult.status !== 'skipped')
+      ) {
+        queueBlockedByRetry = true;
+        break;
+      }
+
+      await sleep(1500);
+    }
+
+    if (preprocessedQueueItems > 0) {
+      logger.info(
+        { profile, preprocessedQueueItems, queueBlockedByRetry },
+        'Fila anterior priorizada antes das novas buscas da Shopee.'
+      );
+    }
+
     const maxProducts = Math.max(
       1,
       Math.min(
@@ -3789,6 +3820,7 @@ async function runAutomation(profile) {
     let skipped = 0;
 
     while (
+      !queueBlockedByRetry &&
       data.queue.some(
         item => item.status === 'pending'
       ) &&
