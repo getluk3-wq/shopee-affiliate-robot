@@ -3559,17 +3559,61 @@ async function runAutomation(profile) {
       Math.min(50, selectedNiches.length)
     );
 
-    const products = hasAllNichesDestination
-      ? await fetchShopeeOffers(profile, maxProducts, '', allNichesPage)
-      : await fetchShopeeOffersForNiches(
-          profile,
-          searchLimit,
-          selectedNiches
-        );
+    let products;
 
     if (hasAllNichesDestination) {
+      // O destino "Todos os nichos" recebe ofertas gerais, mas os demais
+      // grupos continuam precisando de produtos pesquisados por categoria.
+      // Antes, a presença de um único destino "all" fazia o sistema buscar
+      // somente ofertas gerais e podia repetir os mesmos produtos por ciclos.
+      const specificNiches = selectedNiches.filter(
+        nicheId => nicheId !== 'all'
+      );
+
+      const generalOffers = await fetchShopeeOffers(
+        profile,
+        maxProducts,
+        '',
+        allNichesPage
+      );
+
+      const nicheOffers = specificNiches.length
+        ? await fetchShopeeOffersForNiches(
+            profile,
+            searchLimit,
+            specificNiches
+          )
+        : [];
+
+      const mergedOffers = new Map();
+
+      for (const offer of [...generalOffers, ...nicheOffers]) {
+        const key = productSellerKey(offer);
+        if (!key || mergedOffers.has(key)) continue;
+        mergedOffers.set(key, offer);
+      }
+
+      products = [...mergedOffers.values()].slice(0, 50);
+
       automation.searchPage =
         allNichesPage >= 5 ? 1 : allNichesPage + 1;
+
+      logger.info(
+        {
+          profile,
+          generalOffers: generalOffers.length,
+          nicheOffers: nicheOffers.length,
+          mergedOffers: products.length,
+          searchedNiches: specificNiches
+        },
+        'Ofertas gerais e ofertas por nicho foram combinadas.'
+      );
+    } else {
+      products = await fetchShopeeOffersForNiches(
+        profile,
+        searchLimit,
+        selectedNiches
+      );
     }
 
     logger.info(
