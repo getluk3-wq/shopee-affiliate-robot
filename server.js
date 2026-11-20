@@ -1012,7 +1012,29 @@ function classifyProductNiches(product) {
       if (genericAliases.has(normalizedAlias)) continue;
 
       if (containsNichePhrase(text, normalizedAlias)) {
-        matches.push({ id: niche.id, score: normalizedAlias.length });
+        // Termos específicos de cozinha devem prevalecer sobre
+        // descrições genéricas como "utilidades" ou "organização".
+        // Assim, itens de cozinha não são desviados para o nicho amplo "casa".
+        const broadHomeTerms = new Set([
+          'utilidades',
+          'organizacao',
+          'organizador',
+          'limpeza',
+          'banheiro',
+          'lavanderia'
+        ]);
+        const specificNicheBoost = niche.id === 'cozinha' ? 30 : 0;
+        const broadHomePenalty =
+          niche.id === 'casa' && broadHomeTerms.has(normalizedAlias)
+            ? 25
+            : 0;
+
+        matches.push({
+          id: niche.id,
+          score: normalizedAlias.length +
+            specificNicheBoost -
+            broadHomePenalty
+        });
       }
     }
   }
