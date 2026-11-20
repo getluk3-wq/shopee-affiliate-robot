@@ -1505,17 +1505,19 @@ async function createSupabaseAuthState(profile) {
         if (keysCache.has(cacheKey)) {
           result[id] = keysCache.get(cacheKey);
         } else {
-          missing.push({
-            id,
-            key: cacheKey
-          });
+          missing.push({ id, key: cacheKey });
         }
       }
 
-      if (missing.length) {
-        const keyNames = missing.map(
-          item => item.key
-        );
+      // Consultas .in muito grandes podem ser rejeitadas pelo PostgREST
+      // (HTTP 400). Divide a leitura em lotes pequenos sem alterar as
+      // chaves nem a sessão persistida de cada perfil.
+      const batchSize = 40;
+      const found = new Map();
+
+      for (let offset = 0; offset < missing.length; offset += batchSize) {
+        const batch = missing.slice(offset, offset + batchSize);
+        const keyNames = batch.map(item => item.key);
 
         const { data, error } = await supabase
           .from('whatsapp_auth_store')
@@ -1527,31 +1529,31 @@ async function createSupabaseAuthState(profile) {
           logger.error(
             {
               profile,
-              error: error.message
+              keyType: type,
+              requestedKeys: keyNames.length,
+              error: error.message,
+              code: error.code || null,
+              details: error.details || null,
+              hint: error.hint || null
             },
-            'Erro ao recuperar chaves criptográficas do WhatsApp.'
+            'Erro ao recuperar lote de chaves criptográficas do WhatsApp.'
           );
 
           throw error;
         }
 
-        const found = new Map();
-
         for (const row of data || []) {
-          found.set(
-            row.key,
-            unpackAuthValue(row.value)
-          );
+          found.set(row.key, unpackAuthValue(row.value));
         }
+      }
 
-        for (const item of missing) {
-          if (found.has(item.key)) {
-            const value = found.get(item.key);
+      for (const item of missing) {
+        if (found.has(item.key)) {
+          const value = found.get(item.key);
 
-            if (value !== null && value !== undefined) {
-              keysCache.set(item.key, value);
-              result[item.id] = value;
-            }
+          if (value !== null && value !== undefined) {
+            keysCache.set(item.key, value);
+            result[item.id] = value;
           }
         }
       }
