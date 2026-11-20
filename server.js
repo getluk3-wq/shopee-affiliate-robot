@@ -1562,42 +1562,89 @@ async function createSupabaseAuthState(profile) {
     },
 
     async set(dataToSet) {
-      const operations = [];
+      const rowsToUpsert = [];
+      const keysToDelete = [];
 
-      for (const [type, entries] of Object.entries(
-        dataToSet || {}
-      )) {
-        for (const [id, value] of Object.entries(
-          entries || {}
-        )) {
+      for (const [type, entries] of Object.entries(dataToSet || {})) {
+        for (const [id, value] of Object.entries(entries || {})) {
           const key = `${type}:${id}`;
 
           if (value === null || value === undefined) {
             keysCache.delete(key);
-
-            operations.push(
-              deleteWhatsAppAuth(profile, key)
-            );
+            keysToDelete.push(key);
           } else {
-            keysCache.set(key, value);
-
-            operations.push(
-              writeWhatsAppAuth(profile, key, value)
-            );
+            rowsToUpsert.push({
+              profile,
+              key,
+              value: packAuthValue(value),
+              updated_at: new Date().toISOString()
+            });
           }
         }
       }
 
-      const results = await Promise.allSettled(
-        operations
-      );
+      // Evita centenas de requisições simultâneas ao Supabase.
+      // O armazenamento é atualizado em lotes pequenos e ordenados.
+      const batchSize = 40;
 
-      const failed = results.find(
-        result => result.status === 'rejected'
-      );
+      for (let offset = 0; offset < rowsToUpsert.length; offset += batchSize) {
+        const batch = rowsToUpsert.slice(offset, offset + batchSize);
+        const { error } = await supabase
+          .from('whatsapp_auth_store')
+          .upsert(batch, { onConflict: 'profile,key' });
 
-      if (failed) {
-        throw failed.reason;
+        if (error) {
+          logger.error(
+            {
+              profile,
+              batchSize: batch.length,
+              error: error.message,
+              code: error.code || null,
+              details: error.details || null
+            },
+            'Falha ao salvar lote de chaves criptográficas do WhatsApp.'
+          );
+          throw error;
+        }
+
+        for (const row of batch) {
+          const keyTypeAndId = row.key;
+          const splitAt = keyTypeAndId.indexOf(':');
+          const type = keyTypeAndId.slice(0, splitAt);
+          const id = keyTypeAndId.slice(splitAt + 1);
+          const originalValue = dataToSet?.[type]?.[id];
+          if (originalValue !== undefined && originalValue !== null) {
+            keysCache.set(keyTypeAndId, originalValue);
+          }
+          authMemoryCache.set(authCacheKey(profile, keyTypeAndId), originalValue);
+        }
+      }
+
+      for (let offset = 0; offset < keysToDelete.length; offset += batchSize) {
+        const batch = keysToDelete.slice(offset, offset + batchSize);
+        const { error } = await supabase
+          .from('whatsapp_auth_store')
+          .delete()
+          .eq('profile', profile)
+          .in('key', batch);
+
+        if (error) {
+          logger.error(
+            {
+              profile,
+              batchSize: batch.length,
+              error: error.message,
+              code: error.code || null,
+              details: error.details || null
+            },
+            'Falha ao excluir lote de chaves criptográficas do WhatsApp.'
+          );
+          throw error;
+        }
+
+        for (const key of batch) {
+          authMemoryCache.delete(authCacheKey(profile, key));
+        }
       }
     }
   };
