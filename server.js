@@ -3134,8 +3134,48 @@ async function processQueue(profile) {
       };
     }
 
-    // Envia somente para os grupos compatíveis.
-    for (const destination of compatibleTargets) {
+    // Mantém os grupos que já receberam esta oferta registrados.
+    // Em uma nova tentativa, não duplica a mensagem nesses grupos.
+    const previousAccepted = Array.isArray(current.results)
+      ? current.results.filter(item => item.status === 'accepted')
+      : [];
+
+    const wasAlreadyAccepted = destination => {
+      const destinationId = normalizeGroupId(
+        destination.groupId || destination.id || ''
+      );
+      const destinationName = String(
+        destination.name || destination.groupId || destination.id || ''
+      ).trim();
+
+      return previousAccepted.some(item => {
+        const previousId = normalizeGroupId(
+          item.destinationId || item.groupId || ''
+        );
+        const previousName = String(item.destination || '').trim();
+
+        return (
+          (destinationId && previousId && destinationId === previousId) ||
+          (!previousId && destinationName && previousName === destinationName)
+        );
+      });
+    };
+
+    const acceptedResults = [...previousAccepted];
+    const pendingTargets = compatibleTargets.filter(
+      destination => !wasAlreadyAccepted(destination)
+    );
+
+    // Envia para todos os grupos compatíveis que ainda não receberam.
+    for (const destination of pendingTargets) {
+      const destinationId = normalizeGroupId(
+        destination.groupId || destination.id || ''
+      );
+      const destinationName =
+        destination.name ||
+        destination.id ||
+        destination.groupId;
+
       try {
         const sent = await sendToDestination(
           profile,
@@ -3143,47 +3183,54 @@ async function processQueue(profile) {
           product
         );
 
-        results.push({
-          destination:
-            destination.name ||
-            destination.id ||
-            destination.groupId,
-
+        acceptedResults.push({
+          destination: destinationName,
+          destinationId,
           status: 'accepted',
-          messageId: sent?.key?.id || null
+          messageId: sent?.key?.id || null,
+          acceptedAt: new Date().toISOString()
         });
 
       } catch (error) {
         results.push({
-          destination:
-            destination.name ||
-            destination.id ||
-            destination.groupId,
-
+          destination: destinationName,
+          destinationId,
           status: 'error',
-          message: error.message
+          message: error.message,
+          attemptedAt: new Date().toISOString()
         });
+
+        logger.warn(
+          {
+            profile,
+            destination: destinationName,
+            destinationId,
+            error: error.message
+          },
+          'Falha em um grupo; a oferta permanecerá na fila para nova tentativa.'
+        );
       }
 
-      await sleep(1200);
+      await sleep(1800);
     }
-
-    const accepted = results.filter(
-      item => item.status === 'accepted'
-    );
 
     const errors = results.filter(
       item => item.status === 'error'
     );
+    const allDelivered = pendingTargets.length === 0 || errors.length === 0;
 
-    if (accepted.length > 0) {
+    current.results = [...acceptedResults, ...errors];
+    current.product = product;
+    current.lastAttemptAt = new Date().toISOString();
+    current.attempts = (Number(current.attempts) || 0) + 1;
+
+    if (allDelivered && acceptedResults.length > 0) {
       current.status = 'sent';
       current.sentAt = new Date().toISOString();
-      current.results = results;
-      current.product = product;
+      current.finishedAt = current.sentAt;
+      current.error = null;
 
       const key = productSellerKey(product);
-
       if (key) {
         data.sentProducts[key] = {
           sentAt: current.sentAt,
@@ -3191,35 +3238,31 @@ async function processQueue(profile) {
         };
       }
 
-      data.automation.lastSentAt =
-        current.sentAt;
+      data.automation.lastSentAt = current.sentAt;
 
     } else if (errors.length > 0) {
-      current.status = 'error';
-
+      // Parcial ou totalmente falhou: fica pendente para o próximo ciclo.
+      current.status = 'pending';
       current.error = errors
-        .map(item => item.message)
+        .map(item => item.destination + ': ' + item.message)
         .join('; ');
-
-      current.results = results;
+      current.finishedAt = null;
 
     } else {
       current.status = 'skipped';
-
       current.error =
         'Nenhum grupo recebeu a oferta por incompatibilidade de nicho.';
-
-      current.results = results;
+      current.finishedAt = new Date().toISOString();
     }
-
-    current.finishedAt = new Date().toISOString();
 
     await saveProfile(profile);
 
     return {
-      ok: accepted.length > 0,
-      status: current.status,
-      results
+      ok: current.status === 'sent',
+      status: errors.length > 0 ? 'retry' : current.status,
+      accepted: acceptedResults.length,
+      pending: errors.length,
+      results: current.results
     };
 
   } catch (error) {
@@ -3454,10 +3497,32 @@ async function runAutomation(profile) {
       'Busca de ofertas preparada para os nichos selecionados.'
     );
 
-    if (!products.length) {
+    const hasPendingQueue = data.queue.some(
+      item => item.status === 'pending'
+    );
+
+    if (!products.length && !hasPendingQueue) {
       throw new Error(
-        'A Shopee não retornou ofertas.'
+        'A Shopee não retornou ofertas e não existem envios pendentes.'
       );
+    }
+
+    // Recupera ofertas antigas que foram marcadas como enviadas
+    // apesar de um ou mais grupos terem falhado no envio.
+    for (const item of data.queue) {
+      if (
+        item.status === 'sent' &&
+        Array.isArray(item.results) &&
+        item.results.some(result => result.status === 'error')
+      ) {
+        item.status = 'pending';
+        item.finishedAt = null;
+        item.error = 'Retomando envio para os grupos que falharam.';
+        const key = item.productKey || productSellerKey(item.product || item);
+        if (key && data.sentProducts[key]) {
+          delete data.sentProducts[key];
+        }
+      }
     }
 
     const sevenDaysAgo =
@@ -3563,6 +3628,11 @@ async function runAutomation(profile) {
 
       if (result.status === 'sent') {
         sent++;
+      } else if (result.status === 'retry') {
+        failed++;
+        // Evita tentativas em loop no mesmo ciclo. A fila será retomada
+        // no próximo intervalo programado, sem repetir os grupos já atendidos.
+        break;
       } else if (result.status === 'error') {
         failed++;
       } else if (result.status === 'skipped') {
