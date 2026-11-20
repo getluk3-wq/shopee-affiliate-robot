@@ -1923,6 +1923,36 @@ async function startWhatsApp(profile) {
 
       sockets.set(profile, sock);
 
+      // A aceitação de sendMessage não garante entrega. Acompanhar os
+      // recibos enviados pelo WhatsApp para diagnosticar entrega real.
+      sock.ev.on('messages.update', updates => {
+        if (!isCurrentConnection(sock) || !Array.isArray(updates)) return;
+
+        const statusLabels = {
+          0: 'PENDING',
+          1: 'SERVER_ACK',
+          2: 'DELIVERY_ACK',
+          3: 'READ',
+          4: 'PLAYED'
+        };
+
+        for (const entry of updates) {
+          if (!entry?.key?.fromMe) continue;
+
+          const status = entry.update?.status;
+          logger.info(
+            {
+              profile,
+              jid: entry.key.remoteJid || null,
+              messageId: entry.key.id || null,
+              status,
+              statusLabel: statusLabels[status] || 'UNKNOWN'
+            },
+            'Confirmação de status da mensagem WhatsApp.'
+          );
+        }
+      });
+
       sock.ev.on('creds.update', async () => {
         if (!isCurrentConnection(sock)) return;
 
@@ -2349,33 +2379,39 @@ function productSellerKey(product) {
 
 function buildOfferMessage(product) {
   const item = normalizeProduct(product);
+  const productName = String(
+    item.productName || 'Oferta especial'
+  ).trim();
 
   const lines = [
     '🔥 *OFERTA IMPERDÍVEL* 🔥',
     '',
-    `🛍️ *${item.productName}*`
+    `🛍️ *${productName}*`,
+    ''
   ];
 
   if (item.oldPrice) {
-    lines.push(`De: R$ ${item.oldPrice}`);
+    lines.push(`❌ De: R$ ${item.oldPrice}`);
   }
 
   if (item.price) {
-    lines.push(`Por: *R$ ${item.price}*`);
+    lines.push(`✅ *POR: R$ ${item.price}*`);
   }
 
   if (item.discount) {
-    lines.push(`🔥 ${item.discount}`);
+    lines.push(`🏷️ *${item.discount}*`);
   }
-
-  lines.push('');
 
   if (item.productLink) {
-    lines.push(`🔗 ${item.productLink}`);
+    lines.push('');
+    lines.push('🛒 *COMPRE AQUI:*');
+    lines.push(item.productLink);
   }
 
   lines.push('');
-  lines.push('⚡ Aproveite antes que acabe!');
+  lines.push('⏳ Aproveite enquanto a oferta estiver disponível!');
+  lines.push('');
+  lines.push('💬 Compartilhe com quem também vai gostar.');
 
   return lines.join('\n');
 }// ======================================================
