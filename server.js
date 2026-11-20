@@ -2917,20 +2917,22 @@ async function fetchShopeeOffersForNiches(
   // Assim, a automação não fica presa repetindo sempre os mesmos primeiros produtos.
   const nicheLimit = Math.max(20, Math.min(50, totalLimit * 2));
 
-  for (const nicheId of selectedNiches) {
+  const processNiche = async (nicheId) => {
     const configuredKeywords = NICHE_SEARCH_KEYWORDS[nicheId];
     const keywords = Array.isArray(configuredKeywords)
       ? configuredKeywords
       : [configuredKeywords].filter(Boolean);
 
-    if (!keywords.length) continue;
+    if (!keywords.length) {
+      return { nicheId, offers: [], accepted: 0, rejected: 0 };
+    }
 
     const nicheOffers = new Map();
     let acceptedForNiche = 0;
     let rejectedForNiche = 0;
 
-    // Alguns termos genéricos da busca Shopee retornam produtos de nichos
-    // completamente diferentes. Pesquisamos termos específicos por peça.
+    // Os termos de um nicho continuam sequenciais para não sobrecarregar
+    // a API, mas nichos diferentes são pesquisados em pequenos lotes.
     for (const keyword of keywords) {
       const pageKey = `${nicheId}:${keyword}`;
       const page = Math.max(
@@ -2964,10 +2966,6 @@ async function fetchShopeeOffersForNiches(
       for (const offer of offers) {
         let detectedNiches = classifyProductNiches(offer);
 
-        // A API de afiliados não informa a categoria real em vários resultados.
-        // Quando o título não permite classificar o produto, usamos o nicho
-        // da consulta específica como origem. Se o título identificar outra
-        // categoria, a oferta continua sendo rejeitada para evitar mistura.
         if (!detectedNiches.length) {
           detectedNiches = [nicheId];
         }
@@ -2980,11 +2978,6 @@ async function fetchShopeeOffersForNiches(
         const key = productSellerKey(offer);
         if (!key || nicheOffers.has(key)) continue;
 
-        // Não encerra a busca por causa de produtos já enviados.
-        // Filtra os repetidos aqui para continuar procurando ofertas novas
-        // nas próximas palavras-chave e páginas do mesmo nicho.
-        // Compatibilidade com o histórico antigo, que podia estar salvo
-        // somente pelo itemId antes de o shopId ser preservado.
         const legacyItemKey = String(
           offer.itemId || offer.id || offer.productId || ''
         ).trim();
@@ -3038,11 +3031,10 @@ async function fetchShopeeOffersForNiches(
         'Busca específica do nicho concluída.'
       );
 
-      // Evita consultas desnecessárias quando já temos ofertas suficientes.
       if (nicheOffers.size >= totalLimit) break;
     }
 
-    offersByNiche.set(nicheId, [...nicheOffers.values()]);
+    const offers = [...nicheOffers.values()];
 
     logger.info(
       {
@@ -3052,10 +3044,38 @@ async function fetchShopeeOffersForNiches(
         requestedLimit: nicheLimit,
         acceptedForNiche,
         rejectedForNiche,
-        uniqueOffers: nicheOffers.size
+        uniqueOffers: offers.length
       },
       'Resultado consolidado da busca por nicho.'
     );
+
+    return {
+      nicheId,
+      offers,
+      accepted: acceptedForNiche,
+      rejected: rejectedForNiche
+    };
+  };
+
+  // Até três nichos são pesquisados ao mesmo tempo. Isso evita que
+  // buscas demoradas de um nicho segurem todos os demais e atrasem
+  // o início dos envios, sem disparar dezenas de consultas simultâneas.
+  const nicheResults = new Map();
+  let nextNicheIndex = 0;
+  const workerCount = Math.min(3, selectedNiches.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextNicheIndex < selectedNiches.length) {
+        const nicheId = selectedNiches[nextNicheIndex++];
+        const result = await processNiche(nicheId);
+        nicheResults.set(nicheId, result.offers);
+      }
+    })
+  );
+
+  for (const nicheId of selectedNiches) {
+    offersByNiche.set(nicheId, nicheResults.get(nicheId) || []);
   }
 
   const results = [];
@@ -3549,6 +3569,13 @@ async function runAutomation(profile) {
       );
     }
 
+    // O intervalo é contado desde o início deste ciclo, e não do fim
+    // das buscas/envios. Assim, uma execução demorada não empurra o próximo
+    // horário programado ainda mais para frente.
+    const cycleStartedAt = new Date().toISOString();
+    automation.lastRunAt = cycleStartedAt;
+    await saveProfile(profile);
+
     const maxProducts = Math.max(
       1,
       Math.min(
@@ -3793,9 +3820,6 @@ async function runAutomation(profile) {
       await sleep(1500);
     }
 
-    automation.lastRunAt =
-      new Date().toISOString();
-
     automation.lastError = null;
 
     await saveProfile(profile);
@@ -3827,9 +3851,6 @@ async function runAutomation(profile) {
 
   } catch (error) {
     automation.lastError = error.message;
-
-    automation.lastRunAt =
-      new Date().toISOString();
 
     await saveProfile(profile);
 
