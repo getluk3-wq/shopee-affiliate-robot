@@ -107,6 +107,9 @@ const authRegistered = new Map();
 
 const automationLocks = new Set();
 
+// Mantém rastreados envios Baileys que demoram além do limite, para não reenviar duplicado.
+const inFlightWhatsAppSends = new Map();
+
 const storeCache = Object.fromEntries(
   PROFILE_IDS.map(profile => [
     profile,
@@ -2485,48 +2488,142 @@ async function sendToDestination(
 
   const item = normalizeProduct(product);
   const caption = buildOfferMessage(item);
+  const productKey = productSellerKey(item) ||
+    String(item.itemId || item.id || item.productName || 'produto-sem-chave');
+  const sendKey = `${profile}:${productKey}:${jid}`;
 
-  let result;
+  // Se o Baileys ainda estiver processando uma tentativa anterior,
+  // não inicia outro envio para o mesmo produto/grupo.
+  const previousAttempt = inFlightWhatsAppSends.get(sendKey);
 
-  if (
-    item.imageUrl &&
-    /^https?:\/\//i.test(item.imageUrl)
-  ) {
-    try {
-      result = await sock.sendMessage(
-        jid,
-        {
-          image: {
-            url: item.imageUrl
-          },
-          caption
-        }
+  if (previousAttempt) {
+    if (!previousAttempt.settled) {
+      const pendingError = new Error(
+        'O WhatsApp ainda está processando a tentativa anterior para este grupo; evitando envio duplicado.'
       );
-    } catch (error) {
-      logger.warn(
-        {
-          profile,
-          jid,
-          error: error.message
-        },
-        'Falha ao enviar imagem; tentando enviar texto.'
-      );
-
-      result = await sock.sendMessage(
-        jid,
-        {
-          text: caption
-        }
-      );
+      pendingError.code = 'WHATSAPP_SEND_PENDING';
+      throw pendingError;
     }
-  } else {
-    result = await sock.sendMessage(
+
+    inFlightWhatsAppSends.delete(sendKey);
+
+    if (previousAttempt.error) {
+      throw previousAttempt.error;
+    }
+
+    if (previousAttempt.result) {
+      logger.info(
+        { profile, jid, messageId: previousAttempt.result?.key?.id || null },
+        'Envio anterior foi confirmado após o tempo limite; não será enviada uma cópia.'
+      );
+      return previousAttempt.result;
+    }
+  }
+
+  const sendPromise = (async () => {
+    if (
+      item.imageUrl &&
+      /^https?:\/\//i.test(item.imageUrl)
+    ) {
+      try {
+        return await sock.sendMessage(
+          jid,
+          {
+            image: {
+              url: item.imageUrl
+            },
+            caption
+          }
+        );
+      } catch (error) {
+        logger.warn(
+          {
+            profile,
+            jid,
+            error: error.message
+          },
+          'Falha ao enviar imagem; tentando enviar texto.'
+        );
+
+        return await sock.sendMessage(
+          jid,
+          {
+            text: caption
+          }
+        );
+      }
+    }
+
+    return await sock.sendMessage(
       jid,
       {
         text: caption
       }
     );
+  })();
+
+  const attempt = {
+    promise: sendPromise,
+    settled: false,
+    result: null,
+    error: null
+  };
+
+  inFlightWhatsAppSends.set(sendKey, attempt);
+
+  // Registra a conclusão mesmo se o ciclo principal já tiver atingido
+  // o limite de espera. O próximo ciclo poderá recuperar o resultado
+  // sem repetir uma mensagem que tenha sido aceita tardiamente.
+  sendPromise.then(
+    result => {
+      attempt.settled = true;
+      attempt.result = result;
+    },
+    error => {
+      attempt.settled = true;
+      attempt.error = error;
+    }
+  );
+
+  let result;
+
+  try {
+    result = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const error = new Error(
+          'O WhatsApp demorou mais de 45 segundos para responder. A tentativa continuará sendo acompanhada sem gerar envio duplicado.'
+        );
+        error.code = 'WHATSAPP_SEND_PENDING';
+        reject(error);
+      }, 45000);
+
+      timer.unref?.();
+
+      sendPromise.then(
+        value => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        error => {
+          clearTimeout(timer);
+          reject(error);
+        }
+      );
+    });
+  } catch (error) {
+    if (error.code !== 'WHATSAPP_SEND_PENDING') {
+      inFlightWhatsAppSends.delete(sendKey);
+    } else {
+      logger.warn(
+        { profile, jid, productKey },
+        'Envio WhatsApp excedeu o tempo de espera; o restante dos grupos continuará e esta tentativa será acompanhada.'
+      );
+    }
+
+    throw error;
   }
+
+  inFlightWhatsAppSends.delete(sendKey);
 
   logger.info(
     {
