@@ -759,6 +759,7 @@ async function loadProfile() {
   await refreshWhatsApp();
   await refreshShopeeCredentials();
   await loadAutomation();
+  startAutomationStatusPolling();
 }
 
 async function refresh() {
@@ -1210,6 +1211,84 @@ async function getAutomationGroupState(automation = {}) {
   };
 }
 
+function renderAutomationSummary(result) {
+  const automation = result.automation || {};
+  const isActive = Boolean(result.active ?? automation.active ?? automation.enabled);
+  const insideWindow = result.insideWindow !== false;
+  const connected = result.whatsappStatus === "connected";
+  const running = Boolean(result.running);
+
+  let statusText = "PAUSADA";
+  if (isActive && !insideWindow) statusText = "ATIVA — FORA DO HORÁRIO";
+  else if (isActive && !connected) statusText = "ATIVA — WHATSAPP DESCONECTADO";
+  else if (isActive && running) statusText = "ATIVA — EXECUTANDO";
+  else if (isActive) statusText = "ATIVA — AGUARDANDO ENVIO";
+
+  $("automationStatus").textContent = statusText;
+  $("automationStatus").className = isActive
+    ? "automation-status success"
+    : "automation-status";
+
+  const start = automation.startTime || automation.scheduleTimes?.[0] || "08:00";
+  const end = automation.endTime || "18:00";
+  const intervalSeconds = Number(automation.intervalSeconds || (Number(automation.intervalMinutes || 30) * 60));
+  const details = [
+    "Horário: " + start + " até " + end,
+    "Intervalo: " + formatInterval(intervalSeconds || 1800)
+  ];
+
+  if (automation.lastSentAt) {
+    details.push("Último envio real: " + new Date(automation.lastSentAt).toLocaleString("pt-BR"));
+  } else {
+    details.push("Último envio real: nenhum registrado");
+  }
+  if (automation.lastRunAt) {
+    details.push("Última execução: " + new Date(automation.lastRunAt).toLocaleString("pt-BR"));
+  }
+  if (result.nextSendAt) {
+    details.push("Próxima tentativa prevista: " + new Date(result.nextSendAt).toLocaleString("pt-BR"));
+  }
+  if (result.server?.startedAt) {
+    details.push("Servidor iniciado: " + new Date(result.server.startedAt).toLocaleString("pt-BR"));
+    details.push("Tempo ativo: " + formatDuration(result.server.uptimeSeconds || 0));
+  }
+
+  $("automationDetails").textContent = details.join(" | ");
+  $("startAutomationButton").disabled = isActive;
+  $("pauseAutomationButton").disabled = !isActive;
+
+  if (automation.lastError) {
+    showMessage("automationMessage", "Aviso da automação: " + automation.lastError, "error");
+  } else if (isActive && !insideWindow) {
+    showMessage("automationMessage", "Automação habilitada, aguardando o horário programado.", "info");
+  } else if (isActive && !connected) {
+    showMessage("automationMessage", "Automação habilitada, mas o WhatsApp está desconectado.", "error");
+  }
+}
+
+function formatDuration(totalSeconds) {
+  const seconds = Math.max(0, Number(totalSeconds) || 0);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return hours + "h " + minutes + "min";
+}
+
+let automationStatusTimer = null;
+
+function startAutomationStatusPolling() {
+  if (automationStatusTimer) clearInterval(automationStatusTimer);
+  automationStatusTimer = setInterval(async () => {
+    if ($("panel").classList.contains("hidden")) return;
+    try {
+      const result = await api("/api/automation");
+      renderAutomationSummary(result);
+    } catch {
+      $("automationStatus").textContent = "SEM RESPOSTA DO SERVIDOR";
+      $("automationStatus").className = "automation-status";
+    }
+  }, 15000);
+}
+
 async function loadAutomation() {
   try {
     const result = await api("/api/automation");
@@ -1232,41 +1311,10 @@ async function loadAutomation() {
     $("autoEnd").value = end;
     $("autoInterval").value = String(intervalSeconds || 1800);
 
+    renderAutomationSummary(result);
     const isActive = Boolean(
       automation.active ?? automation.enabled
     );
-
-    $("automationStatus").textContent =
-      isActive ? "ATIVA" : "PAUSADA";
-
-    $("automationStatus").className =
-      isActive ? "automation-status success" : "automation-status";
-
-    let details = "Horário: " + start + " até " + end;
-    details += " | Intervalo: " + formatInterval(intervalSeconds || 1800);
-
-    if (automation.lastSentAt || automation.lastRunAt) {
-      details += " | Último envio: " +
-        new Date(
-          automation.lastSentAt || automation.lastRunAt
-        ).toLocaleString("pt-BR");
-    }
-
-    if (automation.nextSendAt) {
-      details += " | Próxima tentativa: " +
-        new Date(automation.nextSendAt).toLocaleString("pt-BR");
-    }
-
-    $("automationDetails").textContent = details;
-
-    if (automation.lastError) {
-      showMessage("automationMessage", "Aviso da automação: " + automation.lastError, "error");
-    } else {
-      showMessage("automationMessage", "");
-    }
-
-    $("startAutomationButton").disabled = isActive;
-    $("pauseAutomationButton").disabled = !isActive;
 
     savedGroupState = await getAutomationGroupState(automation);
 
