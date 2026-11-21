@@ -242,7 +242,9 @@ const NICHE_DEFINITIONS = [
       'organizador',
       'limpeza',
       'banheiro',
-      'lavanderia'
+      'lavanderia',
+      'esponja de banho',
+      'lava costa'
     ]
   },
   {
@@ -991,76 +993,86 @@ function containsNichePhrase(text, phrase) {
 function classifyProductNiches(product) {
   const item = product && typeof product === 'object' ? product : {};
 
-  const text = normalizeText([
-    item.productName,
-    item.name,
-    item.title,
-    item.category,
-    item.categoryName,
-    item.description
-  ].filter(Boolean).join(' '));
-
-  if (!text) return [];
-
   const genericAliases = new Set([
     'make', 'base', 'casa', 'feminino', 'feminina',
     'masculino', 'masculina', 'menino', 'menina'
   ]);
 
-  const matches = [];
+  function classifyText(value) {
+    const text = normalizeText(value);
+    if (!text) return [];
 
-  for (const niche of NICHE_DEFINITIONS) {
-    for (const alias of (niche.aliases || [])) {
-      const normalizedAlias = normalizeText(alias);
+    const matches = [];
 
-      if (genericAliases.has(normalizedAlias)) continue;
+    for (const niche of NICHE_DEFINITIONS) {
+      for (const alias of (niche.aliases || [])) {
+        const normalizedAlias = normalizeText(alias);
 
-      if (containsNichePhrase(text, normalizedAlias)) {
-        // Termos específicos de cozinha devem prevalecer sobre
-        // descrições genéricas como "utilidades" ou "organização".
-        // Assim, itens de cozinha não são desviados para o nicho amplo "casa".
-        const broadHomeTerms = new Set([
-          'utilidades',
-          'organizacao',
-          'organizador',
-          'limpeza',
-          'banheiro',
-          'lavanderia'
-        ]);
-        const specificNicheBoost = niche.id === 'cozinha' ? 30 : 0;
-        const broadHomePenalty =
-          niche.id === 'casa' && broadHomeTerms.has(normalizedAlias)
-            ? 25
-            : 0;
+        if (genericAliases.has(normalizedAlias)) continue;
 
-        matches.push({
-          id: niche.id,
-          score: normalizedAlias.length +
-            specificNicheBoost -
-            broadHomePenalty
-        });
+        if (containsNichePhrase(text, normalizedAlias)) {
+          const broadHomeTerms = new Set([
+            'utilidades',
+            'organizacao',
+            'organizador',
+            'limpeza',
+            'banheiro',
+            'lavanderia'
+          ]);
+          const specificNicheBoost = niche.id === 'cozinha' ? 30 : 0;
+          const broadHomePenalty =
+            niche.id === 'casa' && broadHomeTerms.has(normalizedAlias)
+              ? 25
+              : 0;
+
+          matches.push({
+            id: niche.id,
+            score: normalizedAlias.length +
+              specificNicheBoost -
+              broadHomePenalty
+          });
+        }
       }
     }
+
+    if (!matches.length) return [];
+
+    const bestScore = Math.max(...matches.map(match => match.score));
+    return [...new Set(
+      matches.filter(match => match.score === bestScore).map(match => match.id)
+    )];
   }
 
-  if (!matches.length) {
-    const sourceNiches = Array.isArray(item.sourceNicheIds)
-      ? item.sourceNicheIds.map(normalizeNicheId).filter(Boolean)
-      : [];
+  // O título é a descrição mais direta do item. Evita que uma categoria
+  // secundária incorreta da Shopee desvie a oferta para outro nicho.
+  const titleText = [
+    item.productName,
+    item.name,
+    item.title
+  ].filter(Boolean).join(' ');
 
-    const singleSource = normalizeNicheId(item.sourceNicheId);
+  const titleNiches = classifyText(titleText);
+  if (titleNiches.length) return titleNiches;
 
-    if (singleSource) sourceNiches.push(singleSource);
+  // Só usa categoria/descrição como alternativa quando o título não
+  // contém informação suficiente para classificar o produto.
+  const secondaryText = [
+    item.category,
+    item.categoryName,
+    item.description
+  ].filter(Boolean).join(' ');
 
-    return [...new Set(sourceNiches)];
-  }
+  const secondaryNiches = classifyText(secondaryText);
+  if (secondaryNiches.length) return secondaryNiches;
 
-  const bestScore = Math.max(...matches.map(item => item.score));
-  const bestNiches = [...new Set(
-    matches.filter(item => item.score === bestScore).map(item => item.id)
-  )];
+  const sourceNiches = Array.isArray(item.sourceNicheIds)
+    ? item.sourceNicheIds.map(normalizeNicheId).filter(Boolean)
+    : [];
 
-  return bestNiches.length === 1 ? bestNiches : [];
+  const singleSource = normalizeNicheId(item.sourceNicheId);
+  if (singleSource) sourceNiches.push(singleSource);
+
+  return [...new Set(sourceNiches)];
 }
 
 
