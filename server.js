@@ -2418,6 +2418,29 @@ function productSellerKey(product) {
 // TEXTO DA OFERTA
 // ======================================================
 
+function formatOfferPrice(value) {
+  const raw = String(value ?? '').trim().replace(/^R\\$\\s*/i, '');
+  if (!raw) return '';
+
+  // Mantém valores já formatados no padrão brasileiro.
+  if (/^\\d{1,3}(?:\\.\\d{3})*,\\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  // Converte valores numéricos ou decimais com ponto para pt-BR.
+  const normalized = raw.replace(/\\./g, '').replace(',', '.');
+  const numeric = Number(normalized);
+
+  if (Number.isFinite(numeric)) {
+    return numeric.toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }
+
+  return raw;
+}
+
 function buildOfferMessage(product) {
   const item = normalizeProduct(product);
   const productName = String(
@@ -2425,36 +2448,27 @@ function buildOfferMessage(product) {
   ).trim();
 
   const lines = [
-    '🔥 *OFERTA IMPERDÍVEL* 🔥',
-    '',
-    `🛍️ *${productName}*`,
+    `🔥 *${productName}*`,
     ''
   ];
 
-  if (item.oldPrice) {
-    lines.push(`❌ De: R$ ${item.oldPrice}`);
+  const oldPrice = formatOfferPrice(item.oldPrice);
+  const currentPrice = formatOfferPrice(item.price);
+
+  if (oldPrice) {
+    lines.push(`❌ ~R$ ${oldPrice}~`);
   }
 
-  if (item.price) {
-    lines.push(`✅ *POR: R$ ${item.price}*`);
-  }
-
-  if (item.discount) {
-    lines.push(`🏷️ *${item.discount}*`);
+  if (currentPrice) {
+    lines.push(`✅ R$ ${currentPrice}`);
   }
 
   if (item.productLink) {
     lines.push('');
-    lines.push('🛒 *COMPRE AQUI:*');
-    lines.push(item.productLink);
+    lines.push(`➡️ ${item.productLink}`);
   }
 
-  lines.push('');
-  lines.push('⏳ Aproveite enquanto a oferta estiver disponível!');
-  lines.push('');
-  lines.push('💬 Compartilhe com quem também vai gostar.');
-
-  return lines.join('\n');
+  return lines.join('\\n');
 }// ======================================================
 // ENVIO PARA UM DESTINO WHATSAPP
 // ======================================================
