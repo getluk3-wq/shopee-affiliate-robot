@@ -2468,7 +2468,7 @@ function buildOfferMessage(product) {
     lines.push(`➡️ ${item.productLink}`);
   }
 
-  return lines.join('\\n');
+  return lines.join('\n');
 }// ======================================================
 // ENVIO PARA UM DESTINO WHATSAPP
 // ======================================================
