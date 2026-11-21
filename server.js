@@ -1094,6 +1094,22 @@ function destinationMatchesProduct(destination, product) {
     };
   }
 
+  // Quando a oferta veio de uma busca feita explicitamente para um nicho,
+  // essa origem é a referência mais confiável. Não deixe o título/descrição
+  // reclassificar o produto e bloquear os grupos que escolheram esse nicho.
+  const sourceNiches = Array.isArray(product?.sourceNicheIds)
+    ? product.sourceNicheIds.map(normalizeNicheId).filter(Boolean)
+    : [];
+  const sourceNiche = normalizeNicheId(product?.sourceNicheId);
+  if (sourceNiche) sourceNiches.push(sourceNiche);
+
+  if (sourceNiches.includes(selected)) {
+    return {
+      matches: true,
+      reason: 'Oferta encontrada pela busca do nicho selecionado para este grupo.'
+    };
+  }
+
   const productNiches = classifyProductNiches(product);
 
   if (!productNiches.length) {
