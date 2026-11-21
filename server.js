@@ -3271,14 +3271,17 @@ async function fetchShopeeOffersForNiches(
 async function processQueue(profile) {
   const data = getData(profile);
 
-  const current = data.queue.find(
-    item => item.status === 'pending'
+  const now = Date.now();
+  const current = data.queue.find(item =>
+    item.status === 'pending' &&
+    (!item.retryAfterAt || (Date.parse(item.retryAfterAt) || 0) <= now)
   );
 
   if (!current) {
     return {
       ok: false,
-      message: 'Não existem ofertas pendentes.'
+      status: 'waiting',
+      message: 'Não há ofertas prontas para nova tentativa neste ciclo.'
     };
   }
 
@@ -3481,8 +3484,12 @@ async function processQueue(profile) {
       data.automation.lastSentAt = current.sentAt;
 
     } else if (errors.length > 0) {
-      // Parcial ou totalmente falhou: fica pendente para o próximo ciclo.
+      // Falhas ficam isoladas nesta oferta e aguardam o próximo intervalo.
+      // A fila pode continuar processando outras ofertas/grupos sem ficar presa.
       current.status = 'pending';
+      current.retryAfterAt = new Date(
+        Date.now() + getAutomationIntervalMs(data.automation || {})
+      ).toISOString();
       current.error = errors
         .map(item => item.destination + ': ' + item.message)
         .join('; ');
@@ -3691,25 +3698,23 @@ async function runAutomation(profile) {
 
     // PRIORIDADE: esvazia a fila que já estava pendente ANTES de consultar
     // a Shopee. Uma busca lenta ou erro externo não deve segurar ofertas prontas.
-    let queueBlockedByRetry = false;
     let preprocessedQueueItems = 0;
 
+    const hasReadyPendingItem = () => data.queue.some(item =>
+      item.status === 'pending' &&
+      (!item.retryAfterAt || (Date.parse(item.retryAfterAt) || 0) <= Date.now())
+    );
+
     while (
-      data.queue.some(item => item.status === 'pending') &&
+      hasReadyPendingItem() &&
       preprocessedQueueItems < 100
     ) {
       const pendingResult = await processQueue(profile);
       preprocessedQueueItems++;
 
-      if (
-        pendingResult.status === 'retry' ||
-        pendingResult.status === 'error' ||
-        (pendingResult.ok === false && pendingResult.status !== 'skipped')
-      ) {
-        queueBlockedByRetry = true;
-        break;
-      }
+      if (pendingResult.status === 'waiting') break;
 
+      // Uma oferta com erro fica em espera própria; não bloqueia as demais.
       await sleep(1500);
     }
 
@@ -3933,19 +3938,12 @@ async function runAutomation(profile) {
     let skipped = 0;
 
     while (
-      !queueBlockedByRetry &&
-      data.queue.some(
-        item => item.status === 'pending'
-      ) &&
+      hasReadyPendingItem() &&
       processed < 100
     ) {
-      const current = data.queue.find(
-        item => item.status === 'pending'
-      );
-
-      if (!current) break;
-
       const result = await processQueue(profile);
+
+      if (result.status === 'waiting') break;
 
       processed++;
 
@@ -3953,9 +3951,7 @@ async function runAutomation(profile) {
         sent++;
       } else if (result.status === 'retry') {
         failed++;
-        // Evita tentativas em loop no mesmo ciclo. A fila será retomada
-        // no próximo intervalo programado, sem repetir os grupos já atendidos.
-        break;
+        // A oferta com falha já recebeu retryAfterAt; prossiga para as outras.
       } else if (result.status === 'error') {
         failed++;
       } else if (result.status === 'skipped') {
