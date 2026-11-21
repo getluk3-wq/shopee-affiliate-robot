@@ -29,6 +29,7 @@ const {
 const app = express();
 
 const PORT = Number(process.env.PORT || 3000);
+const SERVER_STARTED_AT = new Date().toISOString();
 
 const DATA_DIR =
   process.env.DATA_DIR ||
@@ -4347,11 +4348,30 @@ app.post('/api/data', async (req, res) => {
 app.get('/api/automation', (req, res) => {
   const profile = profileIdFrom(req);
   const automation = getData(profile).automation;
+  const active = isAutomationActive(automation);
+  const insideWindow = isInsideAutomationWindow(automation);
+  const whatsappStatus = getStatus(profile).status;
+  const intervalMs = getAutomationIntervalMs(automation);
+  const lastRunMs = automation.lastRunAt
+    ? Date.parse(automation.lastRunAt) || 0
+    : 0;
+  const nextSendAt = active && insideWindow && lastRunMs
+    ? new Date(Math.max(Date.now(), lastRunMs + intervalMs)).toISOString()
+    : null;
 
   res.json({
     ok: true,
     automation,
-    active: isAutomationActive(automation)
+    active,
+    insideWindow,
+    running: automationLocks.has(profile),
+    whatsappStatus,
+    nextSendAt,
+    server: {
+      startedAt: SERVER_STARTED_AT,
+      uptimeSeconds: Math.floor(process.uptime()),
+      now: new Date().toISOString()
+    }
   });
 });
 
