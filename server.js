@@ -3104,15 +3104,24 @@ async function fetchShopeeOffersForNiches(
       }
 
       for (const offer of offers) {
-        let detectedNiches = classifyProductNiches(offer);
+        const detectedNiches = classifyProductNiches(offer);
 
-        if (!detectedNiches.length) {
-          detectedNiches = [nicheId];
-        }
-
-        if (!detectedNiches.includes(nicheId)) {
-          rejectedForNiche++;
-          continue;
+        // A oferta veio de uma consulta executada especificamente para
+        // este nicho. A origem da consulta é mais confiável do que um
+        // classificador textual que pode confundir títulos ambíguos.
+        // Registra divergências para diagnóstico, mas não descarta o item.
+        if (detectedNiches.length && !detectedNiches.includes(nicheId)) {
+          logger.warn(
+            {
+              profile,
+              requestedNiche: nicheId,
+              detectedNiches,
+              product: String(
+                offer.productName || offer.name || offer.title || 'Produto sem nome'
+              ).slice(0, 180)
+            },
+            'Divergência entre nicho da busca e classificação do produto; origem da busca será preservada.'
+          );
         }
 
         const key = productSellerKey(offer);
