@@ -3719,22 +3719,23 @@ async function runAutomation(profile) {
       (!item.retryAfterAt || (Date.parse(item.retryAfterAt) || 0) <= Date.now())
     );
 
-    while (
-      hasReadyPendingItem() &&
-      preprocessedQueueItems < 100
-    ) {
+    // No máximo uma oferta por ciclo. Todos os grupos compatíveis
+    // recebem esta mesma oferta; a próxima oferta aguarda o intervalo configurado.
+    if (hasReadyPendingItem()) {
       const pendingResult = await processQueue(profile);
-      preprocessedQueueItems++;
+      preprocessedQueueItems = 1;
 
-      if (pendingResult.status === 'waiting') break;
-
-      // Uma oferta com erro fica em espera própria; não bloqueia as demais.
-      await sleep(1500);
+      if (pendingResult.status !== 'waiting') {
+        logger.info(
+          { profile, status: pendingResult.status },
+          'Oferta pendente processada neste ciclo; próxima oferta aguardará o intervalo.'
+        );
+      }
     }
 
     if (preprocessedQueueItems > 0) {
       logger.info(
-        { profile, preprocessedQueueItems, queueBlockedByRetry },
+        { profile, preprocessedQueueItems },
         'Fila anterior priorizada antes das novas buscas da Shopee.'
       );
     }
@@ -3951,28 +3952,24 @@ async function runAutomation(profile) {
     let failed = 0;
     let skipped = 0;
 
-    while (
-      hasReadyPendingItem() &&
-      processed < 100
-    ) {
+    // Se uma oferta antiga foi processada no início deste ciclo,
+    // não envie outra oferta agora. Respeite um intervalo entre produtos.
+    if (preprocessedQueueItems === 0 && hasReadyPendingItem()) {
       const result = await processQueue(profile);
 
-      if (result.status === 'waiting') break;
+      if (result.status !== 'waiting') {
+        processed++;
 
-      processed++;
-
-      if (result.status === 'sent') {
-        sent++;
-      } else if (result.status === 'retry') {
-        failed++;
-        // A oferta com falha já recebeu retryAfterAt; prossiga para as outras.
-      } else if (result.status === 'error') {
-        failed++;
-      } else if (result.status === 'skipped') {
-        skipped++;
+        if (result.status === 'sent') {
+          sent++;
+        } else if (result.status === 'retry') {
+          failed++;
+        } else if (result.status === 'error') {
+          failed++;
+        } else if (result.status === 'skipped') {
+          skipped++;
+        }
       }
-
-      await sleep(1500);
     }
 
     automation.lastError = null;
