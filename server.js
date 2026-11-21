@@ -3973,6 +3973,9 @@ async function runAutomation(profile) {
     }
 
     automation.lastError = null;
+    // Conta o intervalo a partir do fim do ciclo para garantir a distância
+    // mínima entre ofertas, mesmo quando a busca/envio demora mais que o esperado.
+    automation.lastRunAt = new Date().toISOString();
 
     await saveProfile(profile);
 
@@ -4003,6 +4006,7 @@ async function runAutomation(profile) {
 
   } catch (error) {
     automation.lastError = error.message;
+    automation.lastRunAt = new Date().toISOString();
 
     await saveProfile(profile);
 
@@ -4060,37 +4064,9 @@ async function automationSchedulerTick() {
         continue;
       }
 
-      const scheduleTimes = Array.isArray(
-        automation.scheduleTimes
-      )
-        ? automation.scheduleTimes
-        : [];
-
-      const now = currentTimeInAutomationZone();
-      const minuteKey = getAutomationMinuteKey();
-
-      // O painel atual usa startTime/endTime como janela de funcionamento
-      // e intervalSeconds como frequência. Uma única scheduleTime antiga
-      // representa o início da janela, não um disparo único diário.
-      // Mantemos horários fixos somente quando houver dois ou mais horários
-      // explicitamente configurados (compatibilidade com configurações antigas).
-      if (scheduleTimes.length > 1) {
-        const alreadyRan =
-          automation.lastScheduleMinute === minuteKey;
-
-        if (
-          scheduleTimes.includes(now) &&
-          !alreadyRan
-        ) {
-          automation.lastScheduleMinute = minuteKey;
-
-          await saveProfile(profile);
-          await runAutomation(profile);
-        }
-
-        continue;
-      }
-
+      // startTime/endTime definem apenas a janela de funcionamento.
+      // A frequência é sempre controlada pelo intervalo escolhido no painel,
+      // inclusive em configurações antigas que ainda tenham scheduleTimes.
       const intervalMs =
         getAutomationIntervalMs(automation);
 
