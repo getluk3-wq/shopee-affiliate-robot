@@ -4634,21 +4634,13 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
 
-    // Para o Perfil 2, registra a pausa antes de encerrar o socket.
-    // A sessão salva é preservada: desconectar não significa desparear.
-    if (profile === 'usuario2') {
-      const profileData = getData(profile);
-      profileData.whatsappManuallyDisconnected = true;
-    }
-
-    // Invalida imediatamente qualquer inicialização/evento antigo.
+    // Invalida eventos e inicializações antigas antes de encerrar a sessão.
     connectionIds.set(
       profile,
       (connectionIds.get(profile) || 0) + 1
     );
 
     const timer = reconnectTimers.get(profile);
-
     if (timer) {
       clearTimeout(timer);
       reconnectTimers.delete(profile);
@@ -4656,59 +4648,72 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
 
     const sock = sockets.get(profile);
     sockets.delete(profile);
-
-    // Cancela uma inicialização pendente para impedir que ela recrie o socket.
-    if (profile === 'usuario2') {
-      socketStarts.delete(profile);
-    }
-
-    if (sock) {
-      try {
-        if (typeof sock.end === 'function') {
-          sock.end(new Error('Desconexão solicitada pelo painel.'));
-        }
-      } catch (_) {}
-
-      // Fecha também o WebSocket subjacente. terminate() força o encerramento
-      // caso o handshake de close não finalize.
-      if (profile === 'usuario2') {
-        try {
-          sock.ws?.close();
-        } catch (_) {}
-
-        try {
-          sock.ws?.terminate?.();
-        } catch (_) {}
-      } else if (!sock.end) {
-        try {
-          sock.ws?.close();
-        } catch (_) {}
-      }
-    }
-
     reconnectAttempts.delete(profile);
     qrCache.delete(profile);
     pairingCache.delete(profile);
 
+    if (profile === 'usuario2') {
+      // Este botão significa DESVINCULAR a conta, não apenas pausar o socket.
+      // O próximo QR deverá exigir novo pareamento no aparelho.
+      const profileData = getData(profile);
+      profileData.whatsappManuallyDisconnected = true;
+      socketStarts.delete(profile);
+
+      if (sock) {
+        try {
+          if (typeof sock.logout === 'function') {
+            await sock.logout();
+          } else {
+            sock.end?.(new Error('Sessão desvinculada pelo painel.'));
+            sock.ws?.close();
+            sock.ws?.terminate?.();
+          }
+        } catch (logoutError) {
+          logger.warn(
+            { profile, error: logoutError.message },
+            'Logout remoto do WhatsApp falhou; removendo a sessão local salva.'
+          );
+          try { sock.end?.(new Error('Sessão desvinculada pelo painel.')); } catch (_) {}
+          try { sock.ws?.close(); } catch (_) {}
+          try { sock.ws?.terminate?.(); } catch (_) {}
+        }
+      }
+
+      // Remove as credenciais persistidas deste perfil para impedir reconexão
+      // silenciosa com a sessão antiga. Nenhum dado do Perfil 1 é alterado.
+      await clearWhatsAppAuth(profile);
+    } else if (sock) {
+      // Mantém o comportamento anterior do Perfil 1, sem alterar sua sessão.
+      try {
+        sock.end?.(new Error('Desconexão solicitada pelo painel.'));
+      } catch (_) {
+        try { sock.ws?.close(); } catch (_) {}
+      }
+    }
+
     setStatus(profile, 'disconnected', {
-      message: 'WhatsApp desconectado pelo painel.'
+      message: profile === 'usuario2'
+        ? 'WhatsApp desvinculado. Será necessário escanear um novo QR Code.'
+        : 'WhatsApp desconectado pelo painel.'
     });
 
-    // Persiste a pausa depois de iniciar o encerramento, para que uma falha
-    // no armazenamento não impeça o fechamento físico da conexão.
     if (profile === 'usuario2') {
       await saveProfile(profile);
     }
 
     logger.info(
       { profile },
-      'Desconexão manual solicitada pelo painel; socket encerrado e reconexão bloqueada.'
+      profile === 'usuario2'
+        ? 'Conta WhatsApp do Perfil 2 deslogada e sessão removida.'
+        : 'Desconexão do WhatsApp solicitada pelo painel.'
     );
 
     res.json({
       ok: true,
       status: getStatus(profile),
-      message: 'WhatsApp desconectado.'
+      message: profile === 'usuario2'
+        ? 'WhatsApp desvinculado. Para conectar novamente, gere um novo QR Code.'
+        : 'WhatsApp desconectado.'
     });
 
   } catch (error) {
