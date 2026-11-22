@@ -746,42 +746,36 @@ function mergeProfileData(value) {
 async function findProfileRow(profile) {
   if (!supabase) return null;
 
-  const profileColumns = [
-    'perfil',
-    'profile',
-    'profile_id',
-    'id'
-  ];
-
-  const dataColumns = [
-    'dados',
-    'data',
-    'config',
-    'settings',
-    'conteudo',
-    'payload'
-  ];
+  const profileColumns = ['perfil', 'profile', 'profile_id', 'id'];
+  const dataColumns = ['dados', 'data', 'config', 'settings', 'conteudo', 'payload'];
 
   for (const profileColumn of profileColumns) {
-    for (const dataColumn of dataColumns) {
-      try {
-        const { data, error } = await supabase
-          .from('robo_perfis')
-          .select('*')
-          .eq(profileColumn, profile)
-          .maybeSingle();
+    try {
+      const { data, error } = await supabase
+        .from('robo_perfis')
+        .select('*')
+        .eq(profileColumn, profile)
+        .limit(1);
 
-        if (error) continue;
+      if (error || !Array.isArray(data) || !data.length) continue;
 
-        if (data) {
-          return {
-            row: data,
-            profileColumn,
-            dataColumn
-          };
-        }
-      } catch (_) {}
-    }
+      const row = data[0];
+      const actualProfileColumn = profileColumns.find(column =>
+        Object.prototype.hasOwnProperty.call(row, column) &&
+        String(row[column]) === profile
+      );
+      const actualDataColumn = dataColumns.find(column =>
+        Object.prototype.hasOwnProperty.call(row, column)
+      );
+
+      if (actualProfileColumn && actualDataColumn) {
+        return {
+          row,
+          profileColumn: actualProfileColumn,
+          dataColumn: actualDataColumn
+        };
+      }
+    } catch (_) {}
   }
 
   return null;
@@ -864,94 +858,65 @@ async function loadProfile(profile) {
 
 async function saveProfile(profile) {
   const data = getData(profile);
-
   data.updatedAt = new Date().toISOString();
   storeCache[profile] = data;
 
-  const filePath = path.join(
-    DATA_DIR,
-    `${profile}.json`
-  );
-
+  const filePath = path.join(DATA_DIR, `${profile}.json`);
   try {
-    fs.writeFileSync(
-      filePath,
-      JSON.stringify(data, null, 2),
-      'utf8'
-    );
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
   } catch (error) {
-    logger.error(
-      {
-        profile,
-        error: error.message
-      },
-      'Erro ao salvar arquivo local'
-    );
+    logger.error({ profile, error: error.message }, 'Erro ao salvar arquivo local do perfil');
   }
 
   if (!supabase) return true;
-
-  const profileColumns = [
-    'perfil',
-    'profile',
-    'profile_id',
-    'id'
-  ];
-
-  const dataColumns = [
-    'dados',
-    'data',
-    'config',
-    'settings',
-    'conteudo',
-    'payload'
-  ];
 
   const existing = await findProfileRow(profile);
 
   if (existing) {
     const payload = {
-      [existing.dataColumn]: data,
-      updated_at: new Date().toISOString()
+      [existing.dataColumn]: data
     };
 
-    const { error } = await supabase
+    if (Object.prototype.hasOwnProperty.call(existing.row, 'updated_at')) {
+      payload.updated_at = new Date().toISOString();
+    }
+
+    const { data: updatedRows, error } = await supabase
       .from('robo_perfis')
       .update(payload)
-      .eq(existing.profileColumn, profile);
+      .eq(existing.profileColumn, profile)
+      .select(existing.profileColumn);
 
-    if (!error) return true;
+    if (!error && Array.isArray(updatedRows) && updatedRows.length > 0) {
+      return true;
+    }
 
     logger.error(
-      { profile, error: error.message },
-      'Falha ao atualizar perfil no Supabase'
+      { profile, error: error?.message || 'Nenhuma linha atualizada' },
+      'Falha ao confirmar atualização do perfil no Supabase'
     );
+    return false;
   }
+
+  const profileColumns = ['perfil', 'profile', 'profile_id'];
+  const dataColumns = ['dados', 'data', 'config', 'settings', 'conteudo', 'payload'];
 
   for (const profileColumn of profileColumns) {
     for (const dataColumn of dataColumns) {
       try {
         const payload = {
           [profileColumn]: profile,
-          [dataColumn]: data,
-          updated_at: new Date().toISOString()
+          [dataColumn]: data
         };
 
-        const { error } = await supabase
-          .from('robo_perfis')
-          .insert(payload);
-
+        const { error } = await supabase.from('robo_perfis').insert(payload);
         if (!error) return true;
       } catch (_) {}
     }
   }
 
-  logger.warn(
-    { profile },
-    'Perfil salvo localmente; Supabase não confirmou gravação.'
-  );
-
-  return true;
+  logger.error({ profile }, 'Supabase não confirmou a gravação do perfil.');
+  return false;
 }
 
 
@@ -4712,7 +4677,10 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
     });
 
     if (profile === 'usuario2') {
-      await saveProfile(profile);
+      const persisted = await saveProfile(profile);
+      if (!persisted) {
+        throw new Error('O banco de dados não confirmou a limpeza do Segundo usuário.');
+      }
     }
 
     logger.info(
