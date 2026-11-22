@@ -4679,9 +4679,23 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
         }
       }
 
-      // Remove as credenciais persistidas deste perfil para impedir reconexão
-      // silenciosa com a sessão antiga. Nenhum dado do Perfil 1 é alterado.
-      await clearWhatsAppAuth(profile);
+      // A desconexão do Perfil 2 é uma limpeza completa para troca de titular.
+      // Remove autenticação WhatsApp e todos os dados/configurações deste perfil,
+      // mantendo o Perfil 1 completamente isolado e inalterado.
+      await deleteAllWhatsAppAuth(profile);
+
+      const cleanProfile = defaultProfileData();
+      cleanProfile.whatsappManuallyDisconnected = true;
+      storeCache[profile] = cleanProfile;
+
+      qrCache.delete(profile);
+      pairingCache.delete(profile);
+      authRegistered.delete(profile);
+      reconnectAttempts.delete(profile);
+      socketStarts.delete(profile);
+      automationLocks.delete(profile);
+
+      await saveProfile(profile);
     } else if (sock) {
       // Mantém o comportamento anterior do Perfil 1, sem alterar sua sessão.
       try {
