@@ -385,6 +385,7 @@ function defaultProfileData() {
     },
 
     shopeeCredentials: null,
+    whatsappManuallyDisconnected: false,
     updatedAt: new Date().toISOString()
   };
 }
@@ -1788,6 +1789,7 @@ async function clearWhatsAppAuth(profile) {
 
 function scheduleWhatsAppReconnect(profile, connectionId) {
   if (!WHATSAPP_AUTO_RECONNECT) return;
+  if (profile === 'usuario2' && getData(profile).whatsappManuallyDisconnected) return;
 
   if (reconnectTimers.has(profile)) return;
 
@@ -1841,6 +1843,18 @@ function scheduleWhatsAppReconnect(profile, connectionId) {
 async function startWhatsApp(profile) {
   if (!PROFILE_IDS.includes(profile)) {
     throw new Error('Perfil inválido.');
+  }
+
+  if (profile === 'usuario2' && getData(profile).whatsappManuallyDisconnected) {
+    setStatus(profile, 'disconnected', {
+      message: 'Conexão pausada manualmente pelo painel.'
+    });
+    return {
+      ok: true,
+      status: getStatus(profile),
+      qr: null,
+      message: 'O WhatsApp está desconectado manualmente. Use Conectar para iniciar novamente.'
+    };
   }
 
   const existingSocket = sockets.get(profile);
@@ -4516,6 +4530,11 @@ app.get('/api/whatsapp', (req, res) => {
 app.post('/api/whatsapp/connect', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+    if (profile === 'usuario2') {
+      const profileData = getData(profile);
+      profileData.whatsappManuallyDisconnected = false;
+      await saveProfile(profile);
+    }
 
     const result = await startWhatsApp(profile);
 
@@ -4557,6 +4576,12 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
         ok: false,
         message: 'Informe telefone com DDD e código do país.'
       });
+    }
+
+    if (profile === 'usuario2') {
+      const profileData = getData(profile);
+      profileData.whatsappManuallyDisconnected = false;
+      await saveProfile(profile);
     }
 
     await startWhatsApp(profile);
@@ -4608,6 +4633,11 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
 app.post('/api/whatsapp/disconnect', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+    if (profile === 'usuario2') {
+      const profileData = getData(profile);
+      profileData.whatsappManuallyDisconnected = true;
+      await saveProfile(profile);
+    }
 
     connectionIds.set(
       profile,
@@ -5549,7 +5579,10 @@ async function initializeApp() {
       try {
         const hasSavedSession = await hasWhatsAppAuth(profile);
 
-        if (hasSavedSession) {
+        if (
+          hasSavedSession &&
+          !(profile === 'usuario2' && getData(profile).whatsappManuallyDisconnected)
+        ) {
           logger.info(
             { profile },
             'Sessão encontrada no Supabase. Iniciando WhatsApp.'
