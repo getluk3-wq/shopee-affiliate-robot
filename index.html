@@ -1034,11 +1034,42 @@ async function confirmDisconnectWhatsApp() {
     $("pairCode").textContent = "";
     stopWAPolling();
 
+    if (profile === "usuario2") {
+      // Remove também o estado antigo que ainda poderia estar desenhado na tela.
+      loadedGroups = [];
+      savedGroupState = {
+        groupIds: [],
+        groupNiches: {},
+        groupNames: {},
+        directMode: false
+      };
+      $("groupsList").replaceChildren();
+      $("groupsMessage").textContent = "Nenhum grupo configurado. Conecte o novo WhatsApp para carregar os grupos.";
+      $("automationMessage").textContent = "";
+      $("automationDetails").textContent = "";
+      $("shopeeAppId").value = "";
+      $("shopeeSecret").value = "";
+      $("productResults").replaceChildren();
+      $("searchKeyword").value = "";
+      $("dname").value = "";
+      $("channel").value = "";
+      $("testPhone").value = "";
+      $("testMessage").value = "";
+      $("autoStart").value = "";
+      $("autoEnd").value = "";
+      $("autoInterval").value = "1800";
+    }
+
     showMessage("waMessage", profile === "usuario2"
-      ? "Perfil 2 desconectado e dados pessoais limpos com sucesso."
+      ? "Perfil 2 desconectado. Os dados deste perfil foram limpos."
       : "WhatsApp desconectado com sucesso.", "success");
+
     await refreshWhatsApp();
     await refresh();
+    if (profile === "usuario2") {
+      await refreshShopeeCredentials();
+      await loadAutomation();
+    }
   } catch (error) {
     showMessage("waMessage", error.message, "error");
     button.disabled = false;
