@@ -4633,12 +4633,15 @@ app.post('/api/whatsapp/pairing', async (req, res) => {
 app.post('/api/whatsapp/disconnect', async (req, res) => {
   try {
     const profile = profileIdFrom(req);
+
+    // Para o Perfil 2, registra a pausa antes de encerrar o socket.
+    // A sessão salva é preservada: desconectar não significa desparear.
     if (profile === 'usuario2') {
       const profileData = getData(profile);
       profileData.whatsappManuallyDisconnected = true;
-      await saveProfile(profile);
     }
 
+    // Invalida imediatamente qualquer inicialização/evento antigo.
     connectionIds.set(
       profile,
       (connectionIds.get(profile) || 0) + 1
@@ -4652,15 +4655,31 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
     }
 
     const sock = sockets.get(profile);
-
     sockets.delete(profile);
+
+    // Cancela uma inicialização pendente para impedir que ela recrie o socket.
+    if (profile === 'usuario2') {
+      socketStarts.delete(profile);
+    }
 
     if (sock) {
       try {
-        sock.end(
-          new Error('Desconexão solicitada pelo painel.')
-        );
-      } catch (_) {
+        if (typeof sock.end === 'function') {
+          sock.end(new Error('Desconexão solicitada pelo painel.'));
+        }
+      } catch (_) {}
+
+      // Fecha também o WebSocket subjacente. terminate() força o encerramento
+      // caso o handshake de close não finalize.
+      if (profile === 'usuario2') {
+        try {
+          sock.ws?.close();
+        } catch (_) {}
+
+        try {
+          sock.ws?.terminate?.();
+        } catch (_) {}
+      } else if (!sock.end) {
         try {
           sock.ws?.close();
         } catch (_) {}
@@ -4675,8 +4694,20 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
       message: 'WhatsApp desconectado pelo painel.'
     });
 
+    // Persiste a pausa depois de iniciar o encerramento, para que uma falha
+    // no armazenamento não impeça o fechamento físico da conexão.
+    if (profile === 'usuario2') {
+      await saveProfile(profile);
+    }
+
+    logger.info(
+      { profile },
+      'Desconexão manual solicitada pelo painel; socket encerrado e reconexão bloqueada.'
+    );
+
     res.json({
       ok: true,
+      status: getStatus(profile),
       message: 'WhatsApp desconectado.'
     });
 
