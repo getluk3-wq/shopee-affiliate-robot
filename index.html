@@ -42,6 +42,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .qrbox img{width:100%;height:auto;display:block}
 .code{font-size:25px;letter-spacing:4px;color:var(--orange);font-weight:800;text-align:center;padding:15px;overflow-wrap:anywhere}
 .hidden{display:none!important}
+.disconnect-confirm{margin-top:12px;padding:16px;border:1px solid #b99452;border-radius:12px;background:#211b10}.disconnect-confirm p{line-height:1.55;color:#f2dfb8}.disconnect-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.disconnect-actions .danger{background:#b83232;color:#fff}.disconnect-actions .cancel{background:#333;color:#fff;border:1px solid #555}
 hr{border:0;border-top:1px solid var(--line);margin:20px 0}
 footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
 .profile-label{color:var(--orange);font-weight:700;margin-top:12px}
@@ -188,6 +189,13 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
       <button class="secondary" onclick="disconnectWhatsApp()">Desconectar este perfil</button>
     </div>
     <div id="waMessage" class="status"></div>
+    <div id="disconnectConfirm" class="disconnect-confirm hidden" role="alert">
+      <p id="disconnectConfirmText"></p>
+      <div class="disconnect-actions">
+        <button type="button" class="cancel" onclick="cancelDisconnectWhatsApp()">Cancelar</button>
+        <button type="button" class="danger" id="confirmDisconnectButton" onclick="confirmDisconnectWhatsApp()">Sim, desconectar</button>
+      </div>
+    </div>
   </section>
 
   <section class="card">
@@ -996,26 +1004,45 @@ function stopWAPolling() {
 async function disconnectWhatsApp() {
   const profile = getProfileId();
   const message = profile === "usuario2"
-    ? "ATENÇÃO: ao desconectar o Perfil 2, todos os dados deste perfil serão apagados: WhatsApp vinculado, grupos, nichos, horários, preferências, credenciais Shopee, produtos e histórico. O Perfil 1 não será alterado. Deseja continuar?"
+    ? "ATENÇÃO: ao desconectar o Perfil 2, todos os dados deste perfil serão apagados: WhatsApp vinculado, grupos, nichos, horários, preferências, credenciais Shopee, produtos e histórico. O Perfil 1 não será alterado."
     : "Deseja desconectar o WhatsApp deste perfil?";
-  if (!confirm(message)) return;
+
+  // Confirmação dentro da própria página: evita bloqueios do confirm()
+  // nativo em navegadores móveis e navegadores internos de aplicativos.
+  $("disconnectConfirmText").textContent = message;
+  $("disconnectConfirm").classList.remove("hidden");
+  $("confirmDisconnectButton").disabled = false;
+  $("confirmDisconnectButton").textContent = "Sim, desconectar";
+}
+
+function cancelDisconnectWhatsApp() {
+  $("disconnectConfirm").classList.add("hidden");
+}
+
+async function confirmDisconnectWhatsApp() {
+  const button = $("confirmDisconnectButton");
+  button.disabled = true;
+  button.textContent = "Desconectando...";
 
   try {
     await api("/api/whatsapp/disconnect", "POST", {});
 
+    $("disconnectConfirm").classList.add("hidden");
     $("qrArea").classList.add("hidden");
     $("pairArea").classList.add("hidden");
-
     $("qrImage").removeAttribute("src");
     $("pairCode").textContent = "";
-
     stopWAPolling();
 
-    showMessage("waMessage", "WhatsApp desconectado.");
+    showMessage("waMessage", getProfileId() === "usuario2"
+      ? "Perfil 2 desconectado e dados pessoais limpos com sucesso."
+      : "WhatsApp desconectado com sucesso.", "success");
     await refreshWhatsApp();
     await refresh();
   } catch (error) {
     showMessage("waMessage", error.message, "error");
+    button.disabled = false;
+    button.textContent = "Tentar novamente";
   }
 }
 
