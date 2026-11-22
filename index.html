@@ -1002,8 +1002,8 @@ function stopWAPolling() {
 }
 
 async function disconnectWhatsApp() {
-  const profile = getProfileId();
-  const message = profile === "usuario2"
+  const selectedProfile = profile;
+  const message = selectedProfile === "usuario2"
     ? "ATENÇÃO: ao desconectar o Perfil 2, todos os dados deste perfil serão apagados: WhatsApp vinculado, grupos, nichos, horários, preferências, credenciais Shopee, produtos e histórico. O Perfil 1 não será alterado."
     : "Deseja desconectar o WhatsApp deste perfil?";
 
@@ -1034,7 +1034,7 @@ async function confirmDisconnectWhatsApp() {
     $("pairCode").textContent = "";
     stopWAPolling();
 
-    showMessage("waMessage", getProfileId() === "usuario2"
+    showMessage("waMessage", profile === "usuario2"
       ? "Perfil 2 desconectado e dados pessoais limpos com sucesso."
       : "WhatsApp desconectado com sucesso.", "success");
     await refreshWhatsApp();
