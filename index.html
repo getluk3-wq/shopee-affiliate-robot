@@ -994,7 +994,11 @@ function stopWAPolling() {
 }
 
 async function disconnectWhatsApp() {
-  if (!confirm("Deseja desconectar o WhatsApp deste perfil?")) return;
+  const profile = getProfileId();
+  const message = profile === "usuario2"
+    ? "ATENÇÃO: ao desconectar o Perfil 2, todos os dados deste perfil serão apagados: WhatsApp vinculado, grupos, nichos, horários, preferências, credenciais Shopee, produtos e histórico. O Perfil 1 não será alterado. Deseja continuar?"
+    : "Deseja desconectar o WhatsApp deste perfil?";
+  if (!confirm(message)) return;
 
   try {
     await api("/api/whatsapp/disconnect", "POST", {});
