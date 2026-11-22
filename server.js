@@ -764,9 +764,28 @@ async function findProfileRow(profile) {
         Object.prototype.hasOwnProperty.call(row, column) &&
         String(row[column]) === profile
       );
-      const actualDataColumn = dataColumns.find(column =>
-        Object.prototype.hasOwnProperty.call(row, column)
-      );
+      // Algumas versões antigas da tabela podem ter mais de uma
+      // coluna candidata. Prioriza a coluna que realmente contém os
+      // dados do perfil, em vez de escolher uma coluna vazia por ordem.
+      const populatedDataColumn = dataColumns.find(column => {
+        if (!Object.prototype.hasOwnProperty.call(row, column)) {
+          return false;
+        }
+
+        const value = row[column];
+        if (value === null || value === undefined || value === '') {
+          return false;
+        }
+
+        const parsed = safeJson(value, null);
+        return parsed && typeof parsed === 'object' &&
+          !Array.isArray(parsed);
+      });
+
+      const actualDataColumn = populatedDataColumn ||
+        dataColumns.find(column =>
+          Object.prototype.hasOwnProperty.call(row, column)
+        );
 
       if (actualProfileColumn && actualDataColumn) {
         return {
@@ -2671,18 +2690,25 @@ function getShopeeCredentials(profile) {
     data.shopeeCredentials
   );
 
+  // As variáveis globais do servidor pertencem somente ao Perfil 1.
+  // O Perfil 2 precisa usar exclusivamente as credenciais cadastradas
+  // pelo próprio titular, para nunca herdar o App ID de outra pessoa.
+  const allowEnvironmentCredentials = profile === 'rafael';
+
   return {
     appId: String(
       saved?.appId ||
-      process.env.SHOPEE_APP_ID ||
-      process.env.SHOPEE_PARTNER_ID ||
+      (allowEnvironmentCredentials
+        ? process.env.SHOPEE_APP_ID || process.env.SHOPEE_PARTNER_ID
+        : '') ||
       ''
     ),
 
     appSecret: String(
       saved?.appSecret ||
-      process.env.SHOPEE_APP_SECRET ||
-      process.env.SHOPEE_PARTNER_KEY ||
+      (allowEnvironmentCredentials
+        ? process.env.SHOPEE_APP_SECRET || process.env.SHOPEE_PARTNER_KEY
+        : '') ||
       ''
     )
   };
