@@ -1072,58 +1072,12 @@ function classifyProductNiches(product) {
 // 4. Nunca tenta descobrir o nicho pelo nome do grupo.
 
 function destinationMatchesProduct(destination, product) {
-  const selected = normalizeNicheId(
-    destination?.nicheId ??
-    destination?.niche ??
-    ''
-  );
-
-  if (selected === 'all') {
-    return {
-      matches: true,
-      reason: 'Destino configurado para todos os nichos.'
-    };
-  }
-
-  if (!selected) {
-    return {
-      matches: false,
-      reason: 'Este grupo ainda não possui um nicho selecionado manualmente.'
-    };
-  }
-
-  // Quando a oferta veio de uma busca feita explicitamente para um nicho,
-  // essa origem é a referência mais confiável. Não deixe o título/descrição
-  // reclassificar o produto e bloquear os grupos que escolheram esse nicho.
-  const sourceNiches = Array.isArray(product?.sourceNicheIds)
-    ? product.sourceNicheIds.map(normalizeNicheId).filter(Boolean)
-    : [];
-  const sourceNiche = normalizeNicheId(product?.sourceNicheId);
-  if (sourceNiche) sourceNiches.push(sourceNiche);
-
-  if (sourceNiches.includes(selected)) {
-    return {
-      matches: true,
-      reason: 'Oferta encontrada pela busca do nicho selecionado para este grupo.'
-    };
-  }
-
-  const productNiches = classifyProductNiches(product);
-
-  if (!productNiches.length) {
-    return {
-      matches: false,
-      reason: 'Não foi possível identificar a categoria deste produto.'
-    };
-  }
-
-  const matches = productNiches.includes(selected);
-
+  // Todos os destinos marcados/selecionados na automação recebem as ofertas.
+  // O nicho continua sendo usado para organizar as buscas, mas não bloqueia
+  // a entrega em um grupo que o usuário selecionou explicitamente.
   return {
-    matches,
-    reason: matches
-      ? 'Produto compatível com o nicho selecionado.'
-      : 'Produto não pertence ao nicho selecionado para este grupo.'
+    matches: true,
+    reason: 'Grupo selecionado: envio liberado independentemente do nicho.'
   };
 }
 
@@ -2632,11 +2586,11 @@ async function sendToDestination(
     result = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         const error = new Error(
-          'O WhatsApp demorou mais de 45 segundos para responder. A tentativa continuará sendo acompanhada sem gerar envio duplicado.'
+          'O WhatsApp demorou mais de 90 segundos para responder. A tentativa continuará sendo acompanhada sem gerar envio duplicado.'
         );
         error.code = 'WHATSAPP_SEND_PENDING';
         reject(error);
-      }, 45000);
+      }, 90000);
 
       timer.unref?.();
 
