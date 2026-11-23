@@ -1725,7 +1725,7 @@ async function clearWhatsAppAuth(profile) {
 // AGENDAMENTO DA RECONEXÃO
 // ======================================================
 
-function scheduleWhatsAppReconnect(profile, connectionId) {
+function scheduleWhatsAppReconnect(profile, connectionId, minimumDelayMs = 0) {
   if (!WHATSAPP_AUTO_RECONNECT) return;
   if (profile === 'usuario2' && getData(profile).whatsappManuallyDisconnected) return;
 
@@ -1738,9 +1738,9 @@ function scheduleWhatsAppReconnect(profile, connectionId) {
 
   reconnectAttempts.set(profile, attempts);
 
-  const delay = Math.min(
-    60000,
-    3000 * Math.pow(2, Math.min(attempts - 1, 4))
+  const delay = Math.max(
+    minimumDelayMs,
+    Math.min(60000, 3000 * Math.pow(2, Math.min(attempts - 1, 4)))
   );
 
   logger.info(
@@ -2060,16 +2060,29 @@ async function startWhatsApp(profile) {
             lastDisconnect?.error?.statusCode ||
             null;
 
+          const disconnectMessage =
+            lastDisconnect?.error?.message ||
+            lastDisconnect?.error?.data?.tag ||
+            '';
+
+          // Alguns encerramentos chegam com código 401, mas a mensagem
+          // informa "conflict". Conflito não significa logout: nunca apague
+          // as chaves criptográficas nesse caso.
+          const conflict =
+            statusCode === DisconnectReason.conflict ||
+            /conflict/i.test(String(disconnectMessage));
+
           const loggedOut =
-            statusCode === DisconnectReason.loggedOut ||
-            statusCode === 401;
+            !conflict &&
+            (statusCode === DisconnectReason.loggedOut || statusCode === 401);
 
           logger.warn(
             {
               profile,
               connectionId,
               statusCode,
-              error: lastDisconnect?.error?.message || null
+              conflict,
+              error: disconnectMessage || null
             },
             'Conexão WhatsApp encerrada.'
           );
@@ -2107,7 +2120,8 @@ async function startWhatsApp(profile) {
 
           scheduleWhatsAppReconnect(
             profile,
-            connectionId
+            connectionId,
+            conflict ? 30000 : 0
           );
         }
       });
