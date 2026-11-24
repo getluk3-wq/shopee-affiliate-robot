@@ -401,6 +401,35 @@ function sleep(ms) {
   });
 }
 
+// Serializa chamadas à API Shopee entre os dois perfis.
+// Isso evita que buscas paralelas dos perfis/nichos pressionem a API.
+let shopeeRequestQueue = Promise.resolve();
+let shopeeLastRequestAt = 0;
+
+async function acquireShopeeRequestSlot() {
+  let releaseCurrent;
+  const previous = shopeeRequestQueue;
+
+  shopeeRequestQueue = new Promise(resolve => {
+    releaseCurrent = resolve;
+  });
+
+  await previous;
+
+  const minimumGapMs = 1500;
+  const waitMs = Math.max(
+    0,
+    shopeeLastRequestAt + minimumGapMs - Date.now()
+  );
+
+  if (waitMs > 0) {
+    await sleep(waitMs);
+  }
+
+  shopeeLastRequestAt = Date.now();
+  return releaseCurrent;
+}
+
 function normalizeText(value) {
   return String(value || '')
     .normalize('NFD')
@@ -2704,8 +2733,8 @@ async function shopeeGraphQL(
     process.env.SHOPEE_API_URL ||
     'https://open-api.affiliate.shopee.com.br/graphql';
 
-  // A Shopee 10000 is an internal provider error. Retry for longer with
-  // exponential backoff because short retries can all hit the same outage window.
+  // O código 10000 é erro interno retornado pela Shopee.
+  // As tentativas são espaçadas e as chamadas dos dois perfis são serializadas.
   const maxAttempts = 5;
   let lastError = null;
 
@@ -2728,17 +2757,26 @@ async function shopeeGraphQL(
       `Signature=${signature}`;
 
     try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': authorization
-        },
-        body: payload,
-        signal: AbortSignal.timeout(30000)
-      });
+      // Uma única chamada HTTP à Shopee por vez, compartilhada pelos perfis.
+      const releaseShopeeSlot = await acquireShopeeRequestSlot();
+      let response;
+      let responseText;
 
-      const responseText = await response.text();
+      try {
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': authorization
+          },
+          body: payload,
+          signal: AbortSignal.timeout(30000)
+        });
+
+        responseText = await response.text();
+      } finally {
+        releaseShopeeSlot();
+      }
       let result;
 
       try {
@@ -2794,7 +2832,7 @@ async function shopeeGraphQL(
             'Erro temporário na API Shopee; nova tentativa será realizada.'
           );
 
-          await sleep(Math.min(15000, 2000 * (2 ** (attempt - 1))));
+          await sleep(Math.min(30000, 5000 * (2 ** (attempt - 1))) + Math.floor(Math.random() * 1500));
           continue;
         }
 
