@@ -3453,6 +3453,9 @@ async function processQueue(profile) {
     const previousAccepted = Array.isArray(current.results)
       ? current.results.filter(item => item.status === 'accepted')
       : [];
+    const previousBlocked = Array.isArray(current.results)
+      ? current.results.filter(item => item.status === 'blocked')
+      : [];
 
     const wasAlreadyAccepted = destination => {
       const destinationId = normalizeGroupId(
@@ -3475,9 +3478,21 @@ async function processQueue(profile) {
       });
     };
 
+    const wasAlreadyBlocked = destination => {
+      const destinationId = normalizeGroupId(destination.groupId || destination.id || '');
+      const destinationName = String(destination.name || destination.groupId || destination.id || '').trim();
+      return previousBlocked.some(item => {
+        const previousId = normalizeGroupId(item.destinationId || item.groupId || '');
+        const previousName = String(item.destination || '').trim();
+        return (destinationId && previousId && destinationId === previousId) ||
+          (!previousId && destinationName && previousName === destinationName);
+      });
+    };
+
     const acceptedResults = [...previousAccepted];
+    const blockedResults = [...previousBlocked];
     const pendingTargets = compatibleTargets.filter(
-      destination => !wasAlreadyAccepted(destination)
+      destination => !wasAlreadyAccepted(destination) && !wasAlreadyBlocked(destination)
     );
 
     // Envia para todos os grupos compatíveis que ainda não receberam.
@@ -3520,16 +3535,25 @@ async function processQueue(profile) {
         await saveProfile(profile);
 
       } catch (error) {
-        results.push({
+        const errorText = String(error?.message || error || 'Erro desconhecido');
+        const permanentPermissionFailure =
+          /forbidden|not[-_ ]?authorized|not[-_ ]?allowed|permission denied/i.test(errorText);
+        const failedResult = {
           destination: destinationName,
           destinationId,
-          status: 'error',
-          message: error.message,
+          status: permanentPermissionFailure ? 'blocked' : 'error',
+          message: permanentPermissionFailure
+            ? 'Sem permissão para enviar neste grupo. Verifique as permissões com o administrador.'
+            : errorText,
           attemptedAt: new Date().toISOString()
-        });
+        };
+
+        if (permanentPermissionFailure) blockedResults.push(failedResult);
+        else results.push(failedResult);
 
         current.results = [
           ...acceptedResults,
+          ...blockedResults,
           ...results.filter(item => item.status === 'error')
         ];
         current.product = product;
@@ -3556,7 +3580,7 @@ async function processQueue(profile) {
     );
     const allDelivered = pendingTargets.length === 0 || errors.length === 0;
 
-    current.results = [...acceptedResults, ...errors];
+    current.results = [...acceptedResults, ...blockedResults, ...errors];
     current.product = product;
     current.lastAttemptAt = new Date().toISOString();
     current.attempts = (Number(current.attempts) || 0) + 1;
@@ -3589,6 +3613,10 @@ async function processQueue(profile) {
         .join('; ');
       current.finishedAt = null;
 
+    } else if (blockedResults.length > 0) {
+      current.status = 'blocked';
+      current.error = 'Todos os destinos restantes estão sem permissão para receber esta oferta.';
+      current.finishedAt = new Date().toISOString();
     } else {
       current.status = 'skipped';
       current.error =
@@ -3603,6 +3631,7 @@ async function processQueue(profile) {
       status: errors.length > 0 ? 'retry' : current.status,
       accepted: acceptedResults.length,
       pending: errors.length,
+      blocked: blockedResults.length,
       results: current.results
     };
 
