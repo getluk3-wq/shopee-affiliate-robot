@@ -2912,7 +2912,8 @@ async function fetchShopeeOffers(
     ) {
       productOfferV2(
         keyword: $keyword,
-        sortType: 2,
+        listType: 1,
+        sortType: 5,
         page: $page,
         limit: $limit
       ) {
