@@ -764,7 +764,13 @@ async function setProfileAccess(profileId, enabled) {
 
 async function loadProfile() {
   await refresh();
+
+  // A sessão salva do WhatsApp pode ser reaberta pelo servidor alguns
+  // segundos após a inicialização. Mantém o painel sincronizado até
+  // receber o estado real, sem exigir que o usuário gere outro QR Code.
+  startWAPolling();
   await refreshWhatsApp();
+
   await refreshShopeeCredentials();
   await loadAutomation();
   startAutomationStatusPolling();
