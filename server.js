@@ -3281,6 +3281,21 @@ async function processQueue(profile) {
   const data = getData(profile);
 
   const now = Date.now();
+
+  // Recupera ofertas que ficaram presas em "processing" após reinício
+  // do servidor. Os grupos já confirmados permanecem registrados em results.
+  for (const staleItem of data.queue) {
+    if (
+      staleItem.status === 'processing' &&
+      now - (Date.parse(staleItem.startedAt || staleItem.lastAttemptAt || '') || now) >= 5 * 60 * 1000
+    ) {
+      staleItem.status = 'pending';
+      staleItem.retryAfterAt = new Date(now).toISOString();
+      staleItem.error = 'Retomando oferta interrompida após reinício do servidor.';
+      staleItem.finishedAt = null;
+    }
+  }
+
   const current = data.queue.find(item =>
     item.status === 'pending' &&
     (!item.retryAfterAt || (Date.parse(item.retryAfterAt) || 0) <= now)
@@ -3428,6 +3443,10 @@ async function processQueue(profile) {
         destination.id ||
         destination.groupId;
 
+      current.currentDestination = destinationId || destinationName;
+      current.lastAttemptAt = new Date().toISOString();
+      await saveProfile(profile);
+
       try {
         const sent = await sendToDestination(
           profile,
@@ -3443,6 +3462,16 @@ async function processQueue(profile) {
           acceptedAt: new Date().toISOString()
         });
 
+        // Salva imediatamente cada grupo confirmado. Se o servidor reiniciar
+        // no próximo destino, a retomada não repete os grupos já atendidos.
+        current.results = [
+          ...acceptedResults,
+          ...results.filter(item => item.status === 'error')
+        ];
+        current.product = product;
+        current.lastAttemptAt = new Date().toISOString();
+        await saveProfile(profile);
+
       } catch (error) {
         results.push({
           destination: destinationName,
@@ -3451,6 +3480,15 @@ async function processQueue(profile) {
           message: error.message,
           attemptedAt: new Date().toISOString()
         });
+
+        current.results = [
+          ...acceptedResults,
+          ...results.filter(item => item.status === 'error')
+        ];
+        current.product = product;
+        current.lastAttemptAt = new Date().toISOString();
+        current.error = error.message;
+        await saveProfile(profile);
 
         logger.warn(
           {
@@ -3522,18 +3560,35 @@ async function processQueue(profile) {
     };
 
   } catch (error) {
-    current.status = 'error';
+    // Erros transitórios no processamento não podem abandonar a oferta.
+    // Mantém os grupos já confirmados e agenda nova tentativa dos restantes.
+    current.status = 'pending';
     current.error = error.message;
-    current.results = results;
-    current.finishedAt = new Date().toISOString();
+    current.results = [
+      ...(Array.isArray(current.results)
+        ? current.results.filter(item => item.status === 'accepted')
+        : []),
+      ...results.filter(item => item.status === 'error')
+    ];
+    current.attempts = (Number(current.attempts) || 0) + 1;
+    current.lastAttemptAt = new Date().toISOString();
+    current.retryAfterAt = new Date(
+      Date.now() + getAutomationIntervalMs(data.automation || {})
+    ).toISOString();
+    current.finishedAt = null;
 
     await saveProfile(profile);
 
+    logger.error(
+      { profile, error: error.message, queueItemId: current.id },
+      'Falha no processamento da fila; oferta preservada para nova tentativa.'
+    );
+
     return {
       ok: false,
-      status: 'error',
+      status: 'retry',
       message: error.message,
-      results
+      results: current.results
     };
   }
 }
