@@ -2795,7 +2795,16 @@ async function shopeeGraphQL(
 
       const graphErrors = Array.isArray(result?.errors)
         ? result.errors
-            .map(item => item?.message || item?.error)
+            .map(item => {
+              const message = item?.message || item?.error || 'Erro GraphQL';
+              const code = item?.extensions?.code;
+              const detail = item?.extensions?.message;
+              return [
+                message,
+                code !== undefined && code !== null ? `[${code}]` : '',
+                detail && detail !== message ? detail : ''
+              ].filter(Boolean).join(' ');
+            })
             .filter(Boolean)
         : [];
 
@@ -2903,7 +2912,6 @@ async function fetchShopeeOffers(
     ) {
       productOfferV2(
         keyword: $keyword,
-        listType: 0,
         sortType: 2,
         page: $page,
         limit: $limit
