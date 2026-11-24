@@ -159,7 +159,7 @@ footer{padding:22px;color:var(--muted);font-size:12px;text-align:center}
   </section>
 
   <section class="card">
-    <h2>WhatsApp — <span id="waProfileName">Rafael</span></h2>
+    <h2>WhatsApp — <span id="waProfileName">Perfil 1 — Rafael</span></h2>
     <p class="muted">Conecte o WhatsApp pertencente ao perfil selecionado.</p>
     <div class="status" id="waStatus">Consultando conexão...</div>
 
@@ -669,6 +669,13 @@ function getProfileName() {
   return profile === "rafael" ? "Rafael" : "Segundo usuário";
 }
 
+function updateWhatsAppProfileLabel() {
+  const label = profile === "rafael"
+    ? "Perfil 1 — Rafael"
+    : "Perfil 2 — Segundo usuário";
+  $("waProfileName").textContent = label;
+}
+
 async function changeProfile() {
   profile = $("profile").value;
   stopWAPolling();
@@ -681,7 +688,7 @@ async function changeProfile() {
   };
 
   $("profileLabel").textContent = "Perfil ativo: " + getProfileName();
-  $("waProfileName").textContent = getProfileName();
+  updateWhatsAppProfileLabel();
 
   $("qrArea").classList.add("hidden");
   $("pairArea").classList.add("hidden");
@@ -763,6 +770,10 @@ async function setProfileAccess(profileId, enabled) {
 }
 
 async function loadProfile() {
+  // Atualiza o título antes de consultar o WhatsApp, inclusive no login
+  // direto do Perfil 2, sem reaproveitar o nome visual do Perfil 1.
+  updateWhatsAppProfileLabel();
+
   await refresh();
 
   // A sessão salva do WhatsApp pode ser reaberta pelo servidor alguns
